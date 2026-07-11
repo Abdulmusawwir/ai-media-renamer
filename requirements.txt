@@ -1,0 +1,5 @@
+ollama
+streamlit
+plotly
+streamlit-autorefresh
+pandas

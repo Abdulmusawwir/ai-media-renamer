@@ -1,0 +1,6 @@
+logs/
+sessions/
+__pycache__/
+*.pyc
+.streamlit/
+task.md

@@ -1,0 +1,94 @@
+# AGENTS.md — Master Configuration & Session Orchestrator
+
+This is the root instruction file. Every session MUST read this first, then delegate to the specialized context files listed below.
+
+---
+
+## Mandatory Context File Check Order
+
+Before any code generation, read ALL of the following files in this exact order:
+
+1. **@system_prompt.md** — Codified language, framework, naming, and architecture rules. Every line of generated code MUST comply.
+2. **@prd.md** — Absolute scope boundary. Never implement anything outside this document. Never strip features the PRD guarantees.
+3. **@implementation_plan.md** — The full milestone backlog. Mark tasks with `[x]` as they are completed. Never skip phases or reorder them.
+4. **@task.md** — Active session scratchpad. Read this for immediate micro-tasks. Update it before finishing every session.
+5. **@audit.md** — Known bugs, orphaned code, and PRD divergences. Must be consulted before marking ANY task as complete.
+
+---
+
+## Session Workflow
+
+### 1. Start
+```
+Read @task.md → Read @system_prompt.md → Read @implementation_plan.md
+```
+
+### 2. Execute
+- Pick one checkbox from `@implementation_plan.md` or one line from `@task.md`.
+- Generate code that strictly follows `@system_prompt.md` rules.
+- Never exceed the scope defined in `@prd.md`.
+
+### 3. Verify (before marking done)
+- Cross-check new code against every item in **@audit.md** Section 1 (bugs) and Section 3 (divergences).
+- If the new code introduces a bug, creates orphaned code, or diverges from `@prd.md`, fix it before proceeding.
+- If the new code resolves an existing audit item, update `@audit.md` with a resolution note.
+
+### 4. Commit
+- Update `@task.md`: clear completed items, verify `@implementation_plan.md` checkbox, sync `@audit.md` if applicable.
+- Leave the session with `@task.md` pointing at the next unstarted micro-task.
+
+---
+
+## Critical Technical Quick Reference
+
+### Commands
+```bash
+pip install -r requirements.txt
+streamlit run app.py              # web app (primary)
+python cli.py "path/to/dir"       # CLI
+python cli.py "path/to/dir" --verbose
+```
+No tests, linters, formatters, or type checkers exist.
+
+### Module roles
+| File | Role | Must never |
+|---|---|---|
+| `engine.py` | Pure importable core | Call UI, run as entrypoint |
+| `app.py` | Streamlit web UI | Reimplement engine logic |
+| `cli.py` | CLI entrypoint | Reimplement engine logic |
+| `config.json` | Single source of truth | Duplicate config in Python code |
+
+### Per-asset rerun loop (app.py — most commonly broken pattern)
+- Phase 1 (parallel FFmpeg extraction) runs ONCE per session.
+- Phase 2 does ONE `analyze_asset_with_ai()` call per script execution, increments `analysis_index`, calls `st.rerun()`.
+- Never batch AI calls in a single execution.
+
+### ExifTool metadata (engine.py — most commonly misconfigured)
+- `XMP-dc:Subject=` — one arg PER TAG. Never comma-separated.
+- `EXIF:XPKeywords=` — images only (Windows "Tags" column).
+- Metadata IS correct (verified by DaVinci Resolve, Premiere Pro). Windows Explorer just doesn't surface XMP for MP4 — not a bug.
+
+### Session state reset pattern
+On file change → reset: `analysis_done`, `analysis_in_progress`, `analysis_aborted`, `staged_assets`, `base64_cache`, `commit_message`.
+On Clear All → also pop: `uploaded_files`, `temp_dir`, increment `clear_counter`.
+
+### Windows constraints
+- `str(fp).startswith()` for path checks (not `Path.startswith()` — positional on Windows).
+- `Path.rename()` fails cross-drive — use `shutil.move()`.
+
+---
+
+## Verification Gate (MANDATORY)
+
+Before marking ANY task `[x]` in `@implementation_plan.md`:
+
+1. **Search** the new/changed files for any violation of `@system_prompt.md`:
+   - Wrong naming convention?
+   - Forbidden import?
+   - Module boundary crossed (e.g., `st.` call in `engine.py`)?
+2. **Check** `@audit.md` Section 1 — did this introduce a new bug? Update the section if yes.
+3. **Check** `@audit.md` Section 3 — did this diverge from `@prd.md`? If yes, revert the scope expansion.
+4. **Update** `@task.md` — move completed items to done, add any discovered follow-ups.
+5. **Final syntax check** — `python -m py_compile <file>` for every changed `.py` file.
+
+Only after all five steps pass may a task be marked complete.
