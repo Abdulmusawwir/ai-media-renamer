@@ -1,5 +1,13 @@
 # Changelog
 
+## [Milestone 4.2] — 2026-07-11
+- **Planning & Documentation overhaul:**
+  - `prd.md` expanded with ~20 new feature checkboxes: prompt profiles, multi-provider AI, case styling, duplicate detection, Advanced Features expander, subdirectory CLI flag, config editor, naming templates, and more
+  - `implementation_plan.md` grew from 53 to ~80 tasks across 12 layers (new Layer 12: Duplicate Detection & Feedback)
+  - `audit.md` updated with 3 new bugs: static images→motion_graphics, grid description bleed, HW accel AMD AMF gap
+  - `task.md` reset to point at Phase O (QoL Polish): footer, jargon removal, dismissible summary, HW accel fix
+  - Out-of-scope section updated: removed items now in-scope, added new out-of-scope items (AI content detection, audio analysis, desktop app bundling)
+
 ## [Milestone 4.1] — 2026-07-11
 - **Per-asset rerun loop:** Phase 2 now processes one AI call per `st.rerun()` — eliminated browser disconnection on large batches. Phase 1 (parallel extraction) still runs once.
 - **Metadata fixes for Windows:**

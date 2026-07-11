@@ -64,6 +64,39 @@
 - [ ] Use this value instead of bare `os.cpu_count()` in the `ThreadPoolExecutor` at `app.py` line 278
 - [ ] CLI: add `--workers N` flag to override `extraction_workers` from config
 
+### 2.5 Multiple AI prompt profiles
+- [ ] Add `prompt_profiles` section to `config.json` with `religious`, `general`, `videography`, and `custom` profiles
+  - Each profile has its own `prompt` field and `allowed_categories` list
+  - `custom` profile has an empty prompt string for user-defined input
+- [ ] In `app.py`, add a `st.selectbox("Prompt Profile", [...])` before the "Run AI Analysis" button
+  - On change: update `st.session_state.prompt_profile`, pass to analysis
+- [ ] In `engine.py`, update `analyze_asset_with_ai()` to accept a profile name and use its prompt + categories
+- [ ] Add a `st.text_area("Custom Prompt")` that appears only when "Custom" profile is selected
+- [ ] Log the selected prompt profile with every `ai_analysis_success`/`ai_analysis_failed` event
+- [ ] Include diverse religious landmarks in the `religious` prompt: Baghdad Shareef, Naalain Paak, Aqsa, Islamic geometric patterns, carpets, icons (not "sets")
+- [ ] Create a clean `general` prompt that produces human-readable filenames without cinematography jargon
+- [ ] Add prompt instruction fixes:
+  - Tell AI to never describe the storyboard grid layout itself
+  - Tell AI that static images should never be categorized as motion_graphics, glitch_vfx, timelapse, slow_motion, or cinemagraphs
+  - Tell AI to produce filename descriptions that sound human-written, not AI-generated
+
+### 2.6 Multi-provider abstraction
+- [ ] Create provider interface in `engine.py` with abstract `analyze()` method
+- [ ] Implement `OllamaProvider` (existing code, refactored)
+- [ ] Implement `OpenAIProvider` using `openai` Python client (vision API)
+- [ ] Implement `AnthropicProvider` using `anthropic` Python client
+- [ ] Implement `LMStudioProvider` (uses same OpenAI-compatible endpoint as Ollama, different base URL)
+- [ ] Add `provider` key to `config.json` model section: `"provider": "ollama" | "openai" | "anthropic" | "lm-studio"`
+- [ ] Add `api_key` configuration per provider in `config.json` (stored locally only)
+- [ ] In `app.py`, add `st.selectbox("AI Provider", ["ollama", "openai", "anthropic", "lm-studio"])` near model selector
+- [ ] Show API key field if OpenAI or Anthropic is selected (password input, stored in session state only)
+- [ ] Add `openai` and `anthropic` to `requirements.txt`
+
+### 2.7 Model auto-detection
+- [ ] On provider change or startup, call `ollama.list()` to auto-populate model dropdown
+- [ ] If Ollama is unreachable, show red indicator and fall back to `config.json` model list
+- [ ] For OpenAI/Anthropic, show known model list from config (no auto-detect available)
+
 ---
 
 ## Layer 3: Staging & Review
@@ -135,6 +168,20 @@
   - Read all data from `staged_assets` and `st.session_state.output_dir`
   - Simulate the full commit path without actually writing files or metadata
 - [ ] Show a caption: "This is a preview. No files were modified."
+
+### 4.4 Case style selection
+- [ ] Add `case_style` to `config.json` naming section: `"case_style": "snake_case"` with options: `snake_case`, `camelCase`, `kebab-case`, `pascal_case`, `lowercase`, `original`
+- [ ] In `app.py`, add the option inside a `st.expander("Advanced Features")` section before analysis
+  - `st.selectbox("Filename case style", list(CASE_STYLES.keys()))`
+- [ ] In `engine.py`, create `apply_case_style(name, style)` function that transforms the staged filename
+- [ ] Apply case style in both `app.py` commit flow and `cli.py`
+
+### 4.5 Max filename character limit
+- [ ] Add `max_filename_chars` to `config.json` naming section (default: 0 = no limit)
+- [ ] In `app.py`, add the option inside the Advanced Features expander
+  - `st.number_input("Max filename characters", min_value=10, max_value=100, value=0)`
+- [ ] In `engine.py`, create `truncate_filename(name, max_chars)` that truncates smartly (preserves category prefix)
+- [ ] Apply in both app and CLI
 
 ---
 
@@ -251,6 +298,12 @@
 - [ ] Add `--no-progress` flag to disable progress bars (for pipe-friendly output)
 - [ ] Add `rich` to `requirements.txt`
 
+### 8.4 Include subdirectories flag
+- [ ] Add `--include-subdirectories` / `-r` flag to `cli.py`
+- [ ] When set, use `target_dir.rglob("*")` instead of `target_dir.iterdir()`
+- [ ] Maintain the same extension filtering
+- [ ] Log scanned subdirectory count in `session_start` event: `"subdirs_scanned": N`
+
 ---
 
 ## Layer 9: Infrastructure & DevOps
@@ -332,6 +385,35 @@
 - [ ] If > 200 files: show stronger warning + recommend CLI for better throughput
 - [ ] Thresholds in `config.json`: `batch_warn_threshold: 50`, `batch_recommend_cli: 200`
 
+### 10.5 Footer attribution
+- [ ] Add a `st.markdown()` footer at the bottom of `app.py`:
+  - "Made with love from Tanzania by Abdul Musawwir"
+  - Link to GitHub repo: `https://github.com/Abdulmusawwir/ai-media-renamer`
+- [ ] Use `st.html()` or `st.markdown()` with `unsafe_allow_html=True` for the hyperlink
+- [ ] Style subtly — small text, muted color, positioned below all tabs
+
+### 10.6 Jargon-free UI text
+- [ ] Replace all technical/internal status messages in `app.py` with user-friendly alternatives:
+  - `"Checking caches and extracting grids into RAM"` → `"Extracting preview frames from videos and images"`
+  - `"Injecting RAM streams directly into AI Vision Model"` → `"Analyzing content with AI model"`
+  - `"Piping ExifTool commands into metadata containers"` → `"Writing metadata tags to files"`
+  - `"Phase 1: Extracting previews into memory..."` → `"Step 1: Preparing previews..."`
+  - `"Phase 2: Sequential AI Processing"` → `"Step 2: Analyzing content..."`
+- [ ] Replace corresponding messages in `cli.py`
+- [ ] Remove "fast-seeking" and "storyboard grid" references from user-facing text
+- [ ] Keep technical details in JSONL logs and `--verbose` CLI output only
+
+### 10.7 Dismissible commit summary
+- [ ] Replace the persistent `st.session_state.commit_message` approach with `st.toast()` or `st.success()` with a close button
+- [ ] Show a non-blocking summary: "12 assets committed to Desktop/RenamedMedia. 0 failed."
+- [ ] Auto-dismiss after 8 seconds or on next user interaction
+- [ ] Keep the detailed log accessible in the Analytics Dashboard tab
+
+### 10.8 Advanced Features expander
+- [ ] Add a `st.expander("Advanced Features")` in the Upload & Analyze tab, positioned before the analysis trigger
+- [ ] Group inside: case style selector, max filename chars, custom prompt text area (also linked to profile selection)
+- [ ] Collapsed by default — clean default experience for most users
+
 ---
 
 ## Layer 11: Testing & Reliability
@@ -379,6 +461,30 @@
 
 ---
 
+## Layer 12: Duplicate Detection & Feedback
+
+### 12.1 Perceptual duplicate detection
+- [ ] Add `imagehash` to `requirements.txt` for perceptual hashing
+- [ ] In `engine.py`, create `compute_asset_hash(file_path)` function:
+  - For images: compute pHash via `imagehash.phash()`
+  - For videos: extract middle frame via FFmpeg, then pHash that frame
+- [ ] In `app.py`, add a "Detect Duplicates" button above the staging matrix
+- [ ] On click: compute hashes for all staged assets, compare pairwise, assign confidence scores (0-100%)
+- [ ] Add a new read-only column to the staging table: "Duplicate"
+  - Display: `"File_X.mp4 (92%)"` if duplicate found, otherwise `"-"`
+- [ ] Add checkbox option: "Include audio track in comparison" — if unchecked, compare video frames only
+- [ ] Add option to auto-check lower-confidence duplicates for skipping during commit
+- [ ] Log duplicate detection results: `"duplicates_found": N, "pairs": [{"a": "...", "b": "...", "confidence": 92}]`
+
+### 12.2 User rating / feedback on AI suggestions
+- [ ] Add a rating column to the staging table: thumbs up / thumbs down per asset
+- [ ] Store ratings in session state alongside staged_assets
+- [ ] On commit, log ratings: `"rating": "positive" | "negative"` in `file_committed` event
+- [ ] Show a small aggregate in analytics: "Positive ratings: 42 / 50 (84%)"
+- [ ] Future: use ratings to filter or prioritize certain prompt strategies
+
+---
+
 ## Execution Order (Recommended)
 
 The phases are ordered by dependency — each phase can be worked on independently but earlier phases unblock later ones.
@@ -395,7 +501,13 @@ Phase H: 6.1, 6.2, 6.3, 6.4    → Configuration UI
 Phase I: 7.1, 7.2, 7.3, 7.4    → Analytics enhancements
 Phase J: 8.1, 8.2, 8.3         → CLI improvements
 Phase K: 9.1, 11.2, 11.3       → Docker + integration tests
-Phase L: 10.1, 10.2, 10.3, 10.4 → Quality of life
+Phase L: 10.1, 10.2, 10.3, 10.4 → Quality of life (core)
 Phase M: 3.4, 3.5               → CSV import/export
 Phase N: 4.2                    → Naming templates
+Phase O: 10.5, 10.6, 10.7       → Quality of life (polish)
+Phase P: 4.4, 4.5, 10.8         → Advanced Features expander + naming controls
+Phase Q: 2.5                    → Multi-profile AI prompts
+Phase R: 2.6, 2.7               → Multi-provider + model auto-detect
+Phase S: 12.1, 12.2             → Duplicate detection + feedback
+Phase T: 8.4                    → CLI subdirectories
 ```

@@ -40,6 +40,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] Eager file saving to temp directory (files survive Streamlit reruns)
 - [x] "Clear All Files" button to reset upload state
 - [ ] Progress indicator during upload / file copy
+- [ ] `--include-subdirectories` flag for CLI scanning
 
 ### AI Analysis Pipeline
 - [x] Phase 1 — Parallel FFmpeg frame extraction with hardware acceleration detection (NVIDIA, Intel QSV, AMF, CPU fallback)
@@ -52,6 +53,11 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] 40-category taxonomy validation — invalid suggestions fall back to uncategorized
 - [x] Stop Analysis button (immediate abort, preserves already-analyzed assets)
 - [x] Progress bar during extraction and analysis phases
+- [ ] Multiple AI prompt profiles (Religious, General, Videography, Custom) — selectable in web UI and CLI
+- [ ] Multi-provider AI support (Ollama, OpenAI, Anthropic, LM Studio) with provider abstraction layer
+- [ ] Auto-detect available Ollama models via `ollama.list()` and populate dropdown
+- [ ] Per-asset re-analysis button + "Re-analyze All"
+- [ ] Ollama health check with status indicator in web UI
 
 ### Staging & Review
 - [x] Editable `st.data_editor` with columns: select checkbox, original filename, proposed filename, category (dropdown), tags (comma-separated), summary (read-only)
@@ -60,6 +66,9 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] "Sort into categorized subfolders" checkbox
 - [x] "Commit Selected" button — only checked rows are processed
 - [x] Collision-safe renaming (appends `_1`, `_2` etc. if target filename exists)
+- [ ] Naming template system (configurable `{category}_{topic}_{description}` patterns)
+- [ ] Case style selection (snake_case, camelCase, kebab-case, etc.) — under Advanced Features expander
+- [ ] Max filename character limit — under Advanced Features expander
 
 ### Metadata & File Commit
 - [x] In-place `Path.rename()` (no copy — fast, no duplication)
@@ -92,23 +101,25 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] Single `config.json` as source of truth for all tunable parameters
 - [x] Configurable: AI prompt, categories, model name/temperature/context/keep_alive, extensions, preview settings, logging limits
 - [x] No hardcoded constants in Python code
+- [ ] Config editor tab (read-only + editable modes) in web UI
+- [ ] In-app category management (add/delete/rename categories via UI)
+- [ ] In-app extension management (video/image extension lists via UI)
 
 ## Out of Scope (v1)
 
 - **Multi-user / server mode** — No authentication, no shared sessions, no backend database. Single-user per browser tab.
 - **Persistent storage** — No file database or asset library. State is ephemeral (Streamlit session + OS temp dir). No re-import of previously renamed files with their metadata.
-- **Cloud upload / SaaS** — AI runs locally via Ollama. No cloud API integration. No file upload to external services.
 - **Drag-and-drop reordering** — Staging matrix lists assets in upload order. No manual reorder via drag.
-- **Batch metadata-only updates** — Renaming always moves/renames the file. No option to write metadata without renaming.
-- **Custom user-defined categories** — Categories are defined in `config.json` only. No in-app category creation UI (but custom text entry in the staging dropdown allows ad-hoc assignments).
 - **Video transcoding** — No format conversion, resolution change, or re-encoding. Files keep their original codec/container.
 - **Sidecar files** — No XMP sidecar creation. Metadata is written directly into file headers.
 - **Watch folders / automation** — No folder monitoring or auto-processing. Manual trigger via CLI or web UI.
 - **Mobile / tablet UI** — Streamlit web app is desktop-only in practice. No responsive mobile layout.
-- **Internationalization** — English-only UI. Filenames and metadata are always lowercase ASCII per AI prompt instructions.
+- **Internationalization** -- English-only UI. Filenames and metadata are always lowercase ASCII per AI prompt instructions.
 - **Plugin / extensibility system** — No hook system for custom metadata sources, naming rules, or output formats.
 - **Face / object / scene detection** — AI analyzes the full visual context but does not detect specific faces, identify objects, or segment scenes.
-- **Undo / rollback** — No rename history or "undo commit" feature. The user can re-upload original files if they were preserved externally.
+- **AI-generated content detection** — No reliable way to detect AI content from frame analysis alone.
+- **Subtitle/audio track analysis** — Frame extraction only; no audio stream processing.
+- **Desktop app / Electron bundler** — Stays as Streamlit web app + Python CLI only.
 
 ## Core Tech Stack & Assumptions
 
@@ -117,7 +128,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 |---|---|---|
 | **Frontend / UI** | Streamlit | Fastest path to interactive data-editor UI with file upload, progress bars, and charts |
 | **Backend** | Pure Python 3.10+ | Single-process, no web framework needed beyond Streamlit |
-| **AI Model** | Ollama + `qwen2.5vl:7b` | Local vision model, no cloud API dependency, vision capability for image/video analysis |
+| **AI Model / Providers** | Ollama (primary), OpenAI, Anthropic, LM Studio | Local + cloud vision models via abstracted provider interface. Multiple prompt profiles per use case |
 | **Metadata Engine** | ExifTool 12+ | Industry standard for cross-format metadata; `-stay_open` mode for persistent subprocess performance |
 | **Media Decoding** | FFmpeg 6+ | Hardware-accelerated frame extraction, downscaling, video storyboard grid generation |
 | **Config** | JSON (`config.json`) | Human-editable, no parser needed beyond stdlib `json` |
@@ -126,7 +137,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 | **OS** | Windows 10/11 | Primary target (NLE ecosystem). Linux/macOS secondary (compatible but untested) |
 
 ### Assumptions
-- **Ollama is pre-installed and running** with `qwen2.5vl:7b` (or compatible vision model) pulled. Auto-pull is not handled.
+- **AI provider available.** For Ollama/LM Studio: app must be running locally. For OpenAI/Anthropic: valid API key required. Auto-detection of available Ollama models at startup.
 - **ExifTool and FFmpeg are in `PATH`.** Not bundled. Users install them independently.
 - **Single user per session.** No state shared between browser tabs or users.
 - **Files are under 4 GB typical.** `LargeFileSupport=1` is enabled in ExifTool args for oversized files, but very large files (>10 GB) may cause longer processing times.
