@@ -54,6 +54,13 @@ VIDEO_GRID_SCALE = config['preview']['video_grid_scale']
 DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'snake_case')
 DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
 
+NAMED_TEMPLATES = config.get('naming_templates', {
+    "default": "{category}_{topic}_{description}",
+    "short": "{topic}_{description}",
+    "editorial": "{date}_{category}_{topic}"
+})
+DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{category}_{topic}_{description}")
+
 LOG_DIR = Path(config['logging']['directory'])
 
 
@@ -261,6 +268,37 @@ def truncate_filename(name, max_chars):
     if max_chars <= 0 or len(name) <= max_chars:
         return name
     return name[:max_chars].rstrip("_-")
+
+
+def _template_date():
+    return datetime.date.today().isoformat()
+
+
+def apply_naming_template(template_string, asset_data):
+    category = asset_data.get('category', 'uncategorized')
+    topic = asset_data.get('topic', '') or ''
+    description = asset_data.get('description', '') or ''
+    fallback = asset_data.get('new_filename', '')
+
+    if not topic and not description:
+        return fallback
+
+    result = template_string
+    result = result.replace("{category}", category)
+    result = result.replace("{topic}", topic)
+    result = result.replace("{description}", description)
+    result = result.replace("{date}", _template_date())
+
+    while "__" in result:
+        result = result.replace("__", "_")
+    while "--" in result:
+        result = result.replace("--", "-")
+    result = result.strip("_-")
+
+    if not result or result == template_string:
+        return fallback
+
+    return result
 
 
 def _parse_ai_response(raw_text):

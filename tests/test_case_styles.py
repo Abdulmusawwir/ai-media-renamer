@@ -3,7 +3,7 @@
 import sys
 
 sys.path.insert(0, '.')
-from engine import apply_case_style, sanitize_name, truncate_filename
+from engine import apply_case_style, apply_naming_template, sanitize_name, truncate_filename
 
 
 def test_sanitize_name():
@@ -128,6 +128,58 @@ def test_end_to_end():
     print(f"  end_to_end: {len(ai_names)} cases PASS")
 
 
+def test_apply_naming_template_default():
+    asset = {"category": "aerial_drone", "topic": "golden_hour", "description": "aerial_coastline",
+             "new_filename": "golden_hour_aerial_coastline"}
+    res = apply_naming_template("{category}_{topic}_{description}", asset)
+    assert res == "aerial_drone_golden_hour_aerial_coastline", f"got {res!r}"
+    print("  default template: PASS")
+
+
+def test_apply_naming_template_short():
+    asset = {"category": "aerial_drone", "topic": "golden_hour", "description": "aerial_coastline",
+             "new_filename": "golden_hour_aerial_coastline"}
+    res = apply_naming_template("{topic}_{description}", asset)
+    assert res == "golden_hour_aerial_coastline", f"got {res!r}"
+    print("  short template: PASS")
+
+
+def test_apply_naming_template_editorial():
+    asset = {"category": "aerial_drone", "topic": "golden_hour", "description": "aerial_coastline",
+             "new_filename": "golden_hour_aerial_coastline"}
+    res = apply_naming_template("{date}_{category}_{topic}", asset)
+    # date is dynamic YYYY-MM-DD; just verify structure
+    import datetime
+    expected_date = datetime.date.today().isoformat()
+    expected = f"{expected_date}_aerial_drone_golden_hour"
+    assert res == expected, f"got {res!r}, expected {expected!r}"
+    print("  editorial template: PASS")
+
+
+def test_apply_naming_template_missing_fields():
+    asset = {"category": "uncategorized", "topic": "", "description": "",
+             "new_filename": "fallback_name"}
+    res = apply_naming_template("{category}_{topic}_{description}", asset)
+    assert res == "fallback_name", f"got {res!r}"
+    print("  missing fields fallback: PASS")
+
+
+def test_apply_naming_template_collapse_underscores():
+    asset = {"category": "aerial_drone", "topic": "golden_hour", "description": "aerial_coastline",
+             "new_filename": "golden_hour_aerial_coastline"}
+    res = apply_naming_template("{category}__{topic}___{description}", asset)
+    assert res == "aerial_drone_golden_hour_aerial_coastline", f"got {res!r}"
+    print("  collapse underscores: PASS")
+
+
+def test_apply_naming_template_date_not_missing():
+    asset = {"category": "test", "topic": "test", "description": "test",
+             "new_filename": "test_test"}
+    res = apply_naming_template("{date}", asset)
+    assert "-" in res and len(res) == 10, f"got {res!r}"
+    print("  date present: PASS")
+
+
 if __name__ == "__main__":
     tests = [
         test_sanitize_name,
@@ -138,6 +190,12 @@ if __name__ == "__main__":
         test_lowercase,
         test_truncate_filename,
         test_end_to_end,
+        test_apply_naming_template_default,
+        test_apply_naming_template_short,
+        test_apply_naming_template_editorial,
+        test_apply_naming_template_missing_fields,
+        test_apply_naming_template_collapse_underscores,
+        test_apply_naming_template_date_not_missing,
     ]
     failures = 0
     for t in tests:

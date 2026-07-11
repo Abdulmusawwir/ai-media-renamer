@@ -18,11 +18,14 @@ from engine import (
     ALLOWED_CATEGORIES,
     DEFAULT_CASE_STYLE,
     DEFAULT_MAX_FILENAME_CHARS,
+    DEFAULT_TEMPLATE_STRING,
     LOG_DIR,
+    NAMED_TEMPLATES,
     ExifToolSession,
     _format_ai_error,
     analyze_asset_with_ai,
     apply_case_style,
+    apply_naming_template,
     detect_hw_accel,
     execute_commit,
     log_event,
@@ -72,6 +75,9 @@ if "case_style" not in st.session_state:
 
 if "max_filename_chars" not in st.session_state:
     st.session_state.max_filename_chars = DEFAULT_MAX_FILENAME_CHARS
+
+if "template_string" not in st.session_state:
+    st.session_state.template_string = DEFAULT_TEMPLATE_STRING
 
 if "clear_counter" not in st.session_state:
     st.session_state.clear_counter = 0
@@ -232,6 +238,34 @@ with tab_upload:
     if not st.session_state.analysis_in_progress and not st.session_state.analysis_done \
             and st.session_state.get("uploaded_files"):
         with st.expander("Advanced Features"):
+            preset_names = list(NAMED_TEMPLATES.keys())
+            template_presets = preset_names + ["custom"]
+
+            current_pattern = st.session_state.template_string
+            matched = "custom"
+            for name, pat in NAMED_TEMPLATES.items():
+                if pat == current_pattern:
+                    matched = name
+                    break
+            preset_idx = template_presets.index(matched)
+
+            def _on_template_preset():
+                name = st.session_state.template_preset_sel
+                if name in NAMED_TEMPLATES:
+                    st.session_state.template_string = NAMED_TEMPLATES[name]
+
+            col_tmpl, col_pat = st.columns([1, 2])
+            with col_tmpl:
+                st.selectbox(
+                    "Naming template",
+                    template_presets,
+                    index=preset_idx,
+                    key="template_preset_sel",
+                    on_change=_on_template_preset,
+                )
+            with col_pat:
+                st.text_input("Pattern", key="template_string")
+
             col_case, col_chars = st.columns(2)
             with col_case:
                 st.selectbox(
@@ -316,18 +350,29 @@ with tab_upload:
     # Inline staging matrix (shown after analysis)
     if st.session_state.analysis_done and st.session_state.staged_assets:
         st.divider()
-        st.subheader("Staging Matrix — Review & Edit Before Committing")
+        st.subheader("Staging Matrix \u2014 Review & Edit Before Committing")
         st.caption("Edit filename, category, or tags for any asset. "
                    "Use the dropdown for common categories or type a custom one.")
 
         staged = st.session_state.staged_assets
+        template = st.session_state.template_string
+        case_style = st.session_state.case_style
+        max_chars = st.session_state.max_filename_chars
 
         table_rows = []
         for asset in staged:
+            rendered = apply_naming_template(template, {
+                "category": asset.get("category", "uncategorized"),
+                "topic": asset.get("topic", ""),
+                "description": asset.get("description", ""),
+                "new_filename": asset["staged_name"],
+            })
+            rendered = apply_case_style(rendered, case_style)
+            rendered = truncate_filename(rendered, max_chars)
             table_rows.append({
                 "select": True,
                 "original_name": asset["original_name"],
-                "proposed_filename": asset["staged_name"],
+                "proposed_filename": rendered,
                 "category": asset["category"] if asset["category"] != "uncategorized"
             else asset.get("suggested_category", "uncategorized"),
                 "tags": ", ".join(asset["tags"]),

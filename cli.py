@@ -7,10 +7,13 @@ from pathlib import Path
 
 from engine import (
     IMAGE_EXTENSIONS,
+    NAMED_TEMPLATES,
     VIDEO_EXTENSIONS,
     ExifToolSession,
     _format_ai_error,
     analyze_asset_with_ai,
+    apply_case_style,
+    apply_naming_template,
     detect_hw_accel,
     execute_commit,
     is_already_processed,
@@ -19,6 +22,7 @@ from engine import (
     process_video_to_base64,
     sanitize_name,
     setup_logging,
+    truncate_filename,
     validate_category,
 )
 
@@ -56,7 +60,7 @@ def _close_all_worker_sessions():
 # MAIN CLI PIPELINE
 # -----------------------------------------------------------------------------
 
-def process_library(directory_path, verbose=False):
+def process_library(directory_path, verbose=False, template_string=None):
     target_dir = Path(directory_path)
     if not target_dir.exists():
         print(f"Error: Directory '{directory_path}' does not exist.")
@@ -149,8 +153,23 @@ def process_library(directory_path, verbose=False):
             "staged_name": safe_name,
             "category": staged_category,
             "tags": ai_data.get('tags', []),
-            "summary": ai_data.get('overall_visual_summary', '')
+            "summary": ai_data.get('overall_visual_summary', ''),
+            "topic": ai_data.get('topic', ''),
+            "description": ai_data.get('description', ''),
         })
+
+        if template_string:
+            rendered = apply_naming_template(template_string, {
+                "category": staged_category,
+                "topic": ai_data.get('topic', ''),
+                "description": ai_data.get('description', ''),
+                "new_filename": safe_name,
+            })
+            rendered = apply_case_style(rendered, "snake_case")
+            rendered = truncate_filename(rendered, 0)
+            staged_assets[-1]["staged_name"] = rendered
+            safe_name = rendered
+
         print(f"  Staged as: {safe_name}")
         log_event(logger, "INFO", "ai_analysis_success", file_name=file_path.name, details={
             "staged_name": safe_name,
@@ -290,6 +309,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AI Video Renamer & ExifTool Engine")
     parser.add_argument("dir", type=str, help="Path to target directory folder.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug output.")
+    parser.add_argument(
+        "--template", "-t", type=str, default=None,
+        help='Naming template preset or raw pattern. '
+             'Presets: default, short, editorial. '
+             'Raw: e.g. "{date}_{category}_{topic}_{description}"'
+    )
     args = parser.parse_args()
 
-    process_library(args.dir, verbose=args.verbose)
+    tmpl = args.template
+    if tmpl and tmpl in NAMED_TEMPLATES:
+        tmpl = NAMED_TEMPLATES[tmpl]
+
+    process_library(args.dir, verbose=args.verbose, template_string=tmpl)
