@@ -8,7 +8,7 @@ This is the root instruction file. Every session MUST read this first, then dele
 
 Before any code generation, read ALL of the following files in this exact order:
 
-1. **@system_prompt.md** — Codified language, framework, naming, and architecture rules. Every line of generated code MUST comply.
+1. **@AGENTS.md** — Master rules: module boundaries, naming conventions, Windows constraints, and session workflow. Every line of generated code MUST comply.
 2. **@prd.md** — Absolute scope boundary. Never implement anything outside this document. Never strip features the PRD guarantees.
 3. **@implementation_plan.md** — The full milestone backlog. Mark tasks with `[x]` as they are completed. Never skip phases or reorder them.
 4. **@task.md** — Active session scratchpad. Read this for immediate micro-tasks. Update it before finishing every session.
@@ -20,7 +20,7 @@ Before any code generation, read ALL of the following files in this exact order:
 
 ### 1. Start
 ```
-Read @task.md → Read @system_prompt.md → Read @implementation_plan.md
+Read @task.md → Read @AGENTS.md → Read @implementation_plan.md → Read @audit.md
 ```
 
 ### 2. Execute
@@ -83,7 +83,7 @@ On Clear All → also pop: `uploaded_files`, `temp_dir`, increment `clear_counte
 
 Before marking ANY task `[x]` in `@implementation_plan.md`:
 
-1. **Search** the new/changed files for any violation of `@system_prompt.md`:
+1. **Search** the new/changed files for any violation of `@AGENTS.md` rules:
    - Wrong naming convention?
    - Forbidden import?
    - Module boundary crossed (e.g., `st.` call in `engine.py`)?
@@ -93,3 +93,22 @@ Before marking ANY task `[x]` in `@implementation_plan.md`:
 5. **Final syntax check** — `python -m py_compile <file>` for every changed `.py` file.
 
 Only after all five steps pass may a task be marked complete.
+
+---
+
+## Git Workflow
+
+### 1. Feature branch first
+- Before making any code modifications, create a new micro-focused feature branch from `main`.
+- Branch naming: `feat/<short-description>` (e.g. `feat/upload-progress`, `feat/category-management`).
+- Never commit or work directly on `main`.
+
+### 2. Incremental commits
+- After a task in `@task.md` is successfully implemented **and** passes the Verification Gate, make a local Git commit.
+- Commit message format: `scope: concise description of what changed`
+  - Examples: `upload: add progress bar during file copy`, `tests: add unit tests for config loading`
+- Keep commits small and focused — one commit per completed task, not one giant commit for multiple tasks.
+
+### 3. Push requires permission
+- Do **not** run `git push` to the remote GitHub repository without explicit user approval.
+- After committing, present the commit summary and ask before proceeding.
