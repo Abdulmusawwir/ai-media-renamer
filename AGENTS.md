@@ -47,8 +47,9 @@ pip install -r requirements.txt
 streamlit run app.py              # web app (primary)
 python cli.py "path/to/dir"       # CLI
 python cli.py "path/to/dir" --verbose
+ruff check .                      # lint
+pytest                            # unit tests
 ```
-No tests, linters, formatters, or type checkers exist.
 
 ### Module roles
 | File | Role | Must never |

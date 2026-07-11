@@ -1,0 +1,14 @@
+[project]
+name = "ai-media-renamer"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "N", "UP"]
+ignore = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

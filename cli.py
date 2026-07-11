@@ -1,21 +1,25 @@
+import argparse
 import os
 import sys
-import argparse
 import threading
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 from engine import (
-    load_config, config, ALLOWED_CATEGORIES, AI_PROMPT,
-    VIDEO_EXTENSIONS, IMAGE_EXTENSIONS, MODEL_NAME,
-    MODEL_TEMPERATURE, MODEL_NUM_CTX, MODEL_KEEP_ALIVE,
-    IMAGE_PREVIEW_MAX_EDGE, LOG_DIR,
-    setup_logging, log_event,
-    ExifToolSession, detect_hw_accel, is_already_processed,
-    process_video_to_base64, process_image_to_base64,
-    validate_category, sanitize_name,
-    analyze_asset_with_ai, _format_ai_error,
-    execute_commit
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    ExifToolSession,
+    _format_ai_error,
+    analyze_asset_with_ai,
+    detect_hw_accel,
+    execute_commit,
+    is_already_processed,
+    log_event,
+    process_image_to_base64,
+    process_video_to_base64,
+    sanitize_name,
+    setup_logging,
+    validate_category,
 )
 
 # -----------------------------------------------------------------------------
@@ -61,7 +65,8 @@ def process_library(directory_path, verbose=False):
     logger = setup_logging(verbose=verbose)
     log_event(logger, "INFO", "session_start", details={"directory": directory_path, "verbose": verbose})
 
-    asset_files = [f for f in target_dir.iterdir() if f.is_file() and f.suffix.lower() in (VIDEO_EXTENSIONS + IMAGE_EXTENSIONS)]
+    valid_exts = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS
+    asset_files = [f for f in target_dir.iterdir() if f.is_file() and f.suffix.lower() in valid_exts]
     if not asset_files:
         print("Empty queue. No matching video or image wrappers detected.")
         log_event(logger, "INFO", "session_end", details={"reason": "no_matching_files"})
@@ -136,7 +141,7 @@ def process_library(directory_path, verbose=False):
             if verbose:
                 print(f" [category fallback: {original!r} -> uncategorized]", end="")
             else:
-                print(f" [category: uncategorized]", end="")
+                print(" [category: uncategorized]", end="")
 
         staged_assets.append({
             "original_path": file_path,
@@ -169,7 +174,9 @@ def process_library(directory_path, verbose=False):
         print(f"    [CATEGORY] : {asset['category']}")
     print("=" * 85)
 
-    sort_folders_input = input("\nWould you like to sort these assets into categorized subfolders? [Y]es / [N]o: ").strip().lower()
+    sort_folders_input = input(
+        "\nWould you like to sort these assets into categorized subfolders? [Y]es / [N]o: "
+    ).strip().lower()
     sort_into_folders = sort_folders_input in ('y', 'yes')
 
     # Category override step for uncategorized assets
@@ -196,7 +203,9 @@ def process_library(directory_path, verbose=False):
                 print("    -> Keeping 'uncategorized'.")
 
     while True:
-        choice = input("\nSelect execution path - [A]pply All changes, [I]nteractive mode, [C]ancel session: ").strip().lower()
+        choice = input(
+            "\nSelect execution path - [A]pply All changes, [I]nteractive mode, [C]ancel session: "
+        ).strip().lower()
 
         if choice == 'c':
             print("\nSession canceled safely. No assets were modified.")
@@ -220,7 +229,9 @@ def process_library(directory_path, verbose=False):
                     else:
                         log_event(logger, "ERROR", "file_commit_failed", file_name=asset['original_name'])
             _close_all_worker_sessions()
-            log_event(logger, "INFO", "session_end", details={"committed": committed_count, "total": len(staged_assets), "mode": "batch"})
+            log_event(logger, "INFO", "session_end", details={
+                "committed": committed_count, "total": len(staged_assets), "mode": "batch"
+            })
             print("\nHigh-Performance Run Complete!")
             break
 
@@ -246,20 +257,27 @@ def process_library(directory_path, verbose=False):
                         committed_count += 1
                 elif sub_choice.lower() in ('n', 'no'):
                     print("  Asset skipped.")
-                    log_event(logger, "INFO", "file_skipped", file_name=asset['original_name'], details={"reason": "user_skipped"})
+                    log_event(logger, "INFO", "file_skipped", file_name=asset['original_name'],
+                          details={"reason": "user_skipped"})
                 else:
-                    clean_override = "".join([c for c in sub_choice.lower() if c.isalpha() or c.isdigit() or c in ('_', '-')]).strip('_')
+                    safe_chars = [c for c in sub_choice.lower() if c.isalpha() or c.isdigit() or c in ('_', '-')]
+                    clean_override = "".join(safe_chars).strip('_')
                     if clean_override:
                         asset['staged_name'] = clean_override
                         final_rel_path = execute_commit(asset, target_dir, sort_into_folders, exif_session)
                         if final_rel_path:
                             print(f"Applied Custom Override: {final_rel_path}")
                             log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
-                                      details={"new_path": str(final_rel_path), "category": asset['category'], "custom_name": clean_override})
+                                      details={
+                                          "new_path": str(final_rel_path), "category": asset['category'],
+                                          "custom_name": clean_override,
+                                      })
                             committed_count += 1
                     else:
                         print("Invalid string input. Asset skipped.")
-            log_event(logger, "INFO", "session_end", details={"committed": committed_count, "total": len(staged_assets), "mode": "interactive"})
+            log_event(logger, "INFO", "session_end", details={
+                "committed": committed_count, "total": len(staged_assets), "mode": "interactive"
+            })
             print("\nInteractive processing run finalized!")
             break
         else:

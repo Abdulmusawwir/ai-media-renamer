@@ -1,14 +1,12 @@
-import os
-import sys
-import json
 import base64
-import ollama
-import subprocess
-import threading
-import logging
 import datetime
+import json
+import logging
+import subprocess
+import sys
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import ollama
 
 # -----------------------------------------------------------------------------
 # 1. CONFIGURATION & LOGGING
@@ -18,7 +16,7 @@ def load_config(config_path="config.json"):
     script_dir = Path(__file__).parent
     full_path = script_dir / config_path
     try:
-        with open(full_path, 'r', encoding='utf-8') as f:
+        with open(full_path, encoding='utf-8') as f:
             cfg = json.load(f)
     except FileNotFoundError:
         print(f"Error: Configuration file '{full_path}' not found.")
@@ -136,7 +134,7 @@ def detect_hw_accel():
     for hw in ['cuda', 'qsv']:
         try:
             cmd = ['ffmpeg', '-hwaccel', hw, '-f', 'lavfi', '-i', 'color=c=black:s=16x16:d=1', '-f', 'null', '-']
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            res = subprocess.run(cmd, capture_output=True)
             if res.returncode == 0:
                 return hw
         except Exception:
@@ -154,7 +152,8 @@ def is_already_processed(file_path, exiftool_session):
 # -----------------------------------------------------------------------------
 
 def get_video_duration(video_path):
-    cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(video_path)]
+    cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+           '-of', 'default=noprint_wrappers=1:nokey=1', str(video_path)]
     try:
         output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode().strip()
         return float(output)

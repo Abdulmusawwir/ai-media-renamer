@@ -1,33 +1,31 @@
-import os
-import sys
-import json
-import glob
-import time
-import tempfile
-import threading
-import logging
 import base64
-from pathlib import Path
+import glob
+import json
+import logging
+import os
+import tempfile
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
-import streamlit as st
-import plotly.express as px
-import plotly.graph_objects as go
-from streamlit_autorefresh import st_autorefresh
 import pandas as pd
+import plotly.express as px
+import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 from engine import (
-    load_config, config, ALLOWED_CATEGORIES, AI_PROMPT,
-    VIDEO_EXTENSIONS, IMAGE_EXTENSIONS, MODEL_NAME,
-    IMAGE_PREVIEW_MAX_EDGE, LOG_DIR,
-    setup_logging, log_event,
-    ExifToolSession, detect_hw_accel, is_already_processed,
-    process_video_to_base64, process_image_to_base64,
+    ALLOWED_CATEGORIES,
+    LOG_DIR,
+    ExifToolSession,
+    _format_ai_error,
+    analyze_asset_with_ai,
+    detect_hw_accel,
+    execute_commit,
+    log_event,
     process_asset_to_base64,
-    validate_category, sanitize_name,
-    analyze_asset_with_ai, _format_ai_error,
-    execute_commit
+    sanitize_name,
+    setup_logging,
+    validate_category,
 )
 
 st.set_page_config(page_title="AI Media Renamer", layout="wide")
@@ -91,7 +89,7 @@ def load_log_entries():
         return []
     entries = []
     for log_path in sorted(glob.glob(str(log_dir / "renamer_*.jsonl"))):
-        with open(log_path, 'r', encoding='utf-8') as f:
+        with open(log_path, encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line:
@@ -223,7 +221,8 @@ with tab_upload:
     # ------------------------------------------------------------------
     # Analysis trigger: button + Phase 1 (only when idle)
     # ------------------------------------------------------------------
-    if not st.session_state.analysis_in_progress and not st.session_state.analysis_done and st.session_state.get("uploaded_files"):
+    if not st.session_state.analysis_in_progress and not st.session_state.analysis_done \
+            and st.session_state.get("uploaded_files"):
         col1, col2 = st.columns([1, 3])
         with col1:
             analyze_btn = st.button("Run AI Analysis", type="primary")
@@ -282,13 +281,15 @@ with tab_upload:
                 st.error(f"Analysis crashed: {exc}")
                 with st.expander("Show full traceback"):
                     st.code(traceback.format_exc(), language="python")
-                log_event(logger, "ERROR", "analysis_crashed", details={"error": str(exc), "traceback": traceback.format_exc()})
+                log_event(logger, "ERROR", "analysis_crashed",
+                          details={"error": str(exc), "traceback": traceback.format_exc()})
 
     # Inline staging matrix (shown after analysis)
     if st.session_state.analysis_done and st.session_state.staged_assets:
         st.divider()
         st.subheader("Staging Matrix — Review & Edit Before Committing")
-        st.caption("Edit filename, category, or tags for any asset. Use the dropdown for common categories or type a custom one.")
+        st.caption("Edit filename, category, or tags for any asset. "
+                   "Use the dropdown for common categories or type a custom one.")
 
         staged = st.session_state.staged_assets
 
@@ -298,7 +299,8 @@ with tab_upload:
                 "select": True,
                 "original_name": asset["original_name"],
                 "proposed_filename": asset["staged_name"],
-                "category": asset["category"] if asset["category"] != "uncategorized" else asset.get("suggested_category", "uncategorized"),
+                "category": asset["category"] if asset["category"] != "uncategorized"
+            else asset.get("suggested_category", "uncategorized"),
                 "tags": ", ".join(asset["tags"]),
                 "summary": asset["summary"],
             })
@@ -360,7 +362,8 @@ with tab_upload:
 
                         asset["staged_name"] = row["proposed_filename"]
                         new_cat = row["category"].strip().lower().replace(" ", "_")
-                        safe_cat = "".join([c for c in new_cat if c.isalpha() or c.isdigit() or c in ('_', '-')]).strip('_')
+                        safe_chars = [c for c in new_cat if c.isalpha() or c.isdigit() or c in ('_', '-')]
+                        safe_cat = "".join(safe_chars).strip('_')
                         if safe_cat:
                             asset["category"] = safe_cat
                         asset["tags"] = [t.strip() for t in row["tags"].split(",") if t.strip()]
@@ -398,7 +401,8 @@ with tab_upload:
                 st.error(f"Commit crashed: {exc}")
                 with st.expander("Show full traceback"):
                     st.code(traceback.format_exc(), language="python")
-                log_event(logger, "ERROR", "commit_crashed", details={"error": str(exc), "traceback": traceback.format_exc()})
+                log_event(logger, "ERROR", "commit_crashed",
+                          details={"error": str(exc), "traceback": traceback.format_exc()})
 
     # Persistent commit message (survives reruns)
     if st.session_state.commit_message:
@@ -414,7 +418,10 @@ with tab_analytics:
         st.subheader("Analytics Dashboard")
     with col_reset:
         if st.button("Reset All", type="secondary"):
-            for key in ["base64_cache", "staged_assets", "analysis_done", "uploaded_files", "temp_dir", "output_dir", "logger", "analysis_in_progress", "analysis_index", "analysis_aborted", "commit_message", "clear_counter"]:
+            reset_keys = ["base64_cache", "staged_assets", "analysis_done", "uploaded_files",
+                          "temp_dir", "output_dir", "logger", "analysis_in_progress",
+                          "analysis_index", "analysis_aborted", "commit_message", "clear_counter"]
+            for key in reset_keys:
                 st.session_state.pop(key, None)
             for h in logging.getLogger('video_renamer').handlers[:]:
                 h.close()

@@ -34,7 +34,7 @@
 - **Expanded categories:** Category taxonomy grew from 12 to 38 entries, covering footage, graphics, VFX, and media types.
 - **Custom category override:** Uncategorized assets now prompt the user to assign a custom category during staging review.
 - **File logging:** Pipeline logs every event (AI analysis, commits, errors, skips) as JSON Lines to `logs/renamer_YYYY-MM-DD.jsonl`.
-- **Flask dashboard:** New `dashboard.py` provides a web UI overview with stats, category pie chart, daily bar chart, filterable timeline, and error section.
+- **Streamlit analytics dashboard:** Consolidated into `app.py` Tab 2 — auto-refreshing stats cards, Plotly charts, and filterable event timeline from JSONL logs.
 - **CLI & UX:** Cleaner startup with config validation, more informative progress messages.
 
 ## [Milestone 3.2] — 2026-07-11

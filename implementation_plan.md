@@ -113,18 +113,7 @@
   - Return the original path instead of `new_path`
 - [ ] Update both `app.py` commit handler and `cli.py` commit path
 
-### 4.2 Commit undo / rollback
-- [ ] Create a commit log JSON file per session: `logs/commits_YYYY-MM-DD.jsonl`
-  - Each line: `{timestamp, original_path, new_path, original_name, new_name, category, tags}`
-- [ ] In `execute_commit()`, after successful rename, append a rollback record to the commit log
-- [ ] In `app.py`, add a "Show Commit History" expander below the staging area
-  - Read commit log, display as `st.dataframe` with columns: Time, Original, New, Category
-- [ ] Add "Undo Selected" button per row: rename `new_path` back to `original_path`
-  - Re-reads original name from the commit log record
-  - Uses the same collision-safe logic as the forward path
-  - Logs a `commit_undone` event
-
-### 4.3 Naming template system
+### 4.2 Naming template system
 - [ ] Add `naming_templates` section to `config.json`:
   ```json
   "naming_templates": {
@@ -140,7 +129,7 @@
   - Rebuild the filename according to the selected template
   - Fall back to the AI's raw `new_filename` if template keys are missing
 
-### 4.4 Dry-run commit preview
+### 4.3 Dry-run commit preview
 - [ ] Add a "Preview Commit" button next to "Commit Selected"
 - [ ] When clicked: show a `st.dataframe` with columns: `Original Path`, `New Path`, `Category`, `Tags`, `Metadata Written`
   - Read all data from `staged_assets` and `st.session_state.output_dir`
@@ -400,7 +389,7 @@ Phase B: 2.3, 9.2, 11.1          → Health checks + unit tests (confidence laye
 Phase C: 1.2, 1.4, 1.3          → Upload hardening
 Phase D: 3.1, 3.2, 3.3          → Staging UX improvements
 Phase E: 4.1, 4.4               → Commit flexibility (metadata-only + dry-run)
-Phase F: 4.2, 5.1, 5.2, 5.3    → Persistence + undo
+Phase F: 5.1, 5.2, 5.3         → Session persistence + recovery
 Phase G: 2.1, 2.2, 2.4          → Analysis flexibility (re-analyze, model select, workers)
 Phase H: 6.1, 6.2, 6.3, 6.4    → Configuration UI
 Phase I: 7.1, 7.2, 7.3, 7.4    → Analytics enhancements
@@ -408,5 +397,5 @@ Phase J: 8.1, 8.2, 8.3         → CLI improvements
 Phase K: 9.1, 11.2, 11.3       → Docker + integration tests
 Phase L: 10.1, 10.2, 10.3, 10.4 → Quality of life
 Phase M: 3.4, 3.5               → CSV import/export
-Phase N: 4.3                    → Naming templates
+Phase N: 4.2                    → Naming templates
 ```
