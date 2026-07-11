@@ -70,7 +70,7 @@ pytest                            # unit tests
 - Metadata IS correct (verified by DaVinci Resolve, Premiere Pro). Windows Explorer just doesn't surface XMP for MP4 — not a bug.
 
 ### Session state reset pattern
-On file change → reset: `analysis_done`, `analysis_in_progress`, `analysis_aborted`, `staged_assets`, `base64_cache`, `commit_message`.
+On file change → reset: `analysis_done`, `analysis_in_progress`, `analysis_aborted`, `staged_assets`, `base64_cache`.
 On Clear All → also pop: `uploaded_files`, `temp_dir`, increment `clear_counter`.
 
 ### Windows constraints

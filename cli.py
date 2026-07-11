@@ -87,7 +87,7 @@ def process_library(directory_path, verbose=False):
 
     # Phase 1: Parallel frame extraction
     pending_assets = []
-    print("Phase 1: Checking caches and extracting grids into RAM...")
+    print("Phase 1: Extracting preview frames...")
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         future_to_file = {}
@@ -108,7 +108,7 @@ def process_library(directory_path, verbose=False):
             if base64_data:
                 pending_assets.append((file, base64_data))
             else:
-                print(f"Failed to extract into RAM: {file.name}")
+                print(f"Failed to extract preview: {file.name}")
                 log_event(logger, "ERROR", "extraction_failed", file_name=file.name)
 
     if not pending_assets:
@@ -119,7 +119,7 @@ def process_library(directory_path, verbose=False):
 
     # Phase 2: Sequential AI Processing
     staged_assets = []
-    print("\nPhase 2: Injecting RAM streams directly into AI Vision Model...")
+    print("\nPhase 2: Analyzing content with AI model...")
 
     for idx, (file_path, base64_img) in enumerate(pending_assets, 1):
         print(f"[{idx}/{len(pending_assets)}] AI analyzing: {file_path.name}...", end="", flush=True)
@@ -151,7 +151,7 @@ def process_library(directory_path, verbose=False):
             "tags": ai_data.get('tags', []),
             "summary": ai_data.get('overall_visual_summary', '')
         })
-        print(f" -> Staged: {safe_name}")
+        print(f"  Staged as: {safe_name}")
         log_event(logger, "INFO", "ai_analysis_success", file_name=file_path.name, details={
             "staged_name": safe_name,
             "category": staged_category,
@@ -213,7 +213,7 @@ def process_library(directory_path, verbose=False):
             break
 
         elif choice == 'a':
-            print("\nPiping ExifTool commands directly into metadata containers (parallel)...")
+            print("\nWriting metadata tags to files (parallel)...")
             commit_args = [(asset, target_dir, sort_into_folders) for asset in staged_assets]
             max_workers = min(len(commit_args), os.cpu_count() or 4)
             committed_count = 0
@@ -222,7 +222,7 @@ def process_library(directory_path, verbose=False):
                 for future in as_completed(futures):
                     asset, final_rel_path = future.result()
                     if final_rel_path:
-                        print(f"Baked & Moved: {asset['original_name']} -> {final_rel_path}")
+                        print(f"Committed: {asset['original_name']} -> {final_rel_path}")
                         log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
                                   details={"new_path": str(final_rel_path), "category": asset['category']})
                         committed_count += 1

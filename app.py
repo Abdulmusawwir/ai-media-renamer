@@ -3,6 +3,7 @@ import glob
 import json
 import logging
 import os
+import shutil
 import tempfile
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,16 +16,20 @@ from streamlit_autorefresh import st_autorefresh
 
 from engine import (
     ALLOWED_CATEGORIES,
+    DEFAULT_CASE_STYLE,
+    DEFAULT_MAX_FILENAME_CHARS,
     LOG_DIR,
     ExifToolSession,
     _format_ai_error,
     analyze_asset_with_ai,
+    apply_case_style,
     detect_hw_accel,
     execute_commit,
     log_event,
     process_asset_to_base64,
     sanitize_name,
     setup_logging,
+    truncate_filename,
     validate_category,
 )
 
@@ -44,9 +49,6 @@ if "staged_assets" not in st.session_state:
 if "analysis_done" not in st.session_state:
     st.session_state.analysis_done = False
 
-if "temp_dir" not in st.session_state:
-    st.session_state.temp_dir = None
-
 if "base64_cache" not in st.session_state:
     st.session_state.base64_cache = {}
 
@@ -65,8 +67,11 @@ if "analysis_index" not in st.session_state:
 if "analysis_aborted" not in st.session_state:
     st.session_state.analysis_aborted = False
 
-if "commit_message" not in st.session_state:
-    st.session_state.commit_message = ""
+if "case_style" not in st.session_state:
+    st.session_state.case_style = DEFAULT_CASE_STYLE
+
+if "max_filename_chars" not in st.session_state:
+    st.session_state.max_filename_chars = DEFAULT_MAX_FILENAME_CHARS
 
 if "clear_counter" not in st.session_state:
     st.session_state.clear_counter = 0
@@ -133,16 +138,17 @@ with tab_upload:
             st.session_state.analysis_aborted = False
             st.session_state.staged_assets = []
             st.session_state.base64_cache = {}
-            st.session_state.commit_message = ""
 
     # Clear All button — always visible when files or staged assets exist
     if st.session_state.get("uploaded_files") or st.session_state.staged_assets:
         if st.button("Clear All Files", type="secondary"):
+            temp_dir = st.session_state.get("temp_dir")
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
             for key in ["uploaded_files", "base64_cache", "staged_assets", "temp_dir"]:
                 st.session_state.pop(key, None)
             st.session_state.analysis_done = False
             st.session_state.analysis_in_progress = False
-            st.session_state.commit_message = ""
             st.session_state.clear_counter += 1
             st.rerun()
 
@@ -176,6 +182,8 @@ with tab_upload:
                 if ai_result['ok']:
                     ai_data = ai_result['data']
                     safe_name = sanitize_name(ai_data['new_filename'])
+                    safe_name = apply_case_style(safe_name, st.session_state.case_style)
+                    safe_name = truncate_filename(safe_name, st.session_state.max_filename_chars)
                     suggested_cat = ai_data.get('suggested_category', '')
                     staged_category, _ = validate_category(suggested_cat)
 
@@ -219,6 +227,28 @@ with tab_upload:
             st.success(f"✅ Analysis complete: {n} asset{'s' if n != 1 else ''} ready for review below.")
 
     # ------------------------------------------------------------------
+    # Advanced Features (collapsed by default)
+    # ------------------------------------------------------------------
+    if not st.session_state.analysis_in_progress and not st.session_state.analysis_done \
+            and st.session_state.get("uploaded_files"):
+        with st.expander("Advanced Features"):
+            col_case, col_chars = st.columns(2)
+            with col_case:
+                st.selectbox(
+                    "Filename case style",
+                    ["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase"],
+                    index=["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase"]
+                    .index(st.session_state.case_style),
+                    key="case_style",
+                )
+            with col_chars:
+                st.number_input(
+                    "Max filename characters (0 = no limit)",
+                    min_value=0, max_value=200, step=5,
+                    key="max_filename_chars",
+                )
+
+    # ------------------------------------------------------------------
     # Analysis trigger: button + Phase 1 (only when idle)
     # ------------------------------------------------------------------
     if not st.session_state.analysis_in_progress and not st.session_state.analysis_done \
@@ -239,7 +269,7 @@ with tab_upload:
                     st.info("No hardware acceleration detected, using CPU fallback.")
 
                 # Phase 1: Parallel extraction
-                st.write("**Phase 1:** Extracting previews into memory...")
+                st.write("**Step 1:** Preparing preview frames...")
                 progress_bar = st.progress(0, text="Extracting frames...")
                 base64_results = {}
 
@@ -274,7 +304,6 @@ with tab_upload:
                 st.session_state.analysis_in_progress = True
                 st.session_state.analysis_done = False
                 st.session_state.analysis_aborted = False
-                st.session_state.commit_message = ""
                 st.rerun()
             except Exception as exc:
                 import traceback
@@ -388,12 +417,17 @@ with tab_upload:
                         "committed": committed, "failed": failed, "total": len(selected), "mode": "web_batch"
                     })
 
+                    temp_dir = st.session_state.get("temp_dir")
+                    if temp_dir:
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                    st.session_state.pop("temp_dir", None)
+
                     if failed:
                         msg = f"Committed {committed} assets. {failed} failed."
-                        st.session_state.commit_message = msg
+                        st.toast(msg)
                     else:
                         msg = f"All {committed} assets committed successfully to {target_dir.resolve()}!"
-                        st.session_state.commit_message = msg
+                        st.toast(msg)
                         st.session_state.staged_assets = []
                         st.session_state.analysis_done = False
             except Exception as exc:
@@ -403,10 +437,6 @@ with tab_upload:
                     st.code(traceback.format_exc(), language="python")
                 log_event(logger, "ERROR", "commit_crashed",
                           details={"error": str(exc), "traceback": traceback.format_exc()})
-
-    # Persistent commit message (survives reruns)
-    if st.session_state.commit_message:
-        st.info(st.session_state.commit_message)
 
 # -----------------------------------------------------------------------------
 # Tab 2: Analytics Dashboard
@@ -418,9 +448,12 @@ with tab_analytics:
         st.subheader("Analytics Dashboard")
     with col_reset:
         if st.button("Reset All", type="secondary"):
+            temp_dir = st.session_state.get("temp_dir")
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
             reset_keys = ["base64_cache", "staged_assets", "analysis_done", "uploaded_files",
                           "temp_dir", "output_dir", "logger", "analysis_in_progress",
-                          "analysis_index", "analysis_aborted", "commit_message", "clear_counter"]
+                          "analysis_index", "analysis_aborted", "clear_counter"]
             for key in reset_keys:
                 st.session_state.pop(key, None)
             for h in logging.getLogger('video_renamer').handlers[:]:
@@ -522,3 +555,17 @@ with tab_analytics:
         st.dataframe(timeline_df, width='stretch', hide_index=True)
     else:
         st.info("No matching entries.")
+
+# -----------------------------------------------------------------------------
+# Footer
+# -----------------------------------------------------------------------------
+
+st.markdown(
+    "<hr style='margin-top: 3rem; margin-bottom: 0.5rem; border-color: #334155;'>"
+    "<p style='text-align: center; color: #94a3b8; font-size: 0.8rem;'>"
+    "Made with love from Tanzania by "
+    "<a href='https://github.com/Abdulmusawwir/ai-media-renamer' "
+    "   style='color: #60a5fa; text-decoration: none;'>Abdul Musawwir</a>"
+    "</p>",
+    unsafe_allow_html=True,
+)

@@ -51,6 +51,9 @@ IMAGE_PREVIEW_MAX_EDGE = config['preview']['image_max_edge']
 VIDEO_GRID_TILE = config['preview']['video_grid_tile']
 VIDEO_GRID_SCALE = config['preview']['video_grid_scale']
 
+DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'snake_case')
+DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
+
 LOG_DIR = Path(config['logging']['directory'])
 
 
@@ -131,7 +134,7 @@ class ExifToolSession:
 # -----------------------------------------------------------------------------
 
 def detect_hw_accel():
-    for hw in ['cuda', 'qsv']:
+    for hw in ['cuda', 'qsv', 'amf']:
         try:
             cmd = ['ffmpeg', '-hwaccel', hw, '-f', 'lavfi', '-i', 'color=c=black:s=16x16:d=1', '-f', 'null', '-']
             res = subprocess.run(cmd, capture_output=True)
@@ -185,7 +188,7 @@ def process_video_to_base64(video_path, hw_accel):
     try:
         process = subprocess.run(cmd, capture_output=True, check=True)
         return base64.b64encode(process.stdout).decode('utf-8')
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
 
@@ -230,10 +233,34 @@ def validate_category(raw_category):
 
 def sanitize_name(raw_name):
     cleaned = raw_name.lower().replace("grid", "").replace("sequence", "")
+    cleaned = cleaned.replace(" ", "_")
     safe = "".join([c for c in cleaned if c.isalpha() or c.isdigit() or c in ('_', '-')]).strip('_')
     if len(safe.split('_')) < 3:
         safe = f"{safe}_media_asset"
     return safe
+
+
+def apply_case_style(name, style):
+    if style == "snake_case":
+        return name.lower().replace("-", "_").replace(" ", "_")
+    elif style == "camelCase":
+        parts = name.replace("-", "_").replace(" ", "_").split("_")
+        return parts[0].lower() + "".join(p.capitalize() for p in parts[1:])
+    elif style == "kebab-case":
+        return name.lower().replace("_", "-").replace(" ", "-")
+    elif style == "pascal_case":
+        parts = name.replace("-", "_").replace(" ", "_").split("_")
+        return "".join(p.capitalize() for p in parts)
+    elif style == "lowercase":
+        return name.lower().replace("_", "").replace("-", "").replace(" ", "")
+    else:
+        return name
+
+
+def truncate_filename(name, max_chars):
+    if max_chars <= 0 or len(name) <= max_chars:
+        return name
+    return name[:max_chars].rstrip("_-")
 
 
 def _parse_ai_response(raw_text):

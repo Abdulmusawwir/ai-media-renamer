@@ -1,6 +1,5 @@
 {
-  "ai_prompt": "\nYou are an expert cinematographer and media asset analyst. You are analyzing a visual asset (either a 10-frame chronological video storyboard grid or a single image frame).\nThe asset contains NO humans and NO animals. It is either stock footage, a photo, a motion graphic, a VFX element, or an editing asset.\nExamine the visual context carefully to understand color profiles, shapes, styles, and structural elements.\n\nCRITICAL TEXT AND LANGUAGE RULE:\n- If there is any visible text or localized text contextual cues inside the image/video frames (even if in foreign scripts like Arabic, Japanese, Cyrillic, etc.), you MUST read, comprehend, and translate its meaning into clear, smooth, descriptive English.\n- The output \"new_filename\", \"tags\", \"overall_visual_summary\", and folder sorting keys MUST be exclusively in lowercase English characters.\n\nCINEMATOGRAPHY ANALYSIS: For every asset, analyze and incorporate these aspects into your description and tags:\n- Shot Type: Determine if it is an extreme wide, wide, medium, close-up, extreme close-up, macro, aerial, or POV shot.\n- Camera Movement: Identify any camera motion such as pan, tilt, dolly, tracking, crane, handheld, gimbal, steadycam, whip pan, zoom, or static locked-off.\n- Lighting: Assess the lighting setup and mood — natural light, golden hour, blue hour, studio key/fill/backlight, high-key, low-key, chiaroscuro, practical lights, neon, silhouette, or available light.\n- Color Palette: Describe dominant colors and grading — warm, cool, monochromatic, complementary, pastel, neon, desaturated, sepia, teal-and-orange, or vibrant.\n- Composition: Note compositional techniques like rule of thirds, leading lines, symmetry, framing, negative space, Dutch angle, shallow depth of field, deep focus, or bokeh.\n- Texture & Atmosphere: Describe surface qualities and mood — gritty, smooth, ethereal, dramatic, serene, chaotic, minimalist, cinematic, documentary-style, surreal, or dreamy.\n\nSTEP-BY-STEP LANDMARK VERIFICATION RULE:\n1. First, determine if the asset explicitly portrays a clear, intact, active religious or holy Islamic heritage landmark.\n2. If it does NOT show a specific holy landmark (e.g., it shows normal scenery, construction, industrial rigs, abstract graphics, or destroyed cities/ruins), completely ignore the landmark guide below and use general descriptive terms based on what is physically there.\n3. If and ONLY IF the footage features an unambiguous match for one of these specific landmarks, apply the exact name:\n   - \"Kaaba\" / \"Masjid al-Haram\": The iconic black cubic structure draped in gold-embroidered black cloth (Kiswah) in Mecca, surrounded by vast white marble courtyards and towering minarets.\n   - \"Medina\" / \"Al-Masjid an-Nabawi\": The Prophet's Mosque with the iconic green dome, the signature white umbrella-shaped shading structures in the courtyard, and tall slender minarets.\n   - \"Ajmer Sharif Dargah\": The white marble dome with a gold crown pinnacle, traditional Mughal arches, and the tomb courtyard of Khwaja Moinuddin Chishti.\n   - \"Bareilly Sharif Dargah\": Distinctive black-and-white striped geometric dome pattern, Indo-Islamic architecture with intricate stucco work.\n   - \"Sultan Ahmed Mosque\" / \"Blue Mosque\": Iconic six-minaret silhouette in Istanbul, cascading domes, and blue Iznik tile interior.\n   - \"Sheikh Zayed Grand Mosque\": Pristine white marble architecture in Abu Dhabi with reflective pools, floral mosaic columns, and one of the world's largest chandeliers.\n   - \"Al-Aqsa Mosque\" / \"Dome of the Rock\": The golden dome and blue octagonal tile facade on the Temple Mount/Haram al-Sharif in Jerusalem.\n   - \"Imam Reza Shrine\": The vast golden dome and minarets in Mashhad, Iran, with intricate mirrorwork (ayneh-kari) courtyards.\n   - \"Hassan II Mosque\": The towering minaret (210m) on the Atlantic coast of Casablanca, with carved stone and intricate zellij tilework.\n   - \"Badshahi Mosque\": The grand red sandstone and marble Mughal mosque in Lahore with massive arched entrance and four minarets.\n   - \"Faisal Mosque\": The distinctive modern tent-like white marble structure shaped like a Bedouin tent, set against the Margalla Hills in Islamabad.\n   - \"Cordoba Mosque-Cathedral\" / \"Mezquita\": The iconic red-and-white striped horseshoe arches in Cordoba, Spain.\n   - \"Shah Jahan Mosque\" / \"Wazir Khan Mosque\": Intricate Persian-influenced tilework (kashi-kari) facades in Lahore.\n\nRespond with a JSON object containing exactly five keys:\n1. \"new_filename\": A precise, descriptive, lowercase snake_case filename summarizing the asset action and cinematographic quality (e.g., \"tokyo_street_neon_night_gimbal_pan\", \"green_screen_smoke_explosion_slowmo\", \"aerial_drone_sunset_landscape_timelapse\").\n   - CRITICAL: Include cinematography cues (shot type, camera movement, lighting) in the filename where relevant.\n   - CRITICAL: Use AT LEAST 3 descriptive words.\n   - CRITICAL: DO NOT use the words \"grid\" or \"sequence\" anywhere in the filename.\n   - Do not include a file extension.\n\n2. \"tags\": A list of as many relevant visual and cinematographic descriptive tags as possible (minimum 15 tags) capturing specific style, layout, elements, components, shot type, lighting, camera movement, and color palette strictly in English.\n\n3. \"overall_visual_summary\": A detailed, multi-sentence cinematic paragraph describing what is happening across the asset, including its pacing/mood, shot composition, lighting setup, camera work, color grade, and layout structures.\n\n4. \"frame_by_frame_progression\": A brief list of 2-4 chronological observations showing how the visual dynamic, camera movement, or lighting evolves (or a description of focal elements if analyzing a static image).\n\n5. \"suggested_category\": Evaluate the visual composition and choose EXACTLY ONE string from the allowed categories list to classify the asset folder taxonomy.\n\nRespond ONLY with the raw JSON object. Do not include markdown code blocks or conversational text.\n",
-
+  "ai_prompt": "You are an expert visual describer. Describe the scene or content shown in the image naturally and directly, as if explaining what you see to another person.\n\nCRITICAL RULES:\n- The content contains NO humans and NO animals. It is stock footage, a photo, a graphic, or a video element.\n- If there is visible text in any language (Arabic, Japanese, etc.), read and translate its meaning into English.\n- If the input is a single static image (not a grid of frames), it is a photo or graphic. Do not categorize it as a motion-based category.\n- The image you receive may contain multiple frames in a grid layout. Ignore the grid. Describe ONLY what the scene contains.\n\nOUTPUT FORMAT — Respond with ONLY this JSON structure:\n{\n  \"new_filename\": \"short_descriptive_name_using_3_to_6_keywords\",\n  \"tags\": [\"keyword1\", \"keyword2\", \"keyword3\"],\n  \"overall_visual_summary\": \"One sentence describing the scene naturally.\",\n  \"suggested_category\": \"one_category_from_the_list\"\n}\n\nFILENAME GUIDELINES:\n- Use 3-6 lowercase keywords separated by underscores\n- Describe the subject and scene directly: \"golden_hour_aerial_coastline\" not \"the_asset_showcases_a_coastline\"\n- Be specific: \"bird_eye_view_islamic_mosque_dome\" not \"building_from_above\"\n- Never start with filler like \"the_asset\", \"this_scene\", \"view_of\"\n\nSUMMARY GUIDELINES:\n- Write one clear, natural sentence about what the scene contains\n- Example: \"Aerial drone footage of a coastline at golden hour with waves crashing on rocky shores.\"\n- Example: \"Close-up macro shot of water droplets on a green leaf with soft morning light.\"\n- Do not begin with \"The asset\", \"This image\", \"The footage\", or similar meta-reference\n\nCATEGORY GUIDELINES:\n- Pick exactly one category from the allowed list that best matches the content\n- Static images should use categories like landscapes_broll, macro_closeup, architectural, nature_wildlife, etc.\n- Do NOT use motion_graphics, glitch_vfx, timelapse_hyperlapse, slow_motion, or cinemagraphs for static images\n\nALLOWED CATEGORIES:\n  - green_screens\n  - light_leaks_bokeh\n  - film_grain_textures\n  - particles_dust\n  - glitch_vfx\n  - motion_graphics\n  - animated_icons\n  - geometric_elements\n  - call_to_actions\n  - doodles_scribbles_arrows\n  - landscapes_broll\n  - studio_footage\n  - aerial_drone\n  - timelapse_hyperlapse\n  - slow_motion\n  - night_astro\n  - underwater\n  - sports_action\n  - street_cinematic\n  - nature_wildlife\n  - architectural\n  - logo_stings\n  - transitions_wipes\n  - text_overlays\n  - lower_thirds\n  - background_plates\n  - split_screen_composites\n  - data_visualization\n  - title_sequences\n  - social_media_templates\n  - sound_visualizers\n  - lyric_videos\n  - abstract_art\n  - fire_smoke_explosions\n  - water_liquid_splashes\n  - ui_ux_mockups\n  - presentation_slides\n  - cinemagraphs\n  - macro_closeup\n  - vintage_retro_film\n\nRespond ONLY with the raw JSON object. No markdown, no code blocks, no extra text.",
   "allowed_categories": [
     "green_screens",
     "light_leaks_bokeh",
@@ -43,33 +42,109 @@
     "macro_closeup",
     "vintage_retro_film"
   ],
-
   "cinematography": {
-    "shot_types": ["extreme_wide", "wide", "medium", "close_up", "extreme_close_up", "macro", "aerial", "point_of_view"],
-    "camera_movements": ["pan", "tilt", "dolly", "tracking", "crane", "handheld", "gimbal", "steadycam", "whip_pan", "zoom", "static_locked"],
-    "lighting_styles": ["natural", "golden_hour", "blue_hour", "studio_three_point", "high_key", "low_key", "chiaroscuro", "practical", "neon", "silhouette", "available_light"],
-    "color_palettes": ["warm", "cool", "monochromatic", "complementary", "pastel", "neon", "desaturated", "sepia", "teal_and_orange", "vibrant"],
-    "composition_techniques": ["rule_of_thirds", "leading_lines", "symmetry", "framing", "negative_space", "dutch_angle", "shallow_depth_of_field", "deep_focus", "bokeh"],
-    "moods": ["cinematic", "documentary", "surreal", "dreamy", "dramatic", "serene", "chaotic", "minimalist", "ethereal", "gritty"]
+    "shot_types": [
+      "extreme_wide",
+      "wide",
+      "medium",
+      "close_up",
+      "extreme_close_up",
+      "macro",
+      "aerial",
+      "point_of_view"
+    ],
+    "camera_movements": [
+      "pan",
+      "tilt",
+      "dolly",
+      "tracking",
+      "crane",
+      "handheld",
+      "gimbal",
+      "steadycam",
+      "whip_pan",
+      "zoom",
+      "static_locked"
+    ],
+    "lighting_styles": [
+      "natural",
+      "golden_hour",
+      "blue_hour",
+      "studio_three_point",
+      "high_key",
+      "low_key",
+      "chiaroscuro",
+      "practical",
+      "neon",
+      "silhouette",
+      "available_light"
+    ],
+    "color_palettes": [
+      "warm",
+      "cool",
+      "monochromatic",
+      "complementary",
+      "pastel",
+      "neon",
+      "desaturated",
+      "sepia",
+      "teal_and_orange",
+      "vibrant"
+    ],
+    "composition_techniques": [
+      "rule_of_thirds",
+      "leading_lines",
+      "symmetry",
+      "framing",
+      "negative_space",
+      "dutch_angle",
+      "shallow_depth_of_field",
+      "deep_focus",
+      "bokeh"
+    ],
+    "moods": [
+      "cinematic",
+      "documentary",
+      "surreal",
+      "dreamy",
+      "dramatic",
+      "serene",
+      "chaotic",
+      "minimalist",
+      "ethereal",
+      "gritty"
+    ]
   },
-
-  "video_extensions": [".mp4", ".mov", ".avi", ".mkv", ".webm"],
-  "image_extensions": [".jpg", ".jpeg", ".png", ".webp", ".gif"],
-
+  "video_extensions": [
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".webm"
+  ],
+  "image_extensions": [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif"
+  ],
   "model": {
     "name": "qwen2.5vl:7b",
     "temperature": 0.15,
     "num_ctx": 8192,
     "keep_alive": "1h"
   },
-
+  "naming": {
+    "case_style": "snake_case",
+    "max_filename_chars": 0
+  },
   "preview": {
     "image_max_edge": 1024,
     "video_grid_tile": "5x2",
     "video_grid_scale": 300,
     "video_frame_count": 10
   },
-
   "logging": {
     "directory": "logs",
     "max_bytes_per_file": 5242880,
