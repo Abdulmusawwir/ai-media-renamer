@@ -254,6 +254,9 @@ with tab_upload:
                 if name in NAMED_TEMPLATES:
                     st.session_state.template_string = NAMED_TEMPLATES[name]
 
+            def _template_label(name):
+                return f"{name}  ({NAMED_TEMPLATES[name]})" if name in NAMED_TEMPLATES else name
+
             col_tmpl, col_pat = st.columns([1, 2])
             with col_tmpl:
                 st.selectbox(
@@ -262,9 +265,24 @@ with tab_upload:
                     index=preset_idx,
                     key="template_preset_sel",
                     on_change=_on_template_preset,
+                    format_func=_template_label,
+                    help="Choose a preset or select 'custom' to type your own pattern. "
+                         "The template generates the raw name; then the case style below transforms it.",
                 )
             with col_pat:
-                st.text_input("Pattern", key="template_string")
+                st.text_input(
+                    "Pattern",
+                    key="template_string",
+                    help="{category}, {topic}, {description}, {date} \u2014 in any order. "
+                         "Example: {category}_{topic}_{description}. "
+                         "The case style below overrides any capitalisation in this pattern.",
+                )
+                _demo = {"category": "aerial_drone", "topic": "golden_hour",
+                         "description": "aerial_coastline", "new_filename": "golden_hour_aerial_coastline"}
+                _raw = apply_naming_template(st.session_state.template_string, _demo)
+                _styled = apply_case_style(_raw, st.session_state.case_style)
+                _final = truncate_filename(_styled, st.session_state.max_filename_chars)
+                st.caption(f"Preview: {_final}")
 
             col_case, col_chars = st.columns(2)
             with col_case:
@@ -274,12 +292,21 @@ with tab_upload:
                     index=["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase"]
                     .index(st.session_state.case_style),
                     key="case_style",
+                    help="Applied AFTER the naming template. "
+                         "Overrides letter case from the pattern output. "
+                         "snake_case: golden_hour_aerial | "
+                         "camelCase: goldenHourAerial | "
+                         "kebab-case: golden-hour-aerial | "
+                         "pascal_case: GoldenHourAerial | "
+                         "lowercase: goldenhouraerial",
                 )
             with col_chars:
                 st.number_input(
                     "Max filename characters (0 = no limit)",
                     min_value=0, max_value=200, step=5,
                     key="max_filename_chars",
+                    help="Truncates the filename to this many characters (applied last). "
+                         "0 = no limit.",
                 )
 
     # ------------------------------------------------------------------
