@@ -148,7 +148,8 @@
   "logging": {
     "directory": "logs",
     "max_bytes_per_file": 5242880,
-    "backup_count": 3
+    "backup_count": 3,
+    "max_upload_size": 10737418240
   },
   "naming_templates": {
     "default": "{category}_{topic}_{description}",

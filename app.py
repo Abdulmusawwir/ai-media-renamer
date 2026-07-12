@@ -19,8 +19,11 @@ from engine import (
     DEFAULT_CASE_STYLE,
     DEFAULT_MAX_FILENAME_CHARS,
     DEFAULT_TEMPLATE_STRING,
+    IMAGE_EXTENSIONS,
     LOG_DIR,
+    MAX_UPLOAD_SIZE,
     NAMED_TEMPLATES,
+    VIDEO_EXTENSIONS,
     ExifToolSession,
     _format_ai_error,
     analyze_asset_with_ai,
@@ -44,6 +47,22 @@ from engine import (
 
 st.set_page_config(page_title="AI Media Renamer", layout="wide")
 st.title("AI Media Renamer")
+
+# Drag-and-drop visual feedback CSS
+st.markdown("""
+<style>
+div[data-testid="stFileUploader"] {
+    transition: border-color 0.2s, background-color 0.2s;
+}
+div[data-testid="stFileUploader"]:hover {
+    border-color: #4CAF50 !important;
+    background-color: rgba(76, 175, 80, 0.05);
+}
+div[data-testid="stFileUploader"]:has(.uploadedFile) {
+    border-color: #2196F3 !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # Session state initialisation
@@ -340,10 +359,46 @@ with tab_upload:
         if set(existing.keys()) != new_names:
             st.session_state.temp_dir = tempfile.mkdtemp(prefix="renamer_upload_")
             saved = {}
-            for uf in uploaded_files:
+            skipped_size = []
+            skipped_ext = []
+            valid_exts = set(VIDEO_EXTENSIONS) | set(IMAGE_EXTENSIONS)
+            all_bytes = sum(uf.size for uf in uploaded_files)
+            copied_bytes = 0
+            total_files = len(uploaded_files)
+            progress_bar = st.progress(0, text="Copying files...") if total_files > 1 else None
+
+            for i, uf in enumerate(uploaded_files):
+                ext = Path(uf.name).suffix.lower()
+                if ext not in valid_exts:
+                    skipped_ext.append(uf.name)
+                    log_event(logger, "ERROR", "file_skipped",
+                              details={"file": uf.name, "reason": "unsupported_extension"})
+                    continue
+                if uf.size > MAX_UPLOAD_SIZE:
+                    skipped_size.append((uf.name, uf.size))
+                    log_event(logger, "ERROR", "file_skipped",
+                              details={"file": uf.name, "reason": "exceeds_max_size",
+                                       "size": uf.size})
+                    continue
                 dest = Path(st.session_state.temp_dir) / uf.name
                 dest.write_bytes(uf.getbuffer())
                 saved[uf.name] = dest
+                copied_bytes += uf.size
+                if progress_bar:
+                    progress_bar.progress(copied_bytes / all_bytes,
+                                          text=f"Copying {uf.name} ({i+1}/{total_files})")
+
+            if skipped_ext:
+                st.warning(f"Skipped {len(skipped_ext)} file(s) with unsupported extensions: "
+                           f"{', '.join(skipped_ext)}")
+            if skipped_size:
+                for name, size in skipped_size:
+                    gb = size / (1024 ** 3)
+                    st.warning(f"Skipped {name} ({gb:.1f} GB) — exceeds max upload size.")
+
+            if progress_bar:
+                progress_bar.empty()
+
             st.session_state.uploaded_files = saved
             st.session_state.analysis_done = False
             st.session_state.analysis_in_progress = False

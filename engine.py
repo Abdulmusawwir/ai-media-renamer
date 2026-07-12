@@ -69,6 +69,7 @@ NAMED_TEMPLATES = config.get('naming_templates', {
 DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{category}_{topic}_{description}")
 
 LOG_DIR = Path(config['logging']['directory'])
+MAX_UPLOAD_SIZE = int(config['logging'].get('max_upload_size', 10737418240))
 
 
 def setup_logging(verbose=False):
