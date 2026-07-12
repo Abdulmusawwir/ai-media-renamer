@@ -520,7 +520,7 @@ class OllamaProvider(AIProvider):
                     name = m.model
                 else:
                     name = str(m)
-                if name and _is_vision_model(name):
+                if name:
                     models.append(name)
             return models
         except Exception:

@@ -170,14 +170,15 @@ class TestOllamaProvider:
         assert "llava:13b" in models
 
     @patch("engine.ollama.list")
-    def test_available_models_vision_only(self, mock_list):
+    def test_available_models_all(self, mock_list):
         mock_list.return_value = {"models": [
             {"name": "qwen2.5vl:7b"}, {"name": "deepseek-coder-v2:16b"}, {"name": "llava:13b"}
         ]}
         models = self.prov.available_models()
         assert "qwen2.5vl:7b" in models
         assert "llava:13b" in models
-        assert "deepseek-coder-v2:16b" not in models
+        assert "deepseek-coder-v2:16b" in models
+        assert len(models) == 3
 
     @patch("engine.ollama.list")
     def test_available_models_fallback(self, mock_list):

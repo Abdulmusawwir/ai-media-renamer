@@ -468,7 +468,7 @@ with tab_upload:
     st.subheader("Upload Media Files")
 
     if st.session_state.provider_info == "ollama" and env and not env.get("model_available"):
-        st.info("\u26a0\ufe0f Qwen2.5-VL model is not installed. "
+        st.info("Qwen2.5-VL model is not installed. "
                 "Use the download button in the sidebar to install it before uploading files.",
                 icon="\u26a0\ufe0f")
         uploaded_files = None
