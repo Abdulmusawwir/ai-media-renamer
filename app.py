@@ -148,7 +148,8 @@ if st.session_state.env_check is None and not st.session_state.model_downloading
 # -----------------------------------------------------------------------------
 
 def _on_provider_switch(new_provider):
-    result = switch_ai_provider(new_provider, st.session_state.get("api_key_input", ""))
+    api_key = load_api_key(new_provider) if new_provider != "ollama" else ""
+    result = switch_ai_provider(new_provider, api_key)
     st.session_state.provider_info = new_provider
     if not result["ok"]:
         if result.get("require_download"):

@@ -104,7 +104,7 @@ def delete_api_key(provider_name):
 def setup_logging(verbose=False):
     log_dir = LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / f"renamer_{datetime.datetime.now(datetime.timezone.utc).date().isoformat()}.jsonl"
+    log_file = log_dir / f"renamer_{datetime.datetime.now().astimezone().date().isoformat()}.jsonl"
 
     logger = logging.getLogger('video_renamer')
     logger.handlers.clear()
@@ -119,7 +119,7 @@ def setup_logging(verbose=False):
 
 def log_event(logger, level, event, file_name=None, details=None):
     record = {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "timestamp": datetime.datetime.now().astimezone().isoformat(),
         "level": level,
         "event": event,
         "file": file_name,
@@ -457,7 +457,17 @@ class OllamaProvider(AIProvider):
     def available_models(self):
         try:
             tags = ollama.list()
-            return [m.get('name', '') if isinstance(m, dict) else str(m) for m in tags.get('models', [])]
+            models = []
+            for m in tags.get('models', []):
+                if isinstance(m, dict):
+                    name = m.get('name', '')
+                elif hasattr(m, 'model'):
+                    name = m.model
+                else:
+                    name = str(m)
+                if name:
+                    models.append(name)
+            return models
         except Exception:
             return config.get("model", {}).get("providers", {}).get("ollama", {}).get("models", [])
 
@@ -605,7 +615,10 @@ def get_provider(name):
     cls = PROVIDER_REGISTRY.get(name)
     if not cls:
         raise ValueError(f"Unknown provider: {name}")
-    return cls()
+    inst = cls()
+    if name != "ollama":
+        inst.api_key = load_api_key(name)
+    return inst
 
 
 def list_providers():
