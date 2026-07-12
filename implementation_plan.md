@@ -30,6 +30,16 @@
 - [x] For files with unrecognised extensions: show `st.warning()`, skip the file, log `file_skipped` with reason "unsupported_extension"
 - [x] Do not abort the entire batch — skip just the offending files
 
+### 1.5 10GB upload limit
+- [x] Create `.streamlit/config.toml` with `maxUploadSize = 10240` (removes Streamlit's 200MB default)
+- [x] `MAX_UPLOAD_SIZE` is already 10GB in `config.json` via `max_upload_size: 10737418240`
+- [x] Effective limit is now 10GB end-to-end
+
+### 1.6 Block upload when model missing
+- [x] In upload tab, check `env.get("model_available")` when provider is Ollama
+- [x] If model not installed, replace `st.file_uploader()` with info message directing to sidebar download button
+- [x] Blocks both click-to-browse and drag-and-drop entry points
+
 ---
 
 ## Layer 2: AI Analysis Pipeline
