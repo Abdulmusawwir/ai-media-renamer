@@ -2,5 +2,6 @@ logs/
 sessions/
 __pycache__/
 *.pyc
-
+build/
+dist/
 task.md

@@ -4,6 +4,10 @@
 
 Drop in your videos and images, let AI look at each one, and get back neatly renamed files with descriptive filenames, proper categories, and searchable metadata. Works with DaVinci Resolve, Premiere Pro, and Windows Explorer.
 
+## Download the EXE
+
+Grab the latest `AIMediaRenamer.exe` from the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest). No installation needed — download, double-click, and the app sets itself up. It will auto-download any missing dependencies (FFmpeg, ExifTool, Ollama) on first launch.
+
 > 🛠️ For detailed technical docs, CLI flags, config reference, and system requirements, see [README_TECH.md](README_TECH.md).
 
 ---

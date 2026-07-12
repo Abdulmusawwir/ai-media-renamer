@@ -15,6 +15,8 @@ import ollama
 import openai
 import requests
 
+VERSION = "v1.2.0"
+
 # -----------------------------------------------------------------------------
 # 0. HELPER: resolve worker count
 # -----------------------------------------------------------------------------
@@ -906,6 +908,64 @@ def stream_model_download(model_name="qwen2.5vl:7b"):
         yield {"status": "success", "message": f"Model {model_name} ready"}
     except Exception as exc:
         yield {"status": "error", "message": str(exc)}
+
+
+def check_for_updates():
+    try:
+        resp = requests.get(
+            "https://api.github.com/repos/Abdulmusawwir/ai-media-renamer/releases/latest",
+            timeout=5
+        )
+        data = resp.json()
+        latest = data.get("tag_name", "")
+        return {
+            "current": VERSION,
+            "latest": latest,
+            "update_available": latest != VERSION,
+            "download_url": data.get("html_url", ""),
+            "ok": True,
+        }
+    except Exception as exc:
+        return {"ok": False, "current": VERSION, "latest": "", "update_available": False,
+                "download_url": "", "error": str(exc)}
+
+
+def download_file(url, dest, progress_callback=None, chunk_size=8192):
+    tmp = dest.with_suffix(".part")
+    try:
+        resp = requests.get(url, stream=True, timeout=30)
+        resp.raise_for_status()
+        total = int(resp.headers.get("content-length", 0))
+        downloaded = 0
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback and total:
+                        progress_callback(downloaded, total)
+        tmp.rename(dest)
+        return True
+    except Exception:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+        raise
+
+
+def wait_for_ollama_service(timeout=120):
+    import time
+    url = "http://localhost:11434/api/tags"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            resp = requests.get(url, timeout=2)
+            if resp.status_code == 200:
+                return True
+        except requests.ConnectionError:
+            pass
+        time.sleep(2)
+    return False
 
 
 def switch_ai_provider(new_provider, api_key=None):

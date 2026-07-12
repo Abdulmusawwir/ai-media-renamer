@@ -1,5 +1,18 @@
 # Changelog
 
+## [EXE Delivery] — 2026-07-12
+- **PyInstaller build pipeline:** `build.spec` with `console=False`, `hooks/hook-ollama.py`, bundles app + deps into `AIMediaRenamer.exe`
+- **Bootstrap launcher (`bootstrap.py`):** Dark tkinter GUI with 6-step setup — checks for ExifTool, FFmpeg, Ollama, and the AI vision model; auto-downloads and installs any missing dependencies silently. Progress bars with download speed/ETA. Runs Streamlit as a hidden background process (`DETACHED_PROCESS | CREATE_NO_WINDOW`). Exits completely on launch — no tray icon, no lingering process.
+- **First-run port check:** Detects if Streamlit is already running on `localhost:8501` → opens browser without launching a second instance.
+- **Streamlit branding hidden:** CSS injection removes Streamlit hamburger menu, deploy button, footer, header, toolbar, and status widget from the app. Config set to `headless=true`, `gatherUsageStats=false`.
+- **Update checker (`engine.py`):** `check_for_updates()` hits GitHub API to compare `VERSION` against latest release tag. Used in both bootstrap (step 5 with [Download Update] button) and in-app sidebar ("🔍 Check for Updates" button).
+- **`VERSION` constant (`engine.py`):** `"v1.2.0"` — single source of truth for update comparisons.
+- **Auto-download helpers (`engine.py`):** `download_file()` streams with progress callbacks, `wait_for_ollama_service()` polls localhost:11434 until ready.
+- **Icon:** Placeholder `icon.ico` generated via PIL (blue gradient + play triangle + pencil overlay, 16-256px sizes).
+- **CI/CD:** `.github/workflows/build.yml` — builds EXE on `v*` tag push, uploads to GitHub Release.
+- **Docs:** README.md and README_TECH.md updated with "Download the EXE" / "Building from Source" sections.
+- `.opencode/plans/phase-r-multi-provider.md` deleted (Phase R complete).
+
 ## [CLI Phase 1-5] — 2026-07-12
 - **CLI: `--case-style` / `--style` flag** — Choose from `snake_case`, `camelCase`, `kebab-case`, `pascal_case`, `lowercase`. Replaces the hardcoded `snake_case`.
 - **CLI: `--max-chars` / `--max` flag** — Set max filename length (0 = no limit).

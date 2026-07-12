@@ -4,6 +4,19 @@ Automatically organize, rename, and tag video/image assets using local AI vision
 
 > 👉 For a plain-language overview, see [README.md](README.md)
 
+### Download the EXE
+
+Pre-built binaries are available on the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest). The EXE is self-contained — it checks for FFmpeg, ExifTool, and Ollama on first run and downloads any missing components automatically.
+
+### Building from Source
+
+```bash
+pip install -r requirements.txt
+pip install pyinstaller
+pyinstaller build.spec
+# Output: dist/AIMediaRenamer.exe
+```
+
 ---
 
 ## Quick Start

@@ -24,6 +24,7 @@ from engine import (
     MAX_UPLOAD_SIZE,
     NAMED_TEMPLATES,
     PROMPT_PROFILES,
+    VERSION,
     VIDEO_EXTENSIONS,
     ExifToolSession,
     _format_ai_error,
@@ -31,6 +32,7 @@ from engine import (
     apply_case_style,
     apply_naming_template,
     check_environment,
+    check_for_updates,
     check_ollama_health,
     config,
     detect_hw_accel,
@@ -57,6 +59,21 @@ from engine import (
 )
 
 st.set_page_config(page_title="AI Media Renamer", layout="wide")
+
+# Hide Streamlit chrome
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+.stAppDeployButton {display: none;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+[data-testid="stStatusWidget"] {visibility: hidden;}
+[data-testid="stToolbar"] {display: none;}
+div[data-testid="stDecoration"] {display: none;}
+[data-testid="stSidebarCollapsedControl"] {display: none;}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("AI Media Renamer")
 
 # Drag-and-drop visual feedback CSS
@@ -296,6 +313,18 @@ with st.sidebar:
         st.session_state.env_check = None
         st.session_state.ollama_health = None
         st.rerun()
+
+    st.divider()
+    if st.button("🔍 Check for Updates"):
+        with st.spinner("Checking..."):
+            info = check_for_updates()
+        if info.get("update_available"):
+            st.warning(f"Update available: {info['current']} → {info['latest']}")
+            st.markdown(f"[Download Latest Release]({info['download_url']})")
+        elif info.get("ok"):
+            st.success(f"Up to date ({info['current']})")
+        else:
+            st.caption(f"Could not check: {info.get('error', 'unknown')}")
 
     st.divider()
 
