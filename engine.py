@@ -400,7 +400,7 @@ def _parse_ai_response(raw_text):
 # -----------------------------------------------------------------------------
 
 VISION_MODEL_PREFIXES = {
-    "llava", "bakllava", "qwen2", "minicpm", "cogvlm", "moondream",
+    "llava", "bakllava", "qwen2.5vl", "qwen2-vl", "minicpm", "cogvlm", "moondream",
     "yi-vl", "gemma3", "xclip", "llama3.2-vision", "llama3.2-11b-vision",
     "llama3.2-90b-vision", "pixtral",
 }

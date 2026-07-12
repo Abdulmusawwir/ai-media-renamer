@@ -258,16 +258,19 @@ with st.sidebar:
     st.caption("AI Prompt Profile")
     profile_keys = list(PROMPT_PROFILES.keys())
     current_profile = get_active_profile()
-    p_idx = profile_keys.index(current_profile) if current_profile in profile_keys else 0
 
     def _on_profile_change():
         new_p = st.session_state.profile_selector
         set_active_profile(new_p)
-        st.session_state.profile_selector = new_p
+
+    if "profile_selector" not in st.session_state:
+        st.session_state.profile_selector = current_profile
 
     st.selectbox("Profile", profile_keys, format_func=lambda k: PROMPT_PROFILES.get(k, k),
-                 index=p_idx, key="profile_selector", on_change=_on_profile_change,
+                 key="profile_selector", on_change=_on_profile_change,
                  label_visibility="collapsed")
+
+    current_profile = st.session_state.profile_selector
 
     if current_profile == "custom":
         profile_data = config.get("prompt_profiles", {}).get("profiles", {}).get("custom", {})
@@ -427,10 +430,6 @@ if st.session_state.model_downloading:
 if st.session_state.provider_info == "ollama" and env and not env.get("ollama_running"):
     st.warning("Ollama is not running. Please start the Ollama application, "
                "then click 'Refresh Status' in the sidebar.", icon="\u26a0\ufe0f")
-
-if st.session_state.provider_info == "ollama" and env and not env.get("model_available"):
-    st.warning("Qwen2.5-VL model is not installed. "
-               "Use the download button in the sidebar to install it.", icon="\u26a0\ufe0f")
 
 if st.session_state.provider_info != "ollama":
     stored = load_api_key(st.session_state.provider_info)
