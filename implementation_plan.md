@@ -461,9 +461,66 @@
 
 ---
 
-## Layer 12: Duplicate Detection & Feedback
+## Layer 12: Desktop Bundling & Bootstrap Lifecycle (Phase S)
 
-### 12.1 Perceptual duplicate detection
+### S.1 Bootstrap 4-Stage Checklist
+- [ ] Create `check_environment()` in `engine.py` returning structured status dict:
+  - `ffmpeg`: bool — check via `_resolve_binary_path("ffmpeg")`
+  - `exiftool`: bool — check via `_resolve_binary_path("exiftool")`
+  - `ollama_running`: bool — probe `http://localhost:11434/api/tags`
+  - `model_available`: bool — parse `/api/tags` for `qwen2.5vl:7b`
+  - `cloud_configured`: bool — check config or session state for valid Gemini Flash API key
+- [ ] Create `_resolve_binary_path(name)` in `engine.py`:
+  - Check `sys._MEIPASS / "bin" / name` first (PyInstaller bundled path)
+  - Fall back to `shutil.which(name)`
+  - Return full path string or `None`
+- [ ] Create dedicated bootstrap panel in `app.py` that runs `check_environment()` at startup
+- [ ] Smart routing: if Ollama/model missing but `cloud_configured=True`, show: *"Status: Local engine missing. Routing execution to pre-configured Cloud API."* — bypass download
+- [ ] If both missing: show interactive local downloader UI (see S.2)
+- [ ] Store results in `st.session_state.env_check` to avoid re-running on every rerun
+
+### S.2 Interactive Model Download
+- [ ] Create `stream_model_download(model_name="qwen2.5vl:7b")` generator in `engine.py`:
+  - POST `http://localhost:11434/api/pull` with `stream=True`
+  - Read JSON chunk stream: yield `{"status": "progress", "completed": int, "total": int, "percentage": float}`
+  - On completion: yield `{"status": "success"}`
+  - On error: yield `{"status": "error", "message": str}`
+- [ ] In `app.py` bootstrap panel: iterate generator inside a loop, update `st.progress()` and status text:
+  - `f"Downloading Qwen2.5-VL: {completed_gb:.1f}GB / {total_gb:.1f}GB ({percentage:.0f}%)"`
+- [ ] On success: re-run `check_environment()` to confirm model is now available
+- [ ] On error: show error message with retry button
+
+### S.3 Hybrid AI Switching
+- [ ] Create `switch_ai_provider(new_provider, api_key=None)` in `engine.py`:
+  - `new_provider`: `"ollama"` | `"gemini"` | `"openai"` | `"anthropic"`
+  - **Local → Cloud**: call `ollama.generate(keep_alive=0)` to drop model weights from RAM/VRAM immediately; swap config to cloud provider
+  - **Cloud → Local**: re-trigger `check_environment()`; if Ollama/model missing, block pipeline and show `[Initialize Local AI Engine]` button (fires S.2)
+  - Update module-level constants (`MODEL_NAME`, provider function pointers)
+- [ ] In `app.py` settings panel: add provider selector (radio or dropdown) with conditional API key field (password input)
+- [ ] `[Initialize Local AI Engine]` button appears when cloud→local switch fails due to missing model
+- [ ] Log provider switches via `log_event()` with event type `"provider_switch"`
+
+### S.4 Storage Lifecycle Utility
+- [ ] Create `wipe_local_model(model_name="qwen2.5vl:7b")` in `engine.py`:
+  - Call `DELETE http://localhost:11434/api/delete` with model name payload
+  - Return `{"ok": bool, "message": str}`
+- [ ] In `app.py` Configuration view: add `[Wipe Local Model Cache]` button
+- [ ] Guard: show `st.warning("This will permanently delete the ~5GB Qwen2.5-VL model. Re-download required to use local mode.")` + confirmation checkbox
+- [ ] On success: re-run `check_environment()` to reflect removal
+- [ ] Log via `log_event()` with event type `"model_wipe"`
+
+### S.5 PyInstaller Distribution Setup
+- [ ] Create `_resolve_binary_path()` as described in S.1 (single function used by all binary calls)
+- [ ] Update `detect_hw_accel()` in `engine.py` to use `_resolve_binary_path("ffmpeg")` instead of bare `ffmpeg` command
+- [ ] Update `process_video_to_base64()` and `process_image_to_base64()` to use resolved ffmpeg/ffprobe paths
+- [ ] Update `ExifToolSession.__init__()` to use `_resolve_binary_path("exiftool")`
+- [ ] Create `hooks/hook-ollama.py` for PyInstaller to include ollama client library
+- [ ] Add `pyinstaller` to `requirements.txt`
+- [ ] Create `build.spec` with proper binary collection rules (FFmpeg, ExifTool, model data, static assets)
+
+## Layer 13: (Reserved — Phase U in execution order)
+
+### 13.1 Perceptual duplicate detection
 - [ ] Add `imagehash` to `requirements.txt` for perceptual hashing
 - [ ] In `engine.py`, create `compute_asset_hash(file_path)` function:
   - For images: compute pHash via `imagehash.phash()`
@@ -476,7 +533,7 @@
 - [ ] Add option to auto-check lower-confidence duplicates for skipping during commit
 - [ ] Log duplicate detection results: `"duplicates_found": N, "pairs": [{"a": "...", "b": "...", "confidence": 92}]`
 
-### 12.2 User rating / feedback on AI suggestions
+### 13.2 User rating / feedback on AI suggestions
 - [ ] Add a rating column to the staging table: thumbs up / thumbs down per asset
 - [ ] Store ratings in session state alongside staged_assets
 - [ ] On commit, log ratings: `"rating": "positive" | "negative"` in `file_committed` event
@@ -508,6 +565,7 @@ Phase O: 10.5, 10.6, 10.7       → Quality of life (polish)
 Phase P: 4.4, 4.5, 10.8         → Advanced Features expander + naming controls
 Phase Q: 2.5                    → Multi-profile AI prompts
 Phase R: 2.6, 2.7               → Multi-provider + model auto-detect
-Phase S: 12.1, 12.2             → Duplicate detection + feedback
+Phase S: S.1–S.5                → Desktop Bundling & Bootstrap Lifecycle Setup
 Phase T: 8.4                    → CLI subdirectories
+Phase U: 12.1, 12.2             → Duplicate detection + feedback
 ```

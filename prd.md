@@ -59,6 +59,14 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [ ] Per-asset re-analysis button + "Re-analyze All"
 - [ ] Ollama health check with status indicator in web UI
 
+### Boot Diagnostics & Environment Lifecycle
+- [ ] 4-Stage Bootstrap Checklist on app startup (Core utilities, Ollama daemon, model manifest, cloud config)
+- [ ] Interactive model download UI with real-time progress bar (`/api/pull` streaming)
+- [ ] Hybrid AI switching (Local Ollama ↔ Cloud Gemini) with graceful RAM/VRAM decoupling (`keep_alive=0`)
+- [ ] Boot panel smart routing: if Ollama/model missing but cloud key present, bypass download
+- [ ] `[Wipe Local Model Cache]` button with confirmation guard in Configuration view
+- [ ] PyInstaller bundle with embedded binary path resolution (`_resolve_binary_path()`)
+
 ### Staging & Review
 - [x] Editable `st.data_editor` with columns: select checkbox, original filename, proposed filename, category (dropdown), tags (comma-separated), summary (read-only)
 - [x] Per-asset category override via dropdown with all 40 categories + custom text entry
@@ -119,7 +127,6 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - **Face / object / scene detection** — AI analyzes the full visual context but does not detect specific faces, identify objects, or segment scenes.
 - **AI-generated content detection** — No reliable way to detect AI content from frame analysis alone.
 - **Subtitle/audio track analysis** — Frame extraction only; no audio stream processing.
-- **Desktop app / Electron bundler** — Stays as Streamlit web app + Python CLI only.
 
 ## Core Tech Stack & Assumptions
 
@@ -131,6 +138,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 | **AI Model / Providers** | Ollama (primary), OpenAI, Anthropic, LM Studio | Local + cloud vision models via abstracted provider interface. Multiple prompt profiles per use case |
 | **Metadata Engine** | ExifTool 12+ | Industry standard for cross-format metadata; `-stay_open` mode for persistent subprocess performance |
 | **Media Decoding** | FFmpeg 6+ | Hardware-accelerated frame extraction, downscaling, video storyboard grid generation |
+| **Desktop Bundler** | PyInstaller 6+ | Single-file executable distribution; `_resolve_binary_path()` for bundled FFmpeg/ExifTool |
 | **Config** | JSON (`config.json`) | Human-editable, no parser needed beyond stdlib `json` |
 | **Logging** | JSON Lines | Append-only, trivially parseable into Pandas for analytics dashboard |
 | **Charts** | Plotly + Pandas | Interactive charts, readable from JSONL logs |
