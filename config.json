@@ -134,7 +134,7 @@
     "temperature": 0.15,
     "num_ctx": 8192,
     "keep_alive": "1h",
-    "last_provider": "ollama",
+    "last_provider": "groq",
     "providers": {
       "ollama": {
         "models": [
@@ -178,8 +178,13 @@
           "llama-3.2-90b-vision-preview",
           "llama-3.2-11b-vision-preview"
         ],
-        "base_url": "https://api.groq.com/openai/v1",
-        "selected_model": "gemini-2.0-flash-001"
+        "base_url": "https://api.groq.com/openai/v1"
+      },
+      "openrouter": {
+        "models": [
+          "nvidia/nemotron-3-nano-omni"
+        ],
+        "base_url": "https://openrouter.ai/api/v1"
       }
     }
   },
@@ -209,7 +214,8 @@
       "gemini",
       "openai",
       "anthropic",
-      "groq"
+      "groq",
+      "openrouter"
     ]
   }
 }

@@ -621,6 +621,15 @@ class GroqProvider(OpenAIProvider):
         return config.get("model", {}).get("providers", {}).get("groq", {}).get("models", [])
 
 
+class OpenRouterProvider(OpenAIProvider):
+    def __init__(self):
+        base = config.get("model", {}).get("providers", {}).get("openrouter", {}).get("base_url", "https://openrouter.ai/api/v1")
+        super().__init__(base_url=base)
+
+    def available_models(self):
+        return config.get("model", {}).get("providers", {}).get("openrouter", {}).get("models", [])
+
+
 def register_provider(name, cls):
     PROVIDER_REGISTRY[name] = cls
 
@@ -651,6 +660,7 @@ register_provider("gemini", GeminiProvider)
 register_provider("openai", OpenAIProvider)
 register_provider("anthropic", AnthropicProvider)
 register_provider("groq", GroqProvider)
+register_provider("openrouter", OpenRouterProvider)
 
 
 def analyze_asset_with_ai(base64_img, verbose=False, retry=True):

@@ -184,7 +184,7 @@ with st.sidebar:
     current_prov = st.session_state.provider_info
     prov_labels = {"ollama": "Local (Ollama)", "gemini": "Cloud (Gemini)",
                    "openai": "Cloud (OpenAI)", "anthropic": "Cloud (Anthropic)",
-                   "groq": "Cloud (Groq)"}
+                   "groq": "Cloud (Groq)", "openrouter": "Cloud (OpenRouter)"}
     default_label = prov_labels.get(current_prov, "Local (Ollama)")
     default_idx = list(prov_labels.values()).index(default_label) if default_label in prov_labels.values() else 0
 

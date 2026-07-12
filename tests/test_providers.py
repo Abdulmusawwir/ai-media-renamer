@@ -9,6 +9,7 @@ from engine import (
     GroqProvider,
     OllamaProvider,
     OpenAIProvider,
+    OpenRouterProvider,
     delete_api_key,
     get_provider,
     list_providers,
@@ -22,13 +23,14 @@ from engine import (
 # ---------------------------------------------------------------------------
 
 class TestProviderRegistry:
-    def test_list_includes_all_five(self):
+    def test_list_includes_all_six(self):
         names = list_providers()
         assert "ollama" in names
         assert "gemini" in names
         assert "openai" in names
         assert "anthropic" in names
         assert "groq" in names
+        assert "openrouter" in names
 
     def test_get_ollama(self):
         prov = get_provider("ollama")
@@ -50,6 +52,11 @@ class TestProviderRegistry:
         prov = get_provider("groq")
         assert isinstance(prov, GroqProvider)
         assert prov._base_url == "https://api.groq.com/openai/v1"
+
+    def test_get_openrouter(self):
+        prov = get_provider("openrouter")
+        assert isinstance(prov, OpenRouterProvider)
+        assert "openrouter.ai" in prov._base_url
 
     def test_get_unknown_provider(self):
         with pytest.raises(ValueError, match="Unknown provider"):
@@ -395,6 +402,44 @@ class TestGroqProvider:
         result = self.prov.analyze("fake_base64")
         assert result["ok"] is True
         assert result["data"]["new_filename"] == "desert_dune"
+
+
+# ---------------------------------------------------------------------------
+# OpenRouterProvider
+# ---------------------------------------------------------------------------
+
+class TestOpenRouterProvider:
+    def setup_method(self):
+        self.prov = OpenRouterProvider()
+        self.prov.api_key = "fake-or-key"
+        self.prov.model = "nvidia/nemotron-3-nano-omni"
+
+    def test_inherits_from_openai(self):
+        assert isinstance(self.prov, OpenAIProvider)
+
+    def test_custom_base_url(self):
+        assert "openrouter.ai" in self.prov._base_url
+
+    def test_available_models(self):
+        models = self.prov.available_models()
+        assert "nvidia/nemotron-3-nano-omni" in models
+
+    @patch("engine.openai.OpenAI")
+    def test_analyze_success(self, mock_openai):
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        mock_choice = MagicMock()
+        mock_choice.message.content = (
+            '{"new_filename": "sunset_ai", "topic": "sunset", "description": "ai", '
+            '"tags": ["sunset", "ai"], "overall_visual_summary": "Sunset by AI.", '
+            '"suggested_category": "landscapes_broll"}'
+        )
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_response
+        result = self.prov.analyze("fake_base64")
+        assert result["ok"] is True
+        assert result["data"]["new_filename"] == "sunset_ai"
 
 
 # ---------------------------------------------------------------------------
