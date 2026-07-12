@@ -231,8 +231,14 @@ def detect_hw_accel():
 
 
 def is_already_processed(file_path, exiftool_session):
-    output = exiftool_session.execute(["-XMP-dc:Description", "-s3", str(file_path)])
-    return len(output.strip()) > 0
+    output = exiftool_session.execute(["-XMP-dc:Description", "-json", str(file_path)])
+    try:
+        data = json.loads(output.strip())
+        if isinstance(data, list) and len(data) > 0:
+            return "XMP-dc:Description" in data[0]
+    except (json.JSONDecodeError, TypeError, IndexError):
+        pass
+    return False
 
 
 # -----------------------------------------------------------------------------

@@ -150,7 +150,7 @@
 - [ ] Update both `app.py` commit handler and `cli.py` commit path
 
 ### 4.2 Naming template system
-- [ ] Add `naming_templates` section to `config.json`:
+- [x] Add `naming_templates` section to `config.json`:
   ```json
   "naming_templates": {
     "default": "{category}_{topic}_{description}",
@@ -173,18 +173,18 @@
 - [ ] Show a caption: "This is a preview. No files were modified."
 
 ### 4.4 Case style selection
-- [ ] Add `case_style` to `config.json` naming section: `"case_style": "snake_case"` with options: `snake_case`, `camelCase`, `kebab-case`, `pascal_case`, `lowercase`, `original`
-- [ ] In `app.py`, add the option inside a `st.expander("Advanced Features")` section before analysis
-  - `st.selectbox("Filename case style", list(CASE_STYLES.keys()))`
-- [ ] In `engine.py`, create `apply_case_style(name, style)` function that transforms the staged filename
-- [ ] Apply case style in both `app.py` commit flow and `cli.py`
+- [x] Add `case_style` to `config.json` naming section: `"case_style": "snake_case"` with options: `snake_case`, `camelCase`, `kebab-case`, `pascal_case`, `lowercase`, `original`
+- [x] In `app.py`, add the option inside a `st.expander("Advanced Features")` section before analysis
+  - Note: consolidated into staging "Naming Settings" expander instead
+- [x] In `engine.py`, create `apply_case_style(name, style)` function that transforms the staged filename
+- [x] Apply case style in both `app.py` commit flow and `cli.py`
 
 ### 4.5 Max filename character limit
-- [ ] Add `max_filename_chars` to `config.json` naming section (default: 0 = no limit)
-- [ ] In `app.py`, add the option inside the Advanced Features expander
-  - `st.number_input("Max filename characters", min_value=10, max_value=100, value=0)`
-- [ ] In `engine.py`, create `truncate_filename(name, max_chars)` that truncates smartly (preserves category prefix)
-- [ ] Apply in both app and CLI
+- [x] Add `max_filename_chars` to `config.json` naming section (default: 0 = no limit)
+- [x] In `app.py`, add the option inside the Advanced Features expander
+  - Note: consolidated into staging "Naming Settings" expander instead
+- [x] In `engine.py`, create `truncate_filename(name, max_chars)` that truncates smartly (preserves category prefix)
+- [x] Apply in both app and CLI
 
 ---
 
@@ -284,9 +284,9 @@
 ## Layer 8: CLI Improvements
 
 ### 8.1 Dry-run flag
-- [ ] Add `--dry-run` flag to `cli.py`
-- [ ] When set: simulate all commits (print what WOULD happen), write nothing to disk, open no ExifTool session
-- [ ] Print summary: "Dry-run complete. 12 assets would be renamed. 0 conflicts."
+- [x] Add `--dry-run` flag to `cli.py`
+- [x] When set: simulate all commits (print what WOULD happen), write nothing to disk, open no ExifTool session
+- [x] Print summary: "Dry-run complete. 12 assets would be renamed. 0 conflicts."
 
 ### 8.2 Non-interactive mode
 - [ ] Add `--non-interactive` / `-y` flag: skip all interactive prompts, use AI suggestions as-is
@@ -554,12 +554,12 @@ Phase A: 1.1, 9.3, 9.4          → Foundation (progress UI, gitignore, streamli
 Phase B: 2.3, 9.2, 11.1          → Health checks + unit tests (confidence layer) — DONE
 Phase C: 1.2, 1.4, 1.3          → Upload hardening — DONE
 Phase D: 3.1, 3.2, 3.3          → Staging UX improvements — DONE (sort via native click-to-sort)
-Phase E: 4.1, 4.4               → Commit flexibility (metadata-only + dry-run)
+Phase E: 4.1, 4.4               → Commit flexibility (metadata-only + dry-run) — DONE (dry-run both CLI + app; naming controls in staging)
 Phase F: 5.1, 5.2, 5.3         → Session persistence + recovery
 Phase G: 2.1, 2.2, 2.4          → Analysis flexibility (re-analyze, model select, workers) — DONE
 Phase H: 6.1, 6.2, 6.3, 6.4    → Configuration UI
 Phase I: 7.1, 7.2, 7.3, 7.4    → Analytics enhancements
-Phase J: 8.1, 8.2, 8.3         → CLI improvements
+Phase J: 8.1, 8.2, 8.3         → CLI improvements — DONE (dry-run + export/import CSV; interactive mode enhanced)
 Phase K: 9.1, 11.2, 11.3       → Docker + integration tests
 Phase L: 10.1, 10.2, 10.3, 10.4 → Quality of life (core)
 Phase M: 3.4, 3.5               → CSV import/export — DONE

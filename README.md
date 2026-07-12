@@ -16,8 +16,31 @@ streamlit run app.py
 
 ### CLI
 ```bash
-python cli.py "path/to/your/assets" [--verbose] [--profile cinematography]
+python cli.py "path/to/your/assets" [--verbose] [--profile cinematography] [--case-style snake_case] [--max-chars 60] [--force] [--export-csv staging.csv] [--dry-run]
 ```
+
+### CLI Flags
+| Flag | Description |
+|---|---|
+| `dir` | Path to directory containing media files |
+| `--verbose` / `-v` | Debug output (raw AI responses) |
+| `--profile` / `-p` | AI prompt profile: `general_balanced`, `general_broll`, `cinematography`, `motion_overlays`, `religious_landmarks`, `custom` |
+| `--template` / `-t` | Naming template preset (`default`, `short`, `editorial`) or raw pattern |
+| `--case-style` / `--style` | Case style: `snake_case` (default), `camelCase`, `kebab-case`, `pascal_case`, `lowercase` |
+| `--max-chars` / `--max` | Max filename length (0 = no limit) |
+| `--force` | Re-analyze all files, including previously processed ones |
+| `--workers` / `-w` | Parallel extraction workers (default: CPU count) |
+| `--export-csv <file>` | Export staging data to CSV after analysis |
+| `--import-csv <file>` | Skip AI analysis, load staging from CSV |
+| `--dry-run` | Preview commits without modifying files |
+
+### CLI Workflow
+1. **Extraction** — Parallel FFmpeg frame extraction with HW acceleration detection
+2. **Analysis** — Sequential per-asset AI analysis with progress indicators
+3. **Staging Review** — Summary table, category override for uncategorized assets
+4. **Execution** — Choose: `[A]pply All`, `[I]nteractive mode`, `[D]ry-run preview`, or `[C]ancel`
+
+Interactive mode per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze`, `[E]dit name`, `[B]ulk-apply category to remaining`, or type a custom name override.
 
 ## Modules
 

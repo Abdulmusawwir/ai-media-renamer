@@ -46,7 +46,11 @@ Read @task.md → Read @AGENTS.md → Read @implementation_plan.md → Read @aud
 pip install -r requirements.txt
 streamlit run app.py              # web app (primary)
 python cli.py "path/to/dir"       # CLI
-python cli.py "path/to/dir" --verbose
+python cli.py "path/to/dir" --verbose --profile cinematography --case-style kebab-case --max-chars 60
+python cli.py "path/to/dir" --dry-run                              # preview only
+python cli.py "path/to/dir" --force                                 # re-analyze all
+python cli.py "path/to/dir" --export-csv staging.csv                # export after analysis
+python cli.py "path/to/dir" --import-csv staging.csv                # skip analysis, load from CSV
 ruff check .                      # lint
 pytest                            # unit tests
 ```

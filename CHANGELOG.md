@@ -1,5 +1,18 @@
 # Changelog
 
+## [CLI Phase 1-5] — 2026-07-12
+- **CLI: `--case-style` / `--style` flag** — Choose from `snake_case`, `camelCase`, `kebab-case`, `pascal_case`, `lowercase`. Replaces the hardcoded `snake_case`.
+- **CLI: `--max-chars` / `--max` flag** — Set max filename length (0 = no limit).
+- **CLI: `--force` flag** — Re-analyze all files, skipping the `is_already_processed()` check.
+- **CLI: `--export-csv <file>`** — Export staging data to CSV after AI analysis.
+- **CLI: `--import-csv <file>`** — Skip extraction + analysis entirely; load staging from CSV.
+- **CLI: `--dry-run`** — Preview all file operations without modifying anything.
+- **CLI: Interactive mode enhanced** — Per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze` (cached frame, no re-extraction), `[E]dit name`, `[B]ulk-apply category` to remaining assets.
+- **CLI: Restructured into helper functions** — `_run_staging_phase()`, `_commit_all()`, `_interactive_commit()`, `_preview_dry_run()` extracted for clarity.
+- **`is_already_processed()` bug fix** — Changed from `-s3` raw output (catches ExifTool errors/warnings as false positives) to `-json` structured parsing. Only returns True when the specific `XMP-dc:Description` key exists in the JSON output.
+- **config.json religious_landmarks prompt expanded** — Added 30+ specific landmarks (Masjid al-Aqsa vs Dome of the Rock distinguished, Ghawth al-A'zam Baghdad, Aala Hazrat Bareilly, Imam Ali Najaf, Imam Hussein Karbala, Al-Askari Samarra, Fatima Masumeh Qom, Shah Cheragh Shiraz, Nasir al-Mulk, Hagia Sophia, Suleymaniye, Al-Azhar, Muhammad Ali, Sultan Hassan, Kairouan, Djenne, Umayyad, Al-Nuri, Sultan Qaboos, Putra Mosque, Istiqlal, and more). Added Islamic art/geometry/architecture reference section.
+- **config.json general_balanced prompt updated** — Landmark identification rule added. Grid instructions removed from all 5 non-custom profiles (single-frame extraction).
+
 ## [Layer 3 Complete] — 2026-07-12
 - **Staging search/filter:** `st.text_input` above the data editor filters by name, category, or tags with instant matching. "Showing N of M" caption.
 - **Bulk category assignment:** Select-all checkbox + dropdown apply to checked rows. Custom category entry via "custom" option with inline text input.

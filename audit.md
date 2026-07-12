@@ -3,6 +3,7 @@
 ## 1. Known Bugs
 
 - **ExifToolSession created per asset in commit loop** (`app.py:358`) — A new ExifToolSession is opened inside the `for idx, row in selected.iterrows()` loop, defeating `-stay_open` persistence. Each iteration opens and closes a subprocess, adding ~200ms overhead per asset. Fix: create one session before the loop, close after.
+- ~~**`_preview_dry_run()` calls `log_event(None, ...)`** — When selecting 'D' from the interactive menu, `logger=None` causes `AttributeError: 'NoneType' object has no attribute 'info'`.~~ _Fix: removed log_event call from `_preview_dry_run()` — printed console output is sufficient._
 - ~~**VISION_MODEL_PREFIXES included "qwen2" which matched non-vision models** (`engine.py:402`) — `qwen2` prefix matched `qwen2.5-coder` (code model), causing it to appear in the model dropdown.~~ _Fix: narrowed to `"qwen2.5vl"` and `"qwen2-vl"`._
 - ~~**HW accel detection incomplete** (`engine.py:136`) — `detect_hw_accel()` only checks `cuda` (NVIDIA) and `qsv` (Intel), missing AMD AMF and macOS VideoToolbox.~~ _Fix: added `'amf'` to the detection list. macOS VideoToolbox remains missing (secondary platform, low priority)._
 - ~~**Static images wrongly categorized as motion_graphics** — AI prompt lacked instruction to distinguish static images from video content.~~ _Fix: added CRITICAL OUTPUT RULES to `config.json` prompt instructing AI to never categorize static images as motion_graphics, glitch_vfx, timelapse, slow_motion, or cinemagraphs._
