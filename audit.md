@@ -7,6 +7,7 @@
 - ~~**HW accel detection incomplete** (`engine.py:136`) — `detect_hw_accel()` only checks `cuda` (NVIDIA) and `qsv` (Intel), missing AMD AMF and macOS VideoToolbox.~~ _Fix: added `'amf'` to the detection list. macOS VideoToolbox remains missing (secondary platform, low priority)._
 - ~~**Static images wrongly categorized as motion_graphics** — AI prompt lacked instruction to distinguish static images from video content.~~ _Fix: added CRITICAL OUTPUT RULES to `config.json` prompt instructing AI to never categorize static images as motion_graphics, glitch_vfx, timelapse, slow_motion, or cinemagraphs._
 - ~~**AI storyboard grid description bleeds into output** — AI described the grid layout instead of content.~~ _Fix: added prompt rule: "NEVER describe the storyboard grid layout... Describe ONLY the visual content."_
+- ~~**config.json prompts stored as arrays (list) instead of strings** — Temp updater script wrote 3 prompts (`general_broll`, `cinematography`, `motion_overlays`) as JSON arrays. `get_active_prompt().replace()` would crash with `AttributeError` on those profiles.~~ _Fix: joined array elements into single strings._
 
 ## 2. Orphaned Code
 

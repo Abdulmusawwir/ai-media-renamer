@@ -27,6 +27,7 @@ from engine import (
     VIDEO_EXTENSIONS,
     ExifToolSession,
     _format_ai_error,
+    _is_vision_model,
     apply_case_style,
     apply_naming_template,
     check_environment,
@@ -223,6 +224,12 @@ with st.sidebar:
         st.selectbox("Model", models, index=m_idx, key=model_key, on_change=_on_model_change)
     else:
         st.caption("No models available.")
+
+    # Warn if selected model is not vision-capable
+    if new_provider == "ollama" and models:
+        sel = st.session_state.get(model_key, "")
+        if sel and not _is_vision_model(sel):
+            st.caption("\u26a0\ufe0f This model may not support vision analysis.")
 
     # Ollama health status
     if new_provider == "ollama":
