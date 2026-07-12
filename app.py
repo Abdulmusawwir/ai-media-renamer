@@ -151,6 +151,7 @@ def _on_provider_switch(new_provider):
     api_key = load_api_key(new_provider) if new_provider != "ollama" else ""
     result = switch_ai_provider(new_provider, api_key)
     st.session_state.provider_info = new_provider
+    st.session_state.pop("provider_model", None)
     if not result["ok"]:
         if result.get("require_download"):
             st.warning("Model not found locally. Use the download button below.")
@@ -169,9 +170,10 @@ def _on_api_key_change():
 
 
 def _on_model_change():
-    prov_inst = get_provider(st.session_state.provider_info)
-    prov_inst.model = st.session_state.provider_model
-    config["model"]["name"] = st.session_state.provider_model
+    provider = st.session_state.provider_info
+    model = st.session_state.provider_model
+    config["model"]["providers"].setdefault(provider, {})["selected_model"] = model
+    config["model"]["name"] = model
     save_config()
 
 

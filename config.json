@@ -130,11 +130,11 @@
     ".gif"
   ],
   "model": {
-    "name": "llama-3.2-11b-vision-preview",
+    "name": "llama-3.2-90b-vision-preview",
     "temperature": 0.15,
     "num_ctx": 8192,
     "keep_alive": "1h",
-    "last_provider": "groq",
+    "last_provider": "gemini",
     "providers": {
       "ollama": {
         "models": [

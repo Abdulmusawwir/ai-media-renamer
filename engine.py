@@ -618,6 +618,10 @@ def get_provider(name):
     inst = cls()
     if name != "ollama":
         inst.api_key = load_api_key(name)
+    pconf = config.get("model", {}).get("providers", {}).get(name, {})
+    saved_model = pconf.get("selected_model", "")
+    if saved_model:
+        inst.model = saved_model
     return inst
 
 
@@ -826,7 +830,7 @@ def switch_ai_provider(new_provider, api_key=None):
         CURRENT_API_KEY = stored
         provider.api_key = stored
     pconf = config.get("model", {}).get("providers", {}).get(new_provider, {})
-    provider.model = (pconf.get("models") or [None])[0] or MODEL_NAME
+    provider.model = pconf.get("selected_model", "") or (pconf.get("models") or [None])[0] or MODEL_NAME
 
     CURRENT_PROVIDER_INSTANCE = provider
     config["model"]["last_provider"] = new_provider
