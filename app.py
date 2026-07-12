@@ -100,6 +100,9 @@ if "model_downloading" not in st.session_state:
 if "model_download_gen" not in st.session_state:
     st.session_state.model_download_gen = None
 
+if "analysis_errors" not in st.session_state:
+    st.session_state.analysis_errors = []
+
 if "clear_counter" not in st.session_state:
     st.session_state.clear_counter = 0
 
@@ -145,6 +148,7 @@ with st.sidebar:
             else:
                 st.warning(result["message"])
         st.session_state.env_check = None
+        st.rerun()
 
     api_key_entered = bool(st.session_state.cloud_api_key)
     if new_provider != "ollama":
@@ -252,10 +256,10 @@ if st.session_state.model_downloading:
             st.stop()
 
         if update["status"] == "progress":
-            pct = update["percentage"]
+            pct = update.get("percentage", 0) or 0
             progress_bar.progress(int(pct) / 100.0)
-            completed_gb = update["completed"] / (1024 ** 3)
-            total_gb = update["total"] / (1024 ** 3)
+            completed_gb = (update.get("completed") or 0) / (1024 ** 3)
+            total_gb = (update.get("total") or 0) / (1024 ** 3)
             status_text.text(f"Downloading: {completed_gb:.1f}GB / {total_gb:.1f}GB ({pct:.0f}%)")
             st.session_state.model_download_gen = gen
             st.rerun()
@@ -284,8 +288,9 @@ if st.session_state.provider == "ollama" and env and not env.get("ollama_running
     st.stop()
 
 if st.session_state.provider == "ollama" and env and not env.get("model_available"):
-    st.info("Qwen2.5-VL model is not installed. Use the download button in the sidebar to install it.",
-             icon="\u2139\ufe0f")
+    st.warning("Qwen2.5-VL model is not installed. "
+               "Use the download button in the sidebar to install it.", icon="\u26a0\ufe0f")
+    st.stop()
 
 if st.session_state.provider != "ollama" and not st.session_state.cloud_api_key:
     st.warning("Enter your Cloud API key in the sidebar to enable Cloud mode.", icon="\u26a0\ufe0f")
@@ -352,7 +357,7 @@ with tab_upload:
             temp_dir = st.session_state.get("temp_dir")
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
-            for key in ["uploaded_files", "base64_cache", "staged_assets", "temp_dir"]:
+            for key in ["uploaded_files", "base64_cache", "staged_assets", "temp_dir", "analysis_errors"]:
                 st.session_state.pop(key, None)
             st.session_state.analysis_done = False
             st.session_state.analysis_in_progress = False
@@ -423,7 +428,7 @@ with tab_upload:
                     })
                 else:
                     error_msg = _format_ai_error(ai_result)
-                    st.warning(f"AI analysis failed for {name}: {error_msg}")
+                    st.session_state.analysis_errors.append(f"{name}: {error_msg}")
                     log_event(logger, "ERROR", "ai_analysis_failed", file_name=name, details={"error": error_msg})
 
                 st.session_state.analysis_index = idx + 1
@@ -435,7 +440,10 @@ with tab_upload:
             if n:
                 st.success(f"Analysis complete: {n} assets staged.")
             else:
-                st.warning("No assets were staged.")
+                errs = st.session_state.analysis_errors
+                st.warning(f"No assets were staged ({len(errs)} failure(s)).")
+                for e in errs:
+                    st.caption(f"  {e}")
 
     # ------------------------------------------------------------------
     # Persistent status (visible after analysis completes)
@@ -574,6 +582,7 @@ with tab_upload:
 
                 st.session_state.base64_cache = base64_results
                 st.session_state.staged_assets = []
+                st.session_state.analysis_errors = []
                 st.session_state.analysis_index = 0
                 st.session_state.analysis_in_progress = True
                 st.session_state.analysis_done = False
@@ -755,7 +764,8 @@ with tab_analytics:
                 shutil.rmtree(temp_dir, ignore_errors=True)
             reset_keys = ["base64_cache", "staged_assets", "analysis_done", "uploaded_files",
                           "temp_dir", "output_dir", "logger", "analysis_in_progress",
-                          "analysis_index", "analysis_aborted", "clear_counter"]
+                          "analysis_index", "analysis_aborted", "clear_counter",
+                          "analysis_errors"]
             for key in reset_keys:
                 st.session_state.pop(key, None)
             for h in logging.getLogger('video_renamer').handlers[:]:
