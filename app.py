@@ -401,12 +401,18 @@ tab_upload, tab_analytics = st.tabs(
 with tab_upload:
     st.subheader("Upload Media Files")
 
-    uploaded_files = st.file_uploader(
-        "Choose video or image files",
-        type=["mp4", "mov", "avi", "mkv", "webm", "jpg", "jpeg", "png", "webp", "gif"],
-        accept_multiple_files=True,
-        key=f"fu_{st.session_state.clear_counter}",
-    )
+    if st.session_state.provider_info == "ollama" and env and not env.get("model_available"):
+        st.info("\u26a0\ufe0f Qwen2.5-VL model is not installed. "
+                "Use the download button in the sidebar to install it before uploading files.",
+                icon="\u26a0\ufe0f")
+        uploaded_files = None
+    else:
+        uploaded_files = st.file_uploader(
+            "Choose video or image files",
+            type=["mp4", "mov", "avi", "mkv", "webm", "jpg", "jpeg", "png", "webp", "gif"],
+            accept_multiple_files=True,
+            key=f"fu_{st.session_state.clear_counter}",
+        )
 
     if uploaded_files:
         existing = st.session_state.get("uploaded_files", {})
