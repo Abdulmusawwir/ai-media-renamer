@@ -148,6 +148,13 @@ if st.session_state.env_check is None and not st.session_state.model_downloading
 # -----------------------------------------------------------------------------
 
 def _on_provider_switch(new_provider):
+    if new_provider != "ollama":
+        st.warning("Cloud providers are untested (no API keys available for testing). "
+                   "Select Local (Ollama) to proceed.")
+        st.session_state.provider_info = "ollama"
+        st.session_state.env_check = None
+        st.rerun()
+        return
     api_key = load_api_key(new_provider) if new_provider != "ollama" else ""
     result = switch_ai_provider(new_provider, api_key)
     st.session_state.provider_info = new_provider
@@ -286,24 +293,11 @@ with st.sidebar:
                         st.error(result["message"])
 
 # -----------------------------------------------------------------------------
-# Footer (render early so it appears even when st.stop() blocks below)
-# -----------------------------------------------------------------------------
-
-st.markdown(
-    "<hr style='margin-top: 3rem; margin-bottom: 0.5rem; border-color: #334155;'>"
-    "<p style='text-align: center; color: #94a3b8; font-size: 0.8rem;'>"
-    "Made with love from Tanzania by "
-    "<a href='https://github.com/Abdulmusawwir/ai-media-renamer' "
-    "   style='color: #60a5fa; text-decoration: none;'>Abdul Musawwir</a>"
-    "</p>",
-    unsafe_allow_html=True,
-)
-
-# -----------------------------------------------------------------------------
 # Bootstrap diagnostics panel (blocks upload if critical dependency missing)
 # -----------------------------------------------------------------------------
 
 env = st.session_state.env_check
+
 if env and env.get("errors"):
     critical = False
     for err in env["errors"]:
@@ -335,7 +329,6 @@ if st.session_state.model_downloading:
             st.session_state.model_downloading = False
             st.session_state.model_download_gen = None
             st.rerun()
-            st.stop()
 
         if update["status"] == "progress":
             pct = update.get("percentage", 0) or 0
@@ -985,5 +978,19 @@ with tab_analytics:
         st.dataframe(timeline_df, width='stretch', hide_index=True)
     else:
         st.info("No matching entries.")
+
+# -----------------------------------------------------------------------------
+# Footer — always renders at the bottom
+# -----------------------------------------------------------------------------
+
+st.markdown(
+    "<hr style='margin-top: 3rem; margin-bottom: 0.5rem; border-color: #334155;'>"
+    "<p style='text-align: center; color: #94a3b8; font-size: 0.8rem;'>"
+    "Made with love from Tanzania by "
+    "<a href='https://github.com/Abdulmusawwir/ai-media-renamer' "
+    "   style='color: #60a5fa; text-decoration: none;'>Abdul Musawwir</a>"
+    "</p>",
+    unsafe_allow_html=True,
+)
 
 

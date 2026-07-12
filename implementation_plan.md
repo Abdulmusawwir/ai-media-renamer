@@ -81,16 +81,18 @@
   - Tell AI to produce filename descriptions that sound human-written, not AI-generated
 
 ### 2.6 Multi-provider abstraction
-- [ ] Create provider interface in `engine.py` with abstract `analyze()` method
-- [ ] Implement `OllamaProvider` (existing code, refactored)
-- [ ] Implement `OpenAIProvider` using `openai` Python client (vision API)
-- [ ] Implement `AnthropicProvider` using `anthropic` Python client
-- [ ] Implement `LMStudioProvider` (uses same OpenAI-compatible endpoint as Ollama, different base URL)
-- [ ] Add `provider` key to `config.json` model section: `"provider": "ollama" | "openai" | "anthropic" | "lm-studio"`
-- [ ] Add `api_key` configuration per provider in `config.json` (stored locally only)
-- [ ] In `app.py`, add `st.selectbox("AI Provider", ["ollama", "openai", "anthropic", "lm-studio"])` near model selector
-- [ ] Show API key field if OpenAI or Anthropic is selected (password input, stored in session state only)
-- [ ] Add `openai` and `anthropic` to `requirements.txt`
+- [x] Create provider interface in `engine.py` with abstract `analyze()` method
+- [x] Implement `OllamaProvider` (existing code, refactored)
+- [x] Implement `OpenAIProvider` using `openai` Python client (vision API)
+- [x] Implement `AnthropicProvider` using `anthropic` Python client
+- [x] Implement `GroqProvider` (OpenAI-compatible, custom base URL)
+- [x] Implement `OpenRouterProvider` (OpenAI-compatible, custom base URL)
+- [x] Add `provider` key to `config.json` model section
+- [x] Add keyring-based API key storage (system keychain, never plaintext on disk)
+- [x] Add provider selector UI in `app.py` sidebar
+- [x] Show API key field for cloud providers (password input, keyring-backed)
+- [x] Add `openai`, `anthropic`, and `keyring` to `requirements.txt`
+- [!] **Cloud providers are untested** — API keys unavailable for testing. Disabled in UI via `_on_provider_switch()`. Only Ollama is selectable.
 
 ### 2.7 Model auto-detection
 - [ ] On provider change or startup, call `ollama.list()` to auto-populate model dropdown

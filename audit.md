@@ -14,3 +14,4 @@
 ## 3. PRD Divergences
 
 - **Undo/rollback (impl. plan 4.2)** — Listed as out-of-scope in `prd.md` ("No rename history or undo commit feature"). Files are copied to `~/Desktop/RenamedMedia` (originals preserved), so undo is unnecessary. _Resolution: section 4.2 removed from implementation_plan.md._
+- **Cloud providers untested** — Gemini, OpenAI, Anthropic, Groq, and OpenRouter are implemented but disabled in the UI (`app.py:_on_provider_switch` rejects non-ollama selections). No API keys available for testing. _Resolution: disabled until API keys and test credentials are provided._
