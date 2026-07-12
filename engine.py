@@ -16,6 +16,15 @@ import openai
 import requests
 
 # -----------------------------------------------------------------------------
+# 0. HELPER: resolve worker count
+# -----------------------------------------------------------------------------
+
+def _resolve_workers(cfg_value):
+    if isinstance(cfg_value, int) and cfg_value > 0:
+        return cfg_value
+    return os.cpu_count() or 4
+
+# -----------------------------------------------------------------------------
 # 1. CONFIGURATION & LOGGING
 # -----------------------------------------------------------------------------
 
@@ -43,10 +52,41 @@ config = load_config()
 ALLOWED_CATEGORIES = config['allowed_categories']
 
 CATEGORY_LIST_STR = "\n".join(f'   - "{c}"' for c in ALLOWED_CATEGORIES)
-AI_PROMPT = config['ai_prompt'].replace(
-    "the allowed categories list",
-    f"this list:\n{CATEGORY_LIST_STR}"
-)
+
+
+def get_active_profile():
+    return config.get('prompt_profiles', {}).get('active', 'general_balanced')
+
+
+def get_active_categories():
+    profile_name = get_active_profile()
+    profile = config.get('prompt_profiles', {}).get('profiles', {}).get(profile_name, {})
+    cats = profile.get('allowed_categories', [])
+    return tuple(cats) if cats else ALLOWED_CATEGORIES
+
+
+def get_active_prompt():
+    profile_name = get_active_profile()
+    profile = config.get('prompt_profiles', {}).get('profiles', {}).get(profile_name, {})
+    raw = profile.get('prompt', '')
+    cats = get_active_categories()
+    cat_str = "\n".join(f'   - "{c}"' for c in cats)
+    return raw.replace("the allowed categories list", f"this list:\n{cat_str}")
+
+
+def set_active_profile(name):
+    profiles = config.get('prompt_profiles', {}).get('profiles', {})
+    if name in profiles:
+        config['prompt_profiles']['active'] = name
+        save_config()
+
+
+def get_profile_labels():
+    profiles = config.get('prompt_profiles', {}).get('profiles', {})
+    return {k: v.get('label', k) for k, v in profiles.items()}
+
+
+PROMPT_PROFILES = get_profile_labels()
 
 VIDEO_EXTENSIONS = config['video_extensions']
 IMAGE_EXTENSIONS = config['image_extensions']
@@ -57,6 +97,7 @@ MODEL_KEEP_ALIVE = config['model']['keep_alive']
 IMAGE_PREVIEW_MAX_EDGE = config['preview']['image_max_edge']
 VIDEO_GRID_TILE = config['preview']['video_grid_tile']
 VIDEO_GRID_SCALE = config['preview']['video_grid_scale']
+EXTRACTION_WORKERS = _resolve_workers(config['preview'].get('extraction_workers', 0))
 
 DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'snake_case')
 DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
@@ -435,7 +476,7 @@ class OllamaProvider(AIProvider):
             try:
                 response = ollama.generate(
                     model=self._model,
-                    prompt=AI_PROMPT,
+                    prompt=get_active_prompt(),
                     images=[base64_img],
                     keep_alive=MODEL_KEEP_ALIVE,
                     options={"temperature": MODEL_TEMPERATURE, "num_ctx": MODEL_NUM_CTX}
@@ -499,7 +540,7 @@ class GeminiProvider(AIProvider):
             payload = {
                 "contents": [{
                     "parts": [
-                        {"text": AI_PROMPT},
+                        {"text": get_active_prompt()},
                         {"inline_data": {"mime_type": "image/jpeg", "data": base64_img}}
                     ]
                 }]
@@ -557,7 +598,7 @@ class OpenAIProvider(AIProvider):
                 messages=[{
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": AI_PROMPT},
+                        {"type": "text", "text": get_active_prompt()},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
                     ]
                 }],
@@ -593,7 +634,7 @@ class AnthropicProvider(AIProvider):
                 messages=[{
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": AI_PROMPT},
+                        {"type": "text", "text": get_active_prompt()},
                         {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64_img}}
                     ]
                 }]
@@ -767,6 +808,30 @@ def _resolve_binary_path(name):
             return candidate
     resolved = shutil.which(name)
     return resolved
+
+
+def check_ollama_health():
+    try:
+        tags = ollama.list()
+        models = tags.get('models', [])
+        model_list = []
+        for m in models:
+            name = m.get('name', '') if isinstance(m, dict) else str(m)
+            if _is_vision_model(name):
+                model_list.append(name)
+        return {
+            "connected": True,
+            "models": model_list,
+            "model_count": len(models),
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "connected": False,
+            "models": [],
+            "model_count": 0,
+            "error": str(exc),
+        }
 
 
 def check_environment():

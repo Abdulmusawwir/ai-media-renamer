@@ -2,7 +2,6 @@ import base64
 import glob
 import json
 import logging
-import os
 import shutil
 import tempfile
 from collections import Counter
@@ -19,19 +18,23 @@ from engine import (
     DEFAULT_CASE_STYLE,
     DEFAULT_MAX_FILENAME_CHARS,
     DEFAULT_TEMPLATE_STRING,
+    EXTRACTION_WORKERS,
     IMAGE_EXTENSIONS,
     LOG_DIR,
     MAX_UPLOAD_SIZE,
     NAMED_TEMPLATES,
+    PROMPT_PROFILES,
     VIDEO_EXTENSIONS,
     ExifToolSession,
     _format_ai_error,
     apply_case_style,
     apply_naming_template,
     check_environment,
+    check_ollama_health,
     config,
     detect_hw_accel,
     execute_commit,
+    get_active_profile,
     get_provider,
     list_providers,
     load_api_key,
@@ -40,6 +43,7 @@ from engine import (
     sanitize_name,
     save_api_key,
     save_config,
+    set_active_profile,
     setup_logging,
     stream_model_download,
     switch_ai_provider,
@@ -153,6 +157,7 @@ def _on_provider_switch(new_provider):
                    "Select Local (Ollama) to proceed.")
         st.session_state.provider_info = "ollama"
         st.session_state.env_check = None
+        st.session_state.ollama_health = None
         st.rerun()
         return
     api_key = load_api_key(new_provider) if new_provider != "ollama" else ""
@@ -164,6 +169,7 @@ def _on_provider_switch(new_provider):
         else:
             st.warning(result["message"])
     st.session_state.env_check = None
+    st.session_state.ollama_health = None
     st.rerun()
 
 
@@ -218,6 +224,23 @@ with st.sidebar:
     else:
         st.caption("No models available.")
 
+    # Ollama health status
+    if new_provider == "ollama":
+        health = st.session_state.get("ollama_health")
+        if health is None:
+            health = check_ollama_health()
+            st.session_state.ollama_health = health
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            if health["connected"]:
+                st.markdown(f"\u2705 **Ollama** — {health['model_count']} models")
+            else:
+                st.markdown("\u274c **Ollama** — disconnected")
+        with col2:
+            if st.button("\u21bb", help="Refresh Ollama status"):
+                st.session_state.ollama_health = None
+                st.rerun()
+
     # API key (cloud providers only)
     if new_provider != "ollama":
         api_key = load_api_key(new_provider)
@@ -229,6 +252,49 @@ with st.sidebar:
         )
         if api_key:
             st.caption("\u2713 Key saved in system keychain")
+
+    # Prompt profile selector
+    st.divider()
+    st.caption("AI Prompt Profile")
+    profile_keys = list(PROMPT_PROFILES.keys())
+    current_profile = get_active_profile()
+    p_idx = profile_keys.index(current_profile) if current_profile in profile_keys else 0
+
+    def _on_profile_change():
+        new_p = st.session_state.profile_selector
+        set_active_profile(new_p)
+        st.session_state.profile_selector = new_p
+
+    st.selectbox("Profile", profile_keys, format_func=lambda k: PROMPT_PROFILES.get(k, k),
+                 index=p_idx, key="profile_selector", on_change=_on_profile_change,
+                 label_visibility="collapsed")
+
+    if current_profile == "custom":
+        profile_data = config.get("prompt_profiles", {}).get("profiles", {}).get("custom", {})
+        current_custom = profile_data.get("prompt", "")
+
+        def _on_custom_prompt_change():
+            text = st.session_state.custom_prompt_area
+            if "prompt_profiles" not in config:
+                config["prompt_profiles"] = {"active": "custom", "profiles": {}}
+            if "custom" not in config["prompt_profiles"].setdefault("profiles", {}):
+                cfg_custom = {"label": "Custom Prompt", "prompt": "", "allowed_categories": []}
+                config["prompt_profiles"]["profiles"]["custom"] = cfg_custom
+            config["prompt_profiles"]["profiles"]["custom"]["prompt"] = text
+            save_config()
+
+        st.text_area("Write your own prompt", value=current_custom,
+                     key="custom_prompt_area", on_change=_on_custom_prompt_change,
+                     height=200,
+                     help="This prompt is auto-saved to config.json. Use the export button below to download it.")
+
+        st.download_button(
+            "Export Custom Prompt",
+            data=current_custom,
+            file_name="custom_ai_prompt.txt",
+            mime="text/plain",
+            help="Download your custom prompt as a .txt file.",
+        )
 
     st.divider()
     st.caption("Environment Status")
@@ -260,6 +326,7 @@ with st.sidebar:
 
     if st.button("Refresh Status"):
         st.session_state.env_check = None
+        st.session_state.ollama_health = None
         st.rerun()
 
     st.divider()
@@ -568,6 +635,23 @@ with tab_upload:
             st.success(f"✅ Analysis complete: {n} asset{'s' if n != 1 else ''} ready for review below.")
 
     # ------------------------------------------------------------------
+    # Re-analysis trigger (check before entering analysis loop)
+    # ------------------------------------------------------------------
+    re_target = st.session_state.get("reanalyze_target")
+    if re_target is not None:
+        st.session_state.reanalyze_target = None
+        if re_target == -1:
+            st.session_state.staged_assets = []
+            st.session_state.analysis_errors = []
+            st.session_state.analysis_index = 0
+        else:
+            st.session_state.staged_assets = st.session_state.staged_assets[:re_target]
+            st.session_state.analysis_index = re_target
+        st.session_state.analysis_in_progress = True
+        st.session_state.analysis_done = False
+        st.rerun()
+
+    # ------------------------------------------------------------------
     # Advanced Features (collapsed by default)
     # ------------------------------------------------------------------
     if not st.session_state.analysis_in_progress and not st.session_state.analysis_done \
@@ -670,7 +754,7 @@ with tab_upload:
                 base64_results = {}
 
                 files_list = list(st.session_state.uploaded_files.values())
-                with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+                with ThreadPoolExecutor(max_workers=EXTRACTION_WORKERS) as executor:
                     future_map = {
                         executor.submit(process_asset_to_base64, fp, hw_accel): fp
                         for fp in files_list
@@ -714,6 +798,10 @@ with tab_upload:
     if st.session_state.analysis_done and st.session_state.staged_assets:
         st.divider()
         st.subheader("Staging Matrix \u2014 Review & Edit Before Committing")
+
+        col_ra_all, _ = st.columns([1, 6])
+        with col_ra_all:
+            st.button("Re-analyze All", on_click=lambda: setattr(st.session_state, "reanalyze_target", -1))
 
         with st.expander("Naming Settings (edits update previews below)", expanded=True):
             col_tmpl, col_case, col_chars = st.columns(3)
@@ -779,6 +867,13 @@ with tab_upload:
             width='stretch',
             num_rows="fixed",
         )
+
+        st.caption("Re-analyze individual assets:")
+        ra_cols = st.columns(len(staged))
+        for i, asset in enumerate(staged):
+            with ra_cols[i]:
+                st.button(f"\u21bb #{i+1}", key=f"ra_{i}",
+                          on_click=lambda idx=i: setattr(st.session_state, "reanalyze_target", idx))
 
         with st.expander("Show preview thumbnails"):
             cols = st.columns(min(len(staged), 5))

@@ -45,50 +45,45 @@
 ## Layer 2: AI Analysis Pipeline
 
 ### 2.1 Per-asset re-analysis
-- [ ] In `app.py` staging matrix, add a "Re-analyze" button per row (new column in `st.data_editor` or a separate button per asset)
-  - When clicked: clear that asset's AI result from `staged_assets` and `base64_cache`, set `analysis_index` to point at this asset, set `analysis_in_progress = True`, call `st.rerun()`
-  - The rerun loop re-runs AI only for this one asset, appends updated result, and continues
-- [ ] Add a "Re-analyze All" button above the staging matrix
+- [x] Add "Re-analyze All" button above the staging matrix
   - Clears all `staged_assets`, resets `analysis_index` to 0, re-enters the Phase 2 rerun loop
+- [x] Add per-asset "Re-analyze" buttons in a column row below the data editor
+  - Each button triggers re-analysis from that index onward, truncating subsequent staged assets
+  - Reuses the existing per-asset rerun loop — no separate analysis path needed
 
 ### 2.2 Model selection dropdown
-- [ ] Add `available_models` key to `config.json` (default: `["qwen2.5vl:7b", "qwen2.5vl:32b", "llava:13b"]`)
-- [ ] In `app.py`, before the "Run AI Analysis" button, show a `st.selectbox()` for model selection
-  - Populate from `st.session_state.available_models` or from config
-  - On change: update `st.session_state.selected_model` (does not affect already-analyzed assets)
-- [ ] Pass `st.session_state.selected_model` to `analyze_asset_with_ai()` via a new parameter (or update `engine.py` to accept a model override)
-- [ ] Add `"model": st.session_state.selected_model` to log events for traceability
+- [x] **Already implemented** — `st.selectbox("Model", ...)` in sidebar at `app.py:217`
+  - Populated by `provider.available_models()` which calls `ollama.list()` for Ollama
+  - On change: `_on_model_change()` updates config
+  - Model is passed to provider's `analyze()` via `self._model`
 
 ### 2.3 Ollama health check
-- [ ] Create `check_ollama_health()` in `engine.py`:
-  - Call `ollama.list()` wrapped in try/except
-  - Return `(connected: bool, models: list[str], error: str | None)`
-- [ ] In `app.py`, show a status indicator near the model selector:
-  - Green checkmark + model count when connected
-  - Red X + error message when unreachable
-  - Call `check_ollama_health()` at app startup and cache in `st.session_state.ollama_health`
-- [ ] Add a manual "Refresh Connection" button beside the indicator
+- [x] Create `check_ollama_health()` in `engine.py`:
+  - Calls `ollama.list()` wrapped in try/except
+  - Returns `{connected: bool, models: list[str], model_count: int, error: str | None}`
+- [x] In `app.py` sidebar, show status indicator near the model selector:
+  - Green checkmark "Ollama — N models" when connected
+  - Red X "Ollama — disconnected" when unreachable
+- [x] Add refresh button beside the indicator
+- [x] Cache result in `st.session_state.ollama_health`, invalidated on Refresh Status or provider switch
 
 ### 2.4 Configurable extraction concurrency
-- [ ] Add `extraction_workers` to `config.json` preview section (default: `os.cpu_count()`)
-- [ ] Use this value instead of bare `os.cpu_count()` in the `ThreadPoolExecutor` at `app.py` line 278
-- [ ] CLI: add `--workers N` flag to override `extraction_workers` from config
+- [x] Add `extraction_workers` to `config.json` preview section (default: 0 = `os.cpu_count()`)
+- [x] Use `EXTRACTION_WORKERS` instead of bare `os.cpu_count()` in `ThreadPoolExecutor` at `app.py`
+- [x] CLI: add `--workers N` flag to override `extraction_workers` from config
+- [x] Add `_resolve_workers()` helper in `engine.py`
 
 ### 2.5 Multiple AI prompt profiles
-- [ ] Add `prompt_profiles` section to `config.json` with `religious`, `general`, `videography`, and `custom` profiles
-  - Each profile has its own `prompt` field and `allowed_categories` list
-  - `custom` profile has an empty prompt string for user-defined input
-- [ ] In `app.py`, add a `st.selectbox("Prompt Profile", [...])` before the "Run AI Analysis" button
-  - On change: update `st.session_state.prompt_profile`, pass to analysis
-- [ ] In `engine.py`, update `analyze_asset_with_ai()` to accept a profile name and use its prompt + categories
-- [ ] Add a `st.text_area("Custom Prompt")` that appears only when "Custom" profile is selected
-- [ ] Log the selected prompt profile with every `ai_analysis_success`/`ai_analysis_failed` event
-- [ ] Include diverse religious landmarks in the `religious` prompt: Baghdad Shareef, Naalain Paak, Aqsa, Islamic geometric patterns, carpets, icons (not "sets")
-- [ ] Create a clean `general` prompt that produces human-readable filenames without cinematography jargon
-- [ ] Add prompt instruction fixes:
-  - Tell AI to never describe the storyboard grid layout itself
-  - Tell AI that static images should never be categorized as motion_graphics, glitch_vfx, timelapse, slow_motion, or cinemagraphs
-  - Tell AI to produce filename descriptions that sound human-written, not AI-generated
+- [x] Restructure `config.json`: replace `ai_prompt` with `prompt_profiles` section
+  - Migrate old `ai_prompt` → `general_balanced.profile` (new default)
+  - 6 profiles: `general_balanced`, `general_broll`, `cinematography`, `motion_overlays`, `religious_landmarks`, `custom`
+  - Each profile has `label`, `prompt`, and `allowed_categories` (empty = use global fallback)
+- [x] Add `get_active_prompt()`, `get_active_categories()`, `set_active_profile()`, `get_profile_labels()` in `engine.py`
+- [x] All provider `analyze()` methods use `get_active_prompt()` dynamically (not static `AI_PROMPT`)
+- [x] In `app.py` sidebar, add profile dropdown with label display
+- [x] Custom profile: show `st.text_area()` for user prompt, auto-save to `config.json` via `save_config()`
+- [x] Export button: `st.download_button()` downloads custom prompt as `.txt`
+- [x] CLI: add `--profile` flag
 
 ### 2.6 Multi-provider abstraction
 - [x] Create provider interface in `engine.py` with abstract `analyze()` method

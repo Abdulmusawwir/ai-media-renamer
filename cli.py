@@ -6,8 +6,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from engine import (
+    EXTRACTION_WORKERS,
     IMAGE_EXTENSIONS,
     NAMED_TEMPLATES,
+    PROMPT_PROFILES,
     VIDEO_EXTENSIONS,
     ExifToolSession,
     _format_ai_error,
@@ -21,6 +23,7 @@ from engine import (
     process_image_to_base64,
     process_video_to_base64,
     sanitize_name,
+    set_active_profile,
     setup_logging,
     truncate_filename,
     validate_category,
@@ -60,7 +63,10 @@ def _close_all_worker_sessions():
 # MAIN CLI PIPELINE
 # -----------------------------------------------------------------------------
 
-def process_library(directory_path, verbose=False, template_string=None):
+def process_library(directory_path, verbose=False, template_string=None, workers=None, profile=None):
+    extraction_workers = workers if workers is not None else EXTRACTION_WORKERS
+    if profile:
+        set_active_profile(profile)
     target_dir = Path(directory_path)
     if not target_dir.exists():
         print(f"Error: Directory '{directory_path}' does not exist.")
@@ -93,7 +99,7 @@ def process_library(directory_path, verbose=False, template_string=None):
     pending_assets = []
     print("Phase 1: Extracting preview frames...")
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+    with ThreadPoolExecutor(max_workers=extraction_workers) as executor:
         future_to_file = {}
         for file in asset_files:
             if not is_already_processed(file, exif_session):
@@ -310,6 +316,14 @@ if __name__ == "__main__":
     parser.add_argument("dir", type=str, help="Path to target directory folder.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug output.")
     parser.add_argument(
+        "--workers", "-w", type=int, default=None,
+        help="Number of parallel extraction workers (default: cpu count or config value)."
+    )
+    parser.add_argument(
+        "--profile", "-p", type=str, default=None,
+        help=f"AI prompt profile: {', '.join(PROMPT_PROFILES.keys())} (default: config value)."
+    )
+    parser.add_argument(
         "--template", "-t", type=str, default=None,
         help='Naming template preset or raw pattern. '
              'Presets: default, short, editorial. '
@@ -321,4 +335,4 @@ if __name__ == "__main__":
     if tmpl and tmpl in NAMED_TEMPLATES:
         tmpl = NAMED_TEMPLATES[tmpl]
 
-    process_library(args.dir, verbose=args.verbose, template_string=tmpl)
+    process_library(args.dir, verbose=args.verbose, template_string=tmpl, workers=args.workers, profile=args.profile)
