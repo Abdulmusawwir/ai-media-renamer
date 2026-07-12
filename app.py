@@ -230,8 +230,8 @@ with st.sidebar:
 
     # Warn if selected model is not vision-capable
     if new_provider == "ollama" and models:
-        sel = st.session_state.get(model_key, "")
-        if sel and not _is_vision_model(sel):
+        cur_val = st.session_state.get(model_key, p.model or models[0])
+        if cur_val and not _is_vision_model(cur_val):
             st.caption("\u26a0\ufe0f This model may not support vision analysis.")
 
     # Ollama health status
@@ -564,6 +564,8 @@ with tab_upload:
         total = len(items)
         idx = st.session_state.analysis_index
 
+        st.success(f"\u2705 Step 1 complete: {len(st.session_state.get('base64_cache', {}))} files extracted")
+
         if total > 0:
             st.progress(idx / total, text=f"Analyzed {idx}/{total} assets")
 
@@ -644,23 +646,6 @@ with tab_upload:
             st.success(f"✅ Analysis complete: {n} asset{'s' if n != 1 else ''} ready for review below.")
 
     # ------------------------------------------------------------------
-    # Re-analysis trigger (check before entering analysis loop)
-    # ------------------------------------------------------------------
-    re_target = st.session_state.get("reanalyze_target")
-    if re_target is not None:
-        st.session_state.reanalyze_target = None
-        if re_target == -1:
-            st.session_state.staged_assets = []
-            st.session_state.analysis_errors = []
-            st.session_state.analysis_index = 0
-        else:
-            st.session_state.staged_assets = st.session_state.staged_assets[:re_target]
-            st.session_state.analysis_index = re_target
-        st.session_state.analysis_in_progress = True
-        st.session_state.analysis_done = False
-        st.rerun()
-
-    # ------------------------------------------------------------------
     # Analysis trigger: button + Phase 1 (only when idle)
     # ------------------------------------------------------------------
     if not st.session_state.analysis_in_progress and not st.session_state.analysis_done \
@@ -731,9 +716,7 @@ with tab_upload:
         st.divider()
         st.subheader("Staging Matrix \u2014 Review & Edit Before Committing")
 
-        col_ra_all, col_filter = st.columns([1, 4])
-        with col_ra_all:
-            st.button("Re-analyze All", on_click=lambda: setattr(st.session_state, "reanalyze_target", -1))
+        col_filter, _ = st.columns([3, 2])
         with col_filter:
             st.text_input("\U0001f50d", placeholder="Filter assets...", key="staging_filter",
                           label_visibility="collapsed", on_change=lambda: None)
@@ -793,8 +776,8 @@ with tab_upload:
                 "select": select_all,
                 "original_name": asset["original_name"],
                 "proposed_filename": rendered,
-                "category": asset["category"] if asset["category"] != "uncategorized"
-            else asset.get("suggested_category", "uncategorized"),
+                "category": asset["category"] if asset["category"] and asset["category"] != "uncategorized"
+            else (asset.get("suggested_category") or "uncategorized"),
                 "tags": ", ".join(asset["tags"]),
                 "summary": asset["summary"],
             })
@@ -822,35 +805,56 @@ with tab_upload:
 
         # Bulk category assignment
         sel_count = int(edited_df["select"].sum())
-        col_bulk_cat, col_bulk_btn, col_bulk_info = st.columns([2, 1, 2])
+        col_bulk_label, col_bulk_cat, col_bulk_btn = st.columns([1, 2, 1])
+        with col_bulk_label:
+            st.caption("Apply category:")
         with col_bulk_cat:
-            bulk_category = st.selectbox("Apply category to selected",
-                                         [""] + sorted(CATEGORY_LIST),
-                                         key="bulk_category_sel")
+            bulk_category = st.selectbox("Category", [""] + sorted(CATEGORY_LIST),
+                                         key="bulk_category_sel", label_visibility="collapsed")
         with col_bulk_btn:
             disabled = sel_count == 0 or not bulk_category
-            if st.button("Apply", key="bulk_apply_btn", disabled=disabled) and bulk_category:
-                selected = edited_df[edited_df["select"]]
-                for idx in selected.index:
-                    staged[idx]["category"] = bulk_category
-                st.success(f"Updated {len(selected)} assets to '{bulk_category}'")
+            st.button("Apply", key="bulk_apply_btn", disabled=disabled)
+
+        if st.session_state.get("bulk_apply_btn") and bulk_category:
+            selected = edited_df[edited_df["select"]]
+            for idx in selected.index:
+                staged[idx]["category"] = bulk_category
+            st.success(f"Updated {len(selected)} assets to '{bulk_category}'")
+            st.rerun()
+
+        if sel_count == 0:
+            st.caption("Select assets using the checkbox column above.")
+
+        # Re-analyze button for selected rows
+        col_ra, _ = st.columns([1, 4])
+        with col_ra:
+            ra_disabled = sel_count == 0
+            if st.button("Re-analyze Selected", key="reanalyze_btn", disabled=ra_disabled):
+                selected_names = set()
+                for idx in edited_df[edited_df["select"]].index:
+                    selected_names.add(staged[idx]["original_name"])
+
+                st.session_state.staged_assets = [
+                    a for a in st.session_state.staged_assets
+                    if a["original_name"] not in selected_names
+                ]
+                st.session_state.base64_cache = {
+                    k: v for k, v in st.session_state.base64_cache.items()
+                    if k in selected_names
+                }
+                st.session_state.analysis_index = 0
+                st.session_state.analysis_in_progress = True
+                st.session_state.analysis_done = False
+                st.session_state.analysis_errors = []
                 st.rerun()
-        with col_bulk_info:
-            if sel_count == 0:
-                st.caption("Select assets using the checkbox column above.")
 
         # Export and import staging
-        col_csv, col_json, col_spacer = st.columns([1, 1, 4])
+        col_csv, col_spacer = st.columns([1, 5])
         with col_csv:
             csv_data = export_staging_csv(st.session_state.staged_assets)
-            st.download_button("\U0001f4e5 Export CSV", data=csv_data,
+            st.download_button("Export Staged Changes", data=csv_data,
                                file_name="staging_export.csv", mime="text/csv",
                                key="export_csv_btn")
-        with col_json:
-            json_data = export_staging_json(st.session_state.staged_assets)
-            st.download_button("\U0001f4e5 Export JSON", data=json_data,
-                               file_name="staging_export.json", mime="application/json",
-                               key="export_json_btn")
 
         with st.expander("Import staging CSV (overrides current staging)"):
             imported_file = st.file_uploader("Upload CSV", type="csv", key="staging_import_csv")
@@ -864,19 +868,6 @@ with tab_upload:
                     st.session_state.staged_assets = imported_assets
                     st.success(f"Imported {len(imported_assets)} assets from CSV")
                     st.rerun()
-
-        st.caption("Re-analyze individual assets:")
-        n_per_row = 5
-        for row_start in range(0, len(staged), n_per_row):
-            row_indices = list(range(row_start, min(row_start + n_per_row, len(staged))))
-            cols = st.columns(len(row_indices))
-            for col_idx, idx in enumerate(row_indices):
-                asset = staged[idx]
-                with cols[col_idx]:
-                    name = asset["original_name"]
-                    short = name[:18] + "\u2026" if len(name) > 20 else name
-                    st.button(f"\u21bb {short}", key=f"ra_{idx}",
-                              on_click=lambda i=idx: setattr(st.session_state, "reanalyze_target", i))
 
         with st.expander("Show preview thumbnails"):
             cols = st.columns(min(len(staged), 5))
