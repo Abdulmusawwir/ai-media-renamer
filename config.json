@@ -154,5 +154,8 @@
     "default": "{category}_{topic}_{description}",
     "short": "{topic}_{description}",
     "editorial": "{date}_{category}_{topic}"
+  },
+  "cloud": {
+    "providers": ["gemini", "openai", "anthropic"]
   }
 }

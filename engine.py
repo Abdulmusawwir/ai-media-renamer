@@ -2,11 +2,14 @@ import base64
 import datetime
 import json
 import logging
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import ollama
+import requests
 
 # -----------------------------------------------------------------------------
 # 1. CONFIGURATION & LOGGING
@@ -53,6 +56,10 @@ VIDEO_GRID_SCALE = config['preview']['video_grid_scale']
 
 DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'snake_case')
 DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
+
+CLOUD_PROVIDERS = tuple(config.get('cloud', {}).get('providers', ['gemini', 'openai', 'anthropic']))
+CURRENT_PROVIDER = "ollama"
+CURRENT_API_KEY = ""
 
 NAMED_TEMPLATES = config.get('naming_templates', {
     "default": "{category}_{topic}_{description}",
@@ -378,6 +385,71 @@ def analyze_asset_with_ai(base64_img, verbose=False, retry=True):
     return result
 
 
+def analyze_asset_with_gemini(base64_img, verbose=False):
+    result = {
+        'ok': False,
+        'data': None,
+        'error': None,
+        'detail': None,
+        'raw_response': None,
+    }
+    api_key = CURRENT_API_KEY
+    if not api_key:
+        result['error'] = 'api_key_missing'
+        result['detail'] = 'Gemini API key not configured.'
+        return result
+
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={api_key}"
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": AI_PROMPT},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": base64_img}}
+                ]
+            }]
+        }
+        resp = requests.post(url, json=payload, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+
+        candidates = data.get("candidates", [])
+        if not candidates:
+            result['error'] = 'gemini_empty_response'
+            result['detail'] = 'Gemini returned no candidates.'
+            return result
+
+        raw_text = ""
+        parts = candidates[0].get("content", {}).get("parts", [])
+        for part in parts:
+            raw_text += part.get("text", "")
+        result['raw_response'] = raw_text
+
+        parsed, error_type, detail = _parse_ai_response(raw_text)
+        if error_type:
+            result['error'] = error_type
+            result['detail'] = detail
+            return result
+
+        if 'new_filename' not in parsed:
+            result['error'] = 'missing_keys'
+            result['detail'] = "Response JSON is missing required key 'new_filename'"
+            return result
+
+        result['ok'] = True
+        result['data'] = parsed
+        return result
+
+    except requests.exceptions.RequestException as exc:
+        result['error'] = 'gemini_api_error'
+        result['detail'] = f'Gemini API request failed: {exc}'
+        return result
+    except Exception as exc:
+        result['error'] = 'gemini_api_error'
+        result['detail'] = f'Unexpected Gemini error: {exc}'
+        return result
+
+
 def _format_ai_error(ai_result, verbose=False):
     error_type = ai_result.get('error', 'unknown')
     detail = ai_result.get('detail', 'Unknown error')
@@ -386,6 +458,9 @@ def _format_ai_error(ai_result, verbose=False):
         'missing_keys': detail,
         'empty_response': detail,
         'ollama_error': detail,
+        'api_key_missing': detail,
+        'gemini_empty_response': detail,
+        'gemini_api_error': detail,
     }
     msg = messages.get(error_type, detail)
     if verbose and ai_result.get('raw_response'):
@@ -450,3 +525,117 @@ def execute_commit(asset, target_dir, sort_into_folders, exiftool_session):
         return new_path.relative_to(target_dir)
     except Exception as e:
         return f"ERROR:{e}"
+
+
+# -----------------------------------------------------------------------------
+# 6. BOOTSTRAP & ENVIRONMENT
+# -----------------------------------------------------------------------------
+
+
+def _resolve_binary_path(name):
+    meipass = getattr(sys, '_MEIPASS', None)
+    if meipass:
+        candidate = os.path.join(meipass, 'bin', name)
+        if os.path.isfile(candidate):
+            return candidate
+    resolved = shutil.which(name)
+    return resolved
+
+
+def check_environment():
+    ffmpeg_path = _resolve_binary_path("ffmpeg")
+    exiftool_path = _resolve_binary_path("exiftool")
+    ollama_running = False
+    model_available = False
+    errors = []
+
+    if not ffmpeg_path:
+        errors.append("FFmpeg not found. Install FFmpeg and add it to your PATH.")
+
+    if not exiftool_path:
+        errors.append("ExifTool not found. Install ExifTool and add it to your PATH.")
+
+    try:
+        tags = ollama.list()
+        ollama_running = True
+        models = tags.get('models', [])
+        for m in models:
+            name = m.get('name', '') if isinstance(m, dict) else str(m)
+            if 'qwen2.5vl' in name:
+                model_available = True
+                break
+    except Exception:
+        ollama_running = False
+        errors.append("Ollama is not running. Start Ollama and try again.")
+
+    cloud_configured = CURRENT_PROVIDER != "ollama"
+
+    return {
+        "ffmpeg": bool(ffmpeg_path),
+        "exiftool": bool(exiftool_path),
+        "ollama_running": ollama_running,
+        "model_available": model_available,
+        "cloud_configured": cloud_configured,
+        "errors": errors,
+    }
+
+
+def stream_model_download(model_name="qwen2.5vl:7b"):
+    try:
+        current_stream = ollama.pull(model_name, stream=True)
+        for chunk in current_stream:
+            status = chunk.get('status', '')
+            if status == 'success':
+                yield {"status": "success", "message": f"Model {model_name} ready"}
+                return
+
+            completed = chunk.get('completed', 0)
+            total = chunk.get('total', 0)
+            if total and completed:
+                percentage = (completed / total) * 100.0
+                yield {
+                    "status": "progress",
+                    "completed": completed,
+                    "total": total,
+                    "percentage": percentage,
+                }
+            else:
+                yield {"status": "progress", "completed": completed, "total": total, "percentage": 0.0}
+
+        yield {"status": "success", "message": f"Model {model_name} ready"}
+    except Exception as exc:
+        yield {"status": "error", "message": str(exc)}
+
+
+def switch_ai_provider(new_provider, api_key=None):
+    global CURRENT_PROVIDER, CURRENT_API_KEY
+
+    if CURRENT_PROVIDER == "ollama" and new_provider != "ollama":
+        try:
+            ollama.generate(model="qwen2.5vl:7b", keep_alive=0)
+        except Exception:
+            pass
+
+    CURRENT_PROVIDER = new_provider
+    if api_key:
+        CURRENT_API_KEY = api_key
+    elif new_provider != "ollama":
+        CURRENT_API_KEY = api_key or ""
+
+    if new_provider != "ollama":
+        return {"ok": True, "message": f"Switched to {new_provider}. Local model weights released from RAM/VRAM."}
+
+    env = check_environment()
+    if not env["ollama_running"]:
+        return {"ok": False, "require_download": False, "message": "Ollama is not running. Start Ollama first."}
+    if not env["model_available"]:
+        return {"ok": False, "require_download": True, "message": "Model qwen2.5vl:7b not found. Download required."}
+    return {"ok": True, "message": "Switched to local Ollama."}
+
+
+def wipe_local_model(model_name="qwen2.5vl:7b"):
+    try:
+        ollama.delete(model_name)
+        return {"ok": True, "message": f"Model {model_name} deleted."}
+    except Exception as exc:
+        return {"ok": False, "message": str(exc)}

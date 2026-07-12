@@ -16,6 +16,7 @@ from streamlit_autorefresh import st_autorefresh
 
 from engine import (
     ALLOWED_CATEGORIES,
+    CURRENT_PROVIDER,
     DEFAULT_CASE_STYLE,
     DEFAULT_MAX_FILENAME_CHARS,
     DEFAULT_TEMPLATE_STRING,
@@ -24,16 +25,21 @@ from engine import (
     ExifToolSession,
     _format_ai_error,
     analyze_asset_with_ai,
+    analyze_asset_with_gemini,
     apply_case_style,
     apply_naming_template,
+    check_environment,
     detect_hw_accel,
     execute_commit,
     log_event,
     process_asset_to_base64,
     sanitize_name,
     setup_logging,
+    stream_model_download,
+    switch_ai_provider,
     truncate_filename,
     validate_category,
+    wipe_local_model,
 )
 
 st.set_page_config(page_title="AI Media Renamer", layout="wide")
@@ -79,6 +85,18 @@ if "max_filename_chars" not in st.session_state:
 if "template_string" not in st.session_state:
     st.session_state.template_string = DEFAULT_TEMPLATE_STRING
 
+if "provider" not in st.session_state:
+    st.session_state.provider = "ollama"
+
+if "cloud_api_key" not in st.session_state:
+    st.session_state.cloud_api_key = ""
+
+if "env_check" not in st.session_state:
+    st.session_state.env_check = None
+
+if "model_downloading" not in st.session_state:
+    st.session_state.model_downloading = False
+
 if "clear_counter" not in st.session_state:
     st.session_state.clear_counter = 0
 
@@ -89,6 +107,144 @@ logger = st.session_state.logger
 
 # Allowed categories as list for dropdown use
 CATEGORY_LIST = list(ALLOWED_CATEGORIES)
+
+# -----------------------------------------------------------------------------
+# Environment check (runs once, cached in session state)
+# -----------------------------------------------------------------------------
+
+if st.session_state.env_check is None and not st.session_state.model_downloading:
+    st.session_state.env_check = check_environment()
+
+# -----------------------------------------------------------------------------
+# Sidebar: AI Provider & Environment
+# -----------------------------------------------------------------------------
+
+with st.sidebar:
+    st.header("AI Provider")
+
+    prov = st.session_state.provider
+    provider_idx = ["ollama", "gemini"].index(prov) if prov in ["ollama", "gemini"] else 0
+    chosen = st.radio(
+        "Engine",
+        ["Local (Ollama)", "Cloud (Gemini)"],
+        index=provider_idx,
+        key="provider_radio",
+        help="Local mode uses Ollama with Qwen2.5-VL. Cloud mode uses a remote API.",
+    )
+    new_provider = "ollama" if chosen == "Local (Ollama)" else "gemini"
+
+    if new_provider != st.session_state.provider:
+        result = switch_ai_provider(new_provider, st.session_state.cloud_api_key)
+        st.session_state.provider = new_provider
+        if not result["ok"]:
+            if result.get("require_download"):
+                st.warning("Model not found locally. Use the download button below.")
+            else:
+                st.warning(result["message"])
+        st.session_state.env_check = None
+
+    api_key_entered = bool(st.session_state.cloud_api_key)
+    if new_provider != "ollama":
+        st.text_input("API Key", type="password", key="cloud_api_key",
+                      help="Your Gemini Flash API key. Stored in session only.")
+
+    st.divider()
+    st.caption("Environment Status")
+
+    env = st.session_state.env_check
+    if env:
+        if new_provider == "ollama":
+            for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool"),
+                               ("ollama_running", "Ollama Daemon"), ("model_available", "Qwen2.5-VL Model")]:
+                ok = env.get(key, False)
+                icon = "\u2705" if ok else "\u274c"
+                st.markdown(f"{icon} **{label}**")
+
+            if not env.get("ollama_running"):
+                st.error("Ollama is not running. Start Ollama and click Refresh.")
+            elif not env.get("model_available"):
+                st.info("Qwen2.5-VL model not downloaded yet.")
+        else:
+            for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool")]:
+                ok = env.get(key, False)
+                icon = "\u2705" if ok else "\u274c"
+                st.markdown(f"{icon} **{label}**")
+            key_icon = "\u2705" if api_key_entered else "\u274c"
+            st.markdown(f"{key_icon} **Gemini API Key**")
+            if api_key_entered:
+                st.caption("\u2192 Routing execution to Cloud API")
+
+    if st.button("Refresh Status"):
+        st.session_state.env_check = None
+        st.rerun()
+
+    st.divider()
+
+    if new_provider == "ollama" and env and env.get("ollama_running") and not env.get("model_available"):
+        if st.button("Download Qwen2.5-VL Model", type="primary"):
+            st.session_state.model_downloading = True
+            st.rerun()
+
+    if new_provider == "ollama" and env and env.get("model_available"):
+        if st.button("Wipe Local Model Cache"):
+            result = wipe_local_model()
+            if result["ok"]:
+                st.success(result["message"])
+                st.session_state.env_check = None
+                st.rerun()
+            else:
+                st.error(result["message"])
+
+# -----------------------------------------------------------------------------
+# Bootstrap diagnostics panel (blocks upload if critical dependency missing)
+# -----------------------------------------------------------------------------
+
+env = st.session_state.env_check
+if env and env.get("errors"):
+    critical = False
+    for err in env["errors"]:
+        if "FFmpeg" in err or "ExifTool" in err:
+            critical = True
+            st.error(err, icon="\u274c")
+    if critical:
+        st.stop()
+
+if st.session_state.model_downloading:
+    with st.container():
+        st.subheader("Downloading Qwen2.5-VL Model")
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        for update in stream_model_download("qwen2.5vl:7b"):
+            if update["status"] == "progress":
+                pct = update["percentage"]
+                progress_bar.progress(int(pct) / 100.0)
+                completed_gb = update["completed"] / (1024 ** 3)
+                total_gb = update["total"] / (1024 ** 3)
+                status_text.text(f"Downloading Qwen2.5-VL: {completed_gb:.1f}GB / {total_gb:.1f}GB ({pct:.0f}%)")
+            elif update["status"] == "success":
+                progress_bar.progress(1.0)
+                status_text.text("Download complete!")
+                st.session_state.model_downloading = False
+                st.session_state.env_check = None
+                st.rerun()
+            elif update["status"] == "error":
+                status_text.text(f"Download failed: {update['message']}")
+                st.session_state.model_downloading = False
+    if st.session_state.model_downloading:
+        st.stop()
+
+if st.session_state.provider == "ollama" and env and not env.get("ollama_running"):
+    st.warning("Ollama is not running. Please start the Ollama application, "
+               "then click 'Refresh Status' in the sidebar.", icon="\u26a0\ufe0f")
+    st.stop()
+
+if st.session_state.provider == "ollama" and env and not env.get("model_available"):
+    st.info("Qwen2.5-VL model is not installed. Use the download button in the sidebar to install it.",
+             icon="\u2139\ufe0f")
+
+if st.session_state.provider != "ollama" and not st.session_state.cloud_api_key:
+    st.warning("Enter your Cloud API key in the sidebar to enable Cloud mode.", icon="\u26a0\ufe0f")
+    st.stop()
 
 # -----------------------------------------------------------------------------
 # Helper: load log data for analytics
@@ -183,7 +339,10 @@ with tab_upload:
                 st.session_state.analysis_in_progress = False
                 st.session_state.analysis_done = bool(st.session_state.staged_assets)
             else:
-                ai_result = analyze_asset_with_ai(b64, verbose=False)
+                if CURRENT_PROVIDER == "ollama":
+                    ai_result = analyze_asset_with_ai(b64, verbose=False)
+                else:
+                    ai_result = analyze_asset_with_gemini(b64, verbose=False)
 
                 if ai_result['ok']:
                     ai_data = ai_result['data']
