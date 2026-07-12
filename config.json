@@ -134,14 +134,15 @@
     "temperature": 0.15,
     "num_ctx": 8192,
     "keep_alive": "1h",
-    "last_provider": "gemini",
+    "last_provider": "anthropic",
     "providers": {
       "ollama": {
         "models": [
           "qwen2.5vl:7b",
           "qwen2.5vl:32b",
           "llava:13b"
-        ]
+        ],
+        "selected_model": "llama-3.2-90b-vision-preview"
       },
       "gemini": {
         "models": [
@@ -151,7 +152,8 @@
           "gemini-1.5-flash-002",
           "gemini-1.5-pro-001",
           "gemini-2.5-pro-exp-03-25"
-        ]
+        ],
+        "selected_model": "llama-3.2-90b-vision-preview"
       },
       "openai": {
         "models": [
@@ -161,7 +163,8 @@
           "gpt-4o-2024-08-06",
           "o1",
           "o3-mini"
-        ]
+        ],
+        "selected_model": "gemini-2.0-flash-001"
       },
       "anthropic": {
         "models": [
@@ -170,14 +173,16 @@
           "claude-3-opus-20240229",
           "claude-3-sonnet-20240229",
           "claude-3-haiku-20240307"
-        ]
+        ],
+        "selected_model": "llama-3.2-90b-vision-preview"
       },
       "groq": {
         "models": [
           "llama-3.2-90b-vision-preview",
           "llama-3.2-11b-vision-preview"
         ],
-        "base_url": "https://api.groq.com/openai/v1"
+        "base_url": "https://api.groq.com/openai/v1",
+        "selected_model": "gemini-2.0-flash-001"
       }
     }
   },

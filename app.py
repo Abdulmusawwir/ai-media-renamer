@@ -151,7 +151,6 @@ def _on_provider_switch(new_provider):
     api_key = load_api_key(new_provider) if new_provider != "ollama" else ""
     result = switch_ai_provider(new_provider, api_key)
     st.session_state.provider_info = new_provider
-    st.session_state.pop("provider_model", None)
     if not result["ok"]:
         if result.get("require_download"):
             st.warning("Model not found locally. Use the download button below.")
@@ -162,16 +161,17 @@ def _on_provider_switch(new_provider):
 
 
 def _on_api_key_change():
-    key = st.session_state.api_key_input
-    save_api_key(st.session_state.provider_info, key)
+    provider = st.session_state.provider_info
+    key = st.session_state.get(f"api_key_{provider}", "")
+    save_api_key(provider, key)
     st.session_state.api_key_stored = bool(key)
-    prov_inst = get_provider(st.session_state.provider_info)
+    prov_inst = get_provider(provider)
     prov_inst.api_key = key
 
 
 def _on_model_change():
     provider = st.session_state.provider_info
-    model = st.session_state.provider_model
+    model = st.session_state.get(f"model_{provider}", "")
     config["model"]["providers"].setdefault(provider, {})["selected_model"] = model
     config["model"]["name"] = model
     save_config()
@@ -203,23 +203,24 @@ with st.sidebar:
     # Model dropdown
     p = get_provider(new_provider)
     models = p.available_models()
+    model_key = f"model_{new_provider}"
     if models:
-        cur_model = p.model or models[0]
-        m_idx = models.index(cur_model) if cur_model in models else 0
-        st.selectbox("Model", models, index=m_idx, key="provider_model", on_change=_on_model_change)
+        cur_val = st.session_state.get(model_key, p.model or models[0])
+        m_idx = models.index(cur_val) if cur_val in models else 0
+        st.selectbox("Model", models, index=m_idx, key=model_key, on_change=_on_model_change)
     else:
         st.caption("No models available.")
 
     # API key (cloud providers only)
     if new_provider != "ollama":
-        stored_key = load_api_key(new_provider)
+        api_key = load_api_key(new_provider)
         st.text_input(
-            "API Key", type="password", key="api_key_input",
-            value=stored_key,
+            "API Key", type="password", key=f"api_key_{new_provider}",
+            value=api_key,
             help=f"API key for {new_provider}. Saved to your system keychain.",
             on_change=_on_api_key_change,
         )
-        if stored_key:
+        if api_key:
             st.caption("\u2713 Key saved in system keychain")
 
     st.divider()

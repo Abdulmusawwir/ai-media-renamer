@@ -622,6 +622,10 @@ def get_provider(name):
     saved_model = pconf.get("selected_model", "")
     if saved_model:
         inst.model = saved_model
+    elif name != "ollama":
+        models = pconf.get("models", [])
+        if models:
+            inst.model = models[0]
     return inst
 
 
