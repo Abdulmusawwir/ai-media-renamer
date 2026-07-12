@@ -34,6 +34,7 @@ from engine import (
     log_event,
     process_asset_to_base64,
     sanitize_name,
+    set_api_key,
     setup_logging,
     stream_model_download,
     switch_ai_provider,
@@ -147,6 +148,8 @@ with st.sidebar:
     if new_provider != "ollama":
         st.text_input("API Key", type="password", key="cloud_api_key",
                       help="Your Gemini Flash API key. Stored in session only.")
+        if st.session_state.cloud_api_key:
+            set_api_key(st.session_state.cloud_api_key)
 
     st.divider()
     st.caption("Environment Status")
@@ -186,14 +189,27 @@ with st.sidebar:
             st.rerun()
 
     if new_provider == "ollama" and env and env.get("model_available"):
-        if st.button("Wipe Local Model Cache"):
-            result = wipe_local_model()
-            if result["ok"]:
-                st.success(result["message"])
-                st.session_state.env_check = None
-                st.rerun()
-            else:
-                st.error(result["message"])
+        if not st.session_state.get("confirm_wipe"):
+            st.button("\u26a0\ufe0f Delete Qwen2.5-VL Model Permanently",
+                      type="secondary",
+                      on_click=lambda: setattr(st.session_state, "confirm_wipe", True))
+        else:
+            st.error("**Confirm** \u2014 This permanently removes the AI model from your system. "
+                     "You will need to re-download it to analyze files.")
+            col_cancel, col_confirm = st.columns(2)
+            with col_cancel:
+                st.button("Cancel",
+                          on_click=lambda: setattr(st.session_state, "confirm_wipe", False))
+            with col_confirm:
+                if st.button("Yes, delete model", type="primary"):
+                    st.session_state.confirm_wipe = False
+                    result = wipe_local_model()
+                    if result["ok"]:
+                        st.success(result["message"])
+                        st.session_state.env_check = None
+                        st.rerun()
+                    else:
+                        st.error(result["message"])
 
 # -----------------------------------------------------------------------------
 # Bootstrap diagnostics panel (blocks upload if critical dependency missing)
@@ -346,11 +362,18 @@ with tab_upload:
 
                 if ai_result['ok']:
                     ai_data = ai_result['data']
-                    safe_name = sanitize_name(ai_data['new_filename'])
-                    safe_name = apply_case_style(safe_name, st.session_state.case_style)
-                    safe_name = truncate_filename(safe_name, st.session_state.max_filename_chars)
                     suggested_cat = ai_data.get('suggested_category', '')
                     staged_category, _ = validate_category(suggested_cat)
+                    ai_topic = ai_data.get('topic', '')
+                    ai_desc = ai_data.get('description', '')
+                    safe_name = sanitize_name(ai_data['new_filename'])
+                    safe_name = apply_naming_template(
+                        st.session_state.template_string,
+                        {"category": staged_category, "topic": ai_topic,
+                         "description": ai_desc, "new_filename": safe_name},
+                    )
+                    safe_name = apply_case_style(safe_name, st.session_state.case_style)
+                    safe_name = truncate_filename(safe_name, st.session_state.max_filename_chars)
 
                     staged_assets = st.session_state.get("staged_assets", [])
                     staged_assets.append({
@@ -358,6 +381,8 @@ with tab_upload:
                         "original_name": name,
                         "staged_name": safe_name,
                         "category": staged_category,
+                        "topic": ai_topic,
+                        "description": ai_desc,
                         "tags": ai_data.get('tags', []),
                         "summary": ai_data.get('overall_visual_summary', ''),
                         "suggested_category": suggested_cat,
@@ -537,8 +562,25 @@ with tab_upload:
     if st.session_state.analysis_done and st.session_state.staged_assets:
         st.divider()
         st.subheader("Staging Matrix \u2014 Review & Edit Before Committing")
-        st.caption("Edit filename, category, or tags for any asset. "
-                   "Use the dropdown for common categories or type a custom one.")
+
+        with st.expander("Naming Settings (edits update previews below)", expanded=True):
+            col_tmpl, col_case, col_chars = st.columns(3)
+            with col_tmpl:
+                st.text_input("Pattern", key="template_string",
+                              help="{category}, {topic}, {description}, {date} in any order.")
+            with col_case:
+                def _on_staging_case():
+                    st.session_state.case_style = st.session_state.staging_case_style
+                st.selectbox("Case style",
+                             ["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase"],
+                             index=["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase"]
+                             .index(st.session_state.case_style),
+                             key="staging_case_style", on_change=_on_staging_case)
+            with col_chars:
+                def _on_staging_chars():
+                    st.session_state.max_filename_chars = st.session_state.staging_max_chars
+                st.number_input("Max chars", min_value=0, max_value=200, step=5,
+                                key="staging_max_chars", on_change=_on_staging_chars)
 
         staged = st.session_state.staged_assets
         template = st.session_state.template_string

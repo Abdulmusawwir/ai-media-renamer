@@ -633,6 +633,11 @@ def switch_ai_provider(new_provider, api_key=None):
     return {"ok": True, "message": "Switched to local Ollama."}
 
 
+def set_api_key(key):
+    global CURRENT_API_KEY
+    CURRENT_API_KEY = key
+
+
 def wipe_local_model(model_name="qwen2.5vl:7b"):
     try:
         ollama.delete(model_name)
