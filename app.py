@@ -26,17 +26,20 @@ from engine import (
     VIDEO_EXTENSIONS,
     ExifToolSession,
     _format_ai_error,
-    analyze_asset_with_ai,
-    analyze_asset_with_gemini,
     apply_case_style,
     apply_naming_template,
     check_environment,
+    config,
     detect_hw_accel,
     execute_commit,
+    get_provider,
+    list_providers,
+    load_api_key,
     log_event,
     process_asset_to_base64,
     sanitize_name,
-    set_api_key,
+    save_api_key,
+    save_config,
     setup_logging,
     stream_model_download,
     switch_ai_provider,
@@ -104,11 +107,11 @@ if "max_filename_chars" not in st.session_state:
 if "template_string" not in st.session_state:
     st.session_state.template_string = DEFAULT_TEMPLATE_STRING
 
-if "provider" not in st.session_state:
-    st.session_state.provider = "ollama"
+if "provider_info" not in st.session_state:
+    st.session_state.provider_info = config.get("model", {}).get("last_provider", "ollama")
 
-if "cloud_api_key" not in st.session_state:
-    st.session_state.cloud_api_key = ""
+if "api_key_stored" not in st.session_state:
+    st.session_state.api_key_stored = False
 
 if "env_check" not in st.session_state:
     st.session_state.env_check = None
@@ -144,37 +147,88 @@ if st.session_state.env_check is None and not st.session_state.model_downloading
 # Sidebar: AI Provider & Environment
 # -----------------------------------------------------------------------------
 
+def _on_provider_switch(new_provider):
+    if new_provider != "ollama":
+        st.warning("Cloud providers are untested (no API keys available for testing). "
+                   "Select Local (Ollama) to proceed.")
+        st.session_state.provider_info = "ollama"
+        st.session_state.env_check = None
+        st.rerun()
+        return
+    api_key = load_api_key(new_provider) if new_provider != "ollama" else ""
+    result = switch_ai_provider(new_provider, api_key)
+    st.session_state.provider_info = new_provider
+    if not result["ok"]:
+        if result.get("require_download"):
+            st.warning("Model not found locally. Use the download button below.")
+        else:
+            st.warning(result["message"])
+    st.session_state.env_check = None
+    st.rerun()
+
+
+def _on_api_key_change():
+    provider = st.session_state.provider_info
+    key = st.session_state.get(f"api_key_{provider}", "")
+    save_api_key(provider, key)
+    st.session_state.api_key_stored = bool(key)
+    prov_inst = get_provider(provider)
+    prov_inst.api_key = key
+
+
+def _on_model_change():
+    provider = st.session_state.provider_info
+    model = st.session_state.get(f"model_{provider}", "")
+    config["model"]["providers"].setdefault(provider, {})["selected_model"] = model
+    config["model"]["name"] = model
+    save_config()
+
+
 with st.sidebar:
     st.header("AI Provider")
 
-    prov = st.session_state.provider
-    provider_idx = ["ollama", "gemini"].index(prov) if prov in ["ollama", "gemini"] else 0
+    all_providers = list_providers()
+    current_prov = st.session_state.provider_info
+    prov_labels = {"ollama": "Local (Ollama)", "gemini": "Cloud (Gemini)",
+                   "openai": "Cloud (OpenAI)", "anthropic": "Cloud (Anthropic)",
+                   "groq": "Cloud (Groq)", "openrouter": "Cloud (OpenRouter)"}
+    default_label = prov_labels.get(current_prov, "Local (Ollama)")
+    default_idx = list(prov_labels.values()).index(default_label) if default_label in prov_labels.values() else 0
+
     chosen = st.radio(
         "Engine",
-        ["Local (Ollama)", "Cloud (Gemini)"],
-        index=provider_idx,
+        list(prov_labels.values()),
+        index=default_idx,
         key="provider_radio",
-        help="Local mode uses Ollama with Qwen2.5-VL. Cloud mode uses a remote API.",
+        help="Local mode uses Ollama. Cloud modes use remote APIs via stored API keys.",
     )
-    new_provider = "ollama" if chosen == "Local (Ollama)" else "gemini"
+    new_provider = {v: k for k, v in prov_labels.items()}[chosen]
 
-    if new_provider != st.session_state.provider:
-        result = switch_ai_provider(new_provider, st.session_state.cloud_api_key)
-        st.session_state.provider = new_provider
-        if not result["ok"]:
-            if result.get("require_download"):
-                st.warning("Model not found locally. Use the download button below.")
-            else:
-                st.warning(result["message"])
-        st.session_state.env_check = None
-        st.rerun()
+    if new_provider != st.session_state.provider_info:
+        _on_provider_switch(new_provider)
 
-    api_key_entered = bool(st.session_state.cloud_api_key)
+    # Model dropdown
+    p = get_provider(new_provider)
+    models = p.available_models()
+    model_key = f"model_{new_provider}"
+    if models:
+        cur_val = st.session_state.get(model_key, p.model or models[0])
+        m_idx = models.index(cur_val) if cur_val in models else 0
+        st.selectbox("Model", models, index=m_idx, key=model_key, on_change=_on_model_change)
+    else:
+        st.caption("No models available.")
+
+    # API key (cloud providers only)
     if new_provider != "ollama":
-        st.text_input("API Key", type="password", key="cloud_api_key",
-                      help="Your Gemini Flash API key. Stored in session only.")
-        if st.session_state.cloud_api_key:
-            set_api_key(st.session_state.cloud_api_key)
+        api_key = load_api_key(new_provider)
+        st.text_input(
+            "API Key", type="password", key=f"api_key_{new_provider}",
+            value=api_key,
+            help=f"API key for {new_provider}. Saved to your system keychain.",
+            on_change=_on_api_key_change,
+        )
+        if api_key:
+            st.caption("\u2713 Key saved in system keychain")
 
     st.divider()
     st.caption("Environment Status")
@@ -197,10 +251,12 @@ with st.sidebar:
                 ok = env.get(key, False)
                 icon = "\u2705" if ok else "\u274c"
                 st.markdown(f"{icon} **{label}**")
-            key_icon = "\u2705" if api_key_entered else "\u274c"
-            st.markdown(f"{key_icon} **Gemini API Key**")
-            if api_key_entered:
-                st.caption("\u2192 Routing execution to Cloud API")
+            has_key = bool(load_api_key(new_provider))
+            key_icon = "\u2705" if has_key else "\u274c"
+            pretty_name = new_provider.capitalize()
+            st.markdown(f"{key_icon} **{pretty_name} API Key**")
+            if has_key:
+                st.caption("\u2192 Routing execution via " + pretty_name)
 
     if st.button("Refresh Status"):
         st.session_state.env_check = None
@@ -241,6 +297,7 @@ with st.sidebar:
 # -----------------------------------------------------------------------------
 
 env = st.session_state.env_check
+
 if env and env.get("errors"):
     critical = False
     for err in env["errors"]:
@@ -272,7 +329,6 @@ if st.session_state.model_downloading:
             st.session_state.model_downloading = False
             st.session_state.model_download_gen = None
             st.rerun()
-            st.stop()
 
         if update["status"] == "progress":
             pct = update.get("percentage", 0) or 0
@@ -301,19 +357,21 @@ if st.session_state.model_downloading:
     if st.session_state.model_downloading:
         st.stop()
 
-if st.session_state.provider == "ollama" and env and not env.get("ollama_running"):
+if st.session_state.provider_info == "ollama" and env and not env.get("ollama_running"):
     st.warning("Ollama is not running. Please start the Ollama application, "
                "then click 'Refresh Status' in the sidebar.", icon="\u26a0\ufe0f")
     st.stop()
 
-if st.session_state.provider == "ollama" and env and not env.get("model_available"):
+if st.session_state.provider_info == "ollama" and env and not env.get("model_available"):
     st.warning("Qwen2.5-VL model is not installed. "
                "Use the download button in the sidebar to install it.", icon="\u26a0\ufe0f")
     st.stop()
 
-if st.session_state.provider != "ollama" and not st.session_state.cloud_api_key:
-    st.warning("Enter your Cloud API key in the sidebar to enable Cloud mode.", icon="\u26a0\ufe0f")
-    st.stop()
+if st.session_state.provider_info != "ollama":
+    stored = load_api_key(st.session_state.provider_info)
+    if not stored:
+        st.warning(f"Enter your {st.session_state.provider_info} API key in the sidebar.", icon="\u26a0\ufe0f")
+        st.stop()
 
 # -----------------------------------------------------------------------------
 # Helper: load log data for analytics
@@ -444,10 +502,8 @@ with tab_upload:
                 st.session_state.analysis_in_progress = False
                 st.session_state.analysis_done = bool(st.session_state.staged_assets)
             else:
-                if st.session_state.provider == "ollama":
-                    ai_result = analyze_asset_with_ai(b64, verbose=False)
-                else:
-                    ai_result = analyze_asset_with_gemini(b64, verbose=False)
+                prov = get_provider(st.session_state.provider_info)
+                ai_result = prov.analyze(b64, verbose=False)
 
                 if ai_result['ok']:
                     ai_data = ai_result['data']
@@ -924,7 +980,7 @@ with tab_analytics:
         st.info("No matching entries.")
 
 # -----------------------------------------------------------------------------
-# Footer
+# Footer — always renders at the bottom
 # -----------------------------------------------------------------------------
 
 st.markdown(
@@ -936,3 +992,5 @@ st.markdown(
     "</p>",
     unsafe_allow_html=True,
 )
+
+

@@ -6,9 +6,13 @@ import os
 import shutil
 import subprocess
 import sys
+from abc import ABC, abstractmethod
 from pathlib import Path
 
+import anthropic
+import keyring
 import ollama
+import openai
 import requests
 
 # -----------------------------------------------------------------------------
@@ -57,8 +61,8 @@ VIDEO_GRID_SCALE = config['preview']['video_grid_scale']
 DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'snake_case')
 DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
 
-CLOUD_PROVIDERS = tuple(config.get('cloud', {}).get('providers', ['gemini', 'openai', 'anthropic']))
-CURRENT_PROVIDER = "ollama"
+CLOUD_PROVIDERS = tuple(config.get('cloud', {}).get('providers', ['gemini', 'openai', 'anthropic', 'groq']))
+CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
 CURRENT_API_KEY = ""
 
 NAMED_TEMPLATES = config.get('naming_templates', {
@@ -70,12 +74,37 @@ DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{category}_{topic}_{de
 
 LOG_DIR = Path(config['logging']['directory'])
 MAX_UPLOAD_SIZE = int(config['logging'].get('max_upload_size', 10737418240))
+CONFIG_PATH = Path(__file__).parent / "config.json"
+KEYRING_SERVICE = "ai-media-renamer"
+PROVIDER_REGISTRY = {}
+CURRENT_PROVIDER_INSTANCE = None
+
+
+def save_config():
+    global config
+    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2)
+
+
+def save_api_key(provider_name, key):
+    keyring.set_password(KEYRING_SERVICE, provider_name, key)
+
+
+def load_api_key(provider_name):
+    return keyring.get_password(KEYRING_SERVICE, provider_name) or ""
+
+
+def delete_api_key(provider_name):
+    try:
+        keyring.delete_password(KEYRING_SERVICE, provider_name)
+    except keyring.errors.PasswordDeleteError:
+        pass
 
 
 def setup_logging(verbose=False):
     log_dir = LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / f"renamer_{datetime.datetime.now(datetime.timezone.utc).date().isoformat()}.jsonl"
+    log_file = log_dir / f"renamer_{datetime.datetime.now().astimezone().date().isoformat()}.jsonl"
 
     logger = logging.getLogger('video_renamer')
     logger.handlers.clear()
@@ -90,7 +119,7 @@ def setup_logging(verbose=False):
 
 def log_event(logger, level, event, file_name=None, details=None):
     record = {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "timestamp": datetime.datetime.now().astimezone().isoformat(),
         "level": level,
         "event": event,
         "file": file_name,
@@ -325,130 +354,325 @@ def _parse_ai_response(raw_text):
         return None, 'json_parse_error', f'JSON decode failed: {exc}'
 
 
-def analyze_asset_with_ai(base64_img, verbose=False, retry=True):
-    result = {
-        'ok': False,
-        'data': None,
-        'error': None,
-        'detail': None,
-        'raw_response': None,
-    }
+# -----------------------------------------------------------------------------
+# 5b. AI PROVIDERS (Abstract base + implementations)
+# -----------------------------------------------------------------------------
 
-    attempts = 2 if retry else 1
-    last_exc = None
-
-    for attempt in range(attempts):
-        try:
-            response = ollama.generate(
-                model=MODEL_NAME,
-                prompt=AI_PROMPT,
-                images=[base64_img],
-                keep_alive=MODEL_KEEP_ALIVE,
-                options={
-                    "temperature": MODEL_TEMPERATURE,
-                    "num_ctx": MODEL_NUM_CTX
-                }
-            )
-
-            raw_text = response.get('response', '')
-            result['raw_response'] = raw_text
-
-            parsed, error_type, detail = _parse_ai_response(raw_text)
-            if error_type:
-                result['error'] = error_type
-                result['detail'] = detail
-                return result
-
-            if 'new_filename' not in parsed:
-                result['error'] = 'missing_keys'
-                result['detail'] = "Response JSON is missing required key 'new_filename'"
-                return result
-
-            result['ok'] = True
-            result['data'] = parsed
-            return result
-
-        except (ollama.ResponseError, ConnectionError, TimeoutError, OSError) as exc:
-            last_exc = exc
-            if attempt < attempts - 1:
-                continue
-            result['error'] = 'ollama_error'
-            result['detail'] = f'Ollama request failed: {exc}'
-            return result
-        except Exception as exc:
-            result['error'] = 'ollama_error'
-            result['detail'] = f'Unexpected AI error: {exc}'
-            return result
-
-    if last_exc:
-        result['error'] = 'ollama_error'
-        result['detail'] = f'Ollama request failed after retry: {last_exc}'
-    return result
+VISION_MODEL_PREFIXES = {
+    "llava", "bakllava", "qwen2", "minicpm", "cogvlm", "moondream",
+    "yi-vl", "gemma3", "xclip", "llama3.2-vision", "llama3.2-11b-vision",
+    "llama3.2-90b-vision", "pixtral",
+}
 
 
-def analyze_asset_with_gemini(base64_img, verbose=False):
-    result = {
-        'ok': False,
-        'data': None,
-        'error': None,
-        'detail': None,
-        'raw_response': None,
-    }
-    api_key = CURRENT_API_KEY
-    if not api_key:
-        result['error'] = 'api_key_missing'
-        result['detail'] = 'Gemini API key not configured.'
-        return result
+def _is_vision_model(name):
+    name_lower = name.lower().replace(":", "-")
+    for prefix in VISION_MODEL_PREFIXES:
+        if name_lower.startswith(prefix.lower()):
+            return True
+    return False
 
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={api_key}"
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"text": AI_PROMPT},
-                    {"inline_data": {"mime_type": "image/jpeg", "data": base64_img}}
-                ]
-            }]
-        }
-        resp = requests.post(url, json=payload, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
 
-        candidates = data.get("candidates", [])
-        if not candidates:
-            result['error'] = 'gemini_empty_response'
-            result['detail'] = 'Gemini returned no candidates.'
-            return result
+class AIProvider(ABC):
+    def __init__(self):
+        self._model = ""
+        self._api_key = ""
 
-        raw_text = ""
-        parts = candidates[0].get("content", {}).get("parts", [])
-        for part in parts:
-            raw_text += part.get("text", "")
-        result['raw_response'] = raw_text
+    @abstractmethod
+    def analyze(self, base64_img, verbose=False):
+        ...
 
+    @abstractmethod
+    def health_check(self):
+        ...
+
+    @abstractmethod
+    def available_models(self):
+        ...
+
+    @property
+    def model(self):
+        return self._model
+
+    @model.setter
+    def model(self, value):
+        self._model = value
+
+    @property
+    def api_key(self):
+        return self._api_key
+
+    @api_key.setter
+    def api_key(self, value):
+        self._api_key = value
+
+    def _parse_and_validate(self, raw_text):
+        result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': raw_text}
         parsed, error_type, detail = _parse_ai_response(raw_text)
         if error_type:
             result['error'] = error_type
             result['detail'] = detail
             return result
-
         if 'new_filename' not in parsed:
             result['error'] = 'missing_keys'
             result['detail'] = "Response JSON is missing required key 'new_filename'"
             return result
-
         result['ok'] = True
         result['data'] = parsed
         return result
 
-    except requests.exceptions.RequestException as exc:
-        result['error'] = 'gemini_api_error'
-        result['detail'] = f'Gemini API request failed: {exc}'
+
+class OllamaProvider(AIProvider):
+    def __init__(self):
+        super().__init__()
+        self._model = MODEL_NAME
+        self._retries = 2
+
+    def analyze(self, base64_img, verbose=False):
+        result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
+        last_exc = None
+        for attempt in range(self._retries):
+            try:
+                response = ollama.generate(
+                    model=self._model,
+                    prompt=AI_PROMPT,
+                    images=[base64_img],
+                    keep_alive=MODEL_KEEP_ALIVE,
+                    options={"temperature": MODEL_TEMPERATURE, "num_ctx": MODEL_NUM_CTX}
+                )
+                raw_text = response.get('response', '')
+                parsed = self._parse_and_validate(raw_text)
+                if parsed['ok'] or attempt == self._retries - 1:
+                    return parsed
+                last_exc = parsed.get('detail')
+            except (ollama.ResponseError, ConnectionError, TimeoutError, OSError) as exc:
+                last_exc = exc
+                if attempt < self._retries - 1:
+                    continue
+                result['error'] = 'ollama_error'
+                result['detail'] = f'Ollama request failed: {exc}'
+                return result
+            except Exception as exc:
+                result['error'] = 'ollama_error'
+                result['detail'] = f'Unexpected AI error: {exc}'
+                return result
+        if last_exc:
+            result['error'] = 'ollama_error'
+            result['detail'] = f'Ollama request failed after retry: {last_exc}'
         return result
-    except Exception as exc:
-        result['error'] = 'gemini_api_error'
-        result['detail'] = f'Unexpected Gemini error: {exc}'
-        return result
+
+    def health_check(self):
+        try:
+            ollama.list()
+            return {"ok": True, "message": "Ollama is running."}
+        except Exception as exc:
+            return {"ok": False, "message": f"Ollama not reachable: {exc}"}
+
+    def available_models(self):
+        try:
+            tags = ollama.list()
+            models = []
+            for m in tags.get('models', []):
+                if isinstance(m, dict):
+                    name = m.get('name', '')
+                elif hasattr(m, 'model'):
+                    name = m.model
+                else:
+                    name = str(m)
+                if name and _is_vision_model(name):
+                    models.append(name)
+            return models
+        except Exception:
+            return config.get("model", {}).get("providers", {}).get("ollama", {}).get("models", [])
+
+
+class GeminiProvider(AIProvider):
+    def analyze(self, base64_img, verbose=False):
+        result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
+        if not self._api_key:
+            result['error'] = 'api_key_missing'
+            result['detail'] = 'Gemini API key not configured.'
+            return result
+        try:
+            model_name = self._model or "gemini-2.0-flash-001"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self._api_key}"
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": AI_PROMPT},
+                        {"inline_data": {"mime_type": "image/jpeg", "data": base64_img}}
+                    ]
+                }]
+            }
+            resp = requests.post(url, json=payload, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                result['error'] = 'gemini_empty_response'
+                result['detail'] = 'Gemini returned no candidates.'
+                return result
+            raw_text = ""
+            for part in candidates[0].get("content", {}).get("parts", []):
+                raw_text += part.get("text", "")
+            return self._parse_and_validate(raw_text)
+        except requests.exceptions.RequestException as exc:
+            result['error'] = 'gemini_api_error'
+            result['detail'] = f'Gemini API request failed: {exc}'
+            return result
+        except Exception as exc:
+            result['error'] = 'gemini_api_error'
+            result['detail'] = f'Unexpected Gemini error: {exc}'
+            return result
+
+    def health_check(self):
+        return {"ok": bool(self._api_key), "message": "API key set" if self._api_key else "No API key configured"}
+
+    def available_models(self):
+        return config.get("model", {}).get("providers", {}).get("gemini", {}).get("models", [])
+
+
+class OpenAIProvider(AIProvider):
+    def __init__(self, base_url=None):
+        super().__init__()
+        self._base_url = base_url
+
+    def _make_client(self):
+        kwargs = {"api_key": self._api_key}
+        if self._base_url:
+            kwargs["base_url"] = self._base_url
+        return openai.OpenAI(**kwargs)
+
+    def analyze(self, base64_img, verbose=False):
+        result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
+        if not self._api_key:
+            result['error'] = 'api_key_missing'
+            result['detail'] = 'API key not configured.'
+            return result
+        try:
+            client = self._make_client()
+            model_name = self._model or "gpt-4o"
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": AI_PROMPT},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
+                    ]
+                }],
+                max_tokens=1024
+            )
+            raw_text = response.choices[0].message.content or ""
+            return self._parse_and_validate(raw_text)
+        except Exception as exc:
+            result['error'] = 'openai_api_error'
+            result['detail'] = f'OpenAI API request failed: {exc}'
+            return result
+
+    def health_check(self):
+        return {"ok": bool(self._api_key), "message": "API key set" if self._api_key else "No API key configured"}
+
+    def available_models(self):
+        return config.get("model", {}).get("providers", {}).get("openai", {}).get("models", [])
+
+
+class AnthropicProvider(AIProvider):
+    def analyze(self, base64_img, verbose=False):
+        result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
+        if not self._api_key:
+            result['error'] = 'api_key_missing'
+            result['detail'] = 'API key not configured.'
+            return result
+        try:
+            client = anthropic.Anthropic(api_key=self._api_key)
+            model_name = self._model or "claude-3-5-sonnet-20241022"
+            response = client.messages.create(
+                model=model_name,
+                max_tokens=1024,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": AI_PROMPT},
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64_img}}
+                    ]
+                }]
+            )
+            raw_text = response.content[0].text
+            return self._parse_and_validate(raw_text)
+        except Exception as exc:
+            result['error'] = 'anthropic_api_error'
+            result['detail'] = f'Anthropic API request failed: {exc}'
+            return result
+
+    def health_check(self):
+        return {"ok": bool(self._api_key), "message": "API key set" if self._api_key else "No API key configured"}
+
+    def available_models(self):
+        return config.get("model", {}).get("providers", {}).get("anthropic", {}).get("models", [])
+
+
+class GroqProvider(OpenAIProvider):
+    def __init__(self):
+        base = config.get("model", {}).get("providers", {}).get("groq", {}).get("base_url", "https://api.groq.com/openai/v1")
+        super().__init__(base_url=base)
+
+    def available_models(self):
+        return config.get("model", {}).get("providers", {}).get("groq", {}).get("models", [])
+
+
+class OpenRouterProvider(OpenAIProvider):
+    def __init__(self):
+        base = config.get("model", {}).get("providers", {}).get("openrouter", {}).get("base_url", "https://openrouter.ai/api/v1")
+        super().__init__(base_url=base)
+
+    def available_models(self):
+        return config.get("model", {}).get("providers", {}).get("openrouter", {}).get("models", [])
+
+
+def register_provider(name, cls):
+    PROVIDER_REGISTRY[name] = cls
+
+
+def get_provider(name):
+    cls = PROVIDER_REGISTRY.get(name)
+    if not cls:
+        raise ValueError(f"Unknown provider: {name}")
+    inst = cls()
+    if name != "ollama":
+        inst.api_key = load_api_key(name)
+    pconf = config.get("model", {}).get("providers", {}).get(name, {})
+    valid_models = pconf.get("models", [])
+    saved_model = pconf.get("selected_model", "")
+    if saved_model and (name == "ollama" or saved_model in valid_models):
+        inst.model = saved_model
+    elif name != "ollama" and valid_models:
+        inst.model = valid_models[0]
+    return inst
+
+
+def list_providers():
+    return list(PROVIDER_REGISTRY.keys())
+
+
+register_provider("ollama", OllamaProvider)
+register_provider("gemini", GeminiProvider)
+register_provider("openai", OpenAIProvider)
+register_provider("anthropic", AnthropicProvider)
+register_provider("groq", GroqProvider)
+register_provider("openrouter", OpenRouterProvider)
+
+
+def analyze_asset_with_ai(base64_img, verbose=False, retry=True):
+    provider = get_provider("ollama")
+    provider.model = MODEL_NAME
+    return provider.analyze(base64_img, verbose=verbose)
+
+
+def analyze_asset_with_gemini(base64_img, verbose=False):
+    provider = get_provider("gemini")
+    provider.api_key = CURRENT_API_KEY or load_api_key("gemini")
+    return provider.analyze(base64_img, verbose=verbose)
 
 
 def _format_ai_error(ai_result, verbose=False):
@@ -462,6 +686,8 @@ def _format_ai_error(ai_result, verbose=False):
         'api_key_missing': detail,
         'gemini_empty_response': detail,
         'gemini_api_error': detail,
+        'openai_api_error': detail,
+        'anthropic_api_error': detail,
     }
     msg = messages.get(error_type, detail)
     if verbose and ai_result.get('raw_response'):
@@ -611,19 +837,31 @@ def stream_model_download(model_name="qwen2.5vl:7b"):
 
 
 def switch_ai_provider(new_provider, api_key=None):
-    global CURRENT_PROVIDER, CURRENT_API_KEY
+    global CURRENT_PROVIDER, CURRENT_API_KEY, CURRENT_PROVIDER_INSTANCE
 
     if CURRENT_PROVIDER == "ollama" and new_provider != "ollama":
         try:
-            ollama.generate(model="qwen2.5vl:7b", keep_alive=0)
+            ollama.generate(model=MODEL_NAME, keep_alive=0)
         except Exception:
             pass
 
     CURRENT_PROVIDER = new_provider
+
+    provider = get_provider(new_provider)
     if api_key:
         CURRENT_API_KEY = api_key
+        save_api_key(new_provider, api_key)
+        provider.api_key = api_key
     elif new_provider != "ollama":
-        CURRENT_API_KEY = api_key or ""
+        stored = load_api_key(new_provider)
+        CURRENT_API_KEY = stored
+        provider.api_key = stored
+    pconf = config.get("model", {}).get("providers", {}).get(new_provider, {})
+    provider.model = pconf.get("selected_model", "") or (pconf.get("models") or [None])[0] or MODEL_NAME
+
+    CURRENT_PROVIDER_INSTANCE = provider
+    config["model"]["last_provider"] = new_provider
+    save_config()
 
     if new_provider != "ollama":
         return {"ok": True, "message": f"Switched to {new_provider}. Local model weights released from RAM/VRAM."}
