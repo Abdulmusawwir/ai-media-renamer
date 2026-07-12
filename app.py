@@ -16,7 +16,6 @@ from streamlit_autorefresh import st_autorefresh
 
 from engine import (
     ALLOWED_CATEGORIES,
-    CURRENT_PROVIDER,
     DEFAULT_CASE_STYLE,
     DEFAULT_MAX_FILENAME_CHARS,
     DEFAULT_TEMPLATE_STRING,
@@ -385,7 +384,7 @@ with tab_upload:
                 st.session_state.analysis_in_progress = False
                 st.session_state.analysis_done = bool(st.session_state.staged_assets)
             else:
-                if CURRENT_PROVIDER == "ollama":
+                if st.session_state.provider == "ollama":
                     ai_result = analyze_asset_with_ai(b64, verbose=False)
                 else:
                     ai_result = analyze_asset_with_gemini(b64, verbose=False)
