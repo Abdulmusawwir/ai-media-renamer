@@ -109,36 +109,32 @@
 ## Layer 3: Staging & Review
 
 ### 3.1 Staging table search / filter
-- [ ] Above the `st.data_editor`, add a `st.text_input("Filter assets...")`
-- [ ] On every rerun, filter `staged_assets` by substring match against `original_name`, `staged_name`, `category`, or any tag
+- [x] Above the `st.data_editor`, add a `st.text_input("Filter assets...")`
+- [x] On every rerun, filter `staged_assets` by substring match against `original_name`, `staged_name`, `category`, or any tag
   - Case-insensitive, partial match
   - Show count: "Showing 5 of 12 assets"
-- [ ] Filter affects only the displayed table; all assets remain in `st.session_state.staged_assets`
+- [x] Filter affects only the displayed table; all assets remain in `st.session_state.staged_assets`
 
 ### 3.2 Bulk category assignment
-- [ ] Add a row-level checkbox column to `st.data_editor` (exists) plus a "Select All" checkbox in the header
-- [ ] Below the table, add a `st.selectbox("Apply category to selected", CATEGORY_LIST)` + "Apply" button
-- [ ] On "Apply": iterate selected rows, update their `category` field, rebuild the DataFrame
-- [ ] Show confirmation: "Updated 5 assets to category 'aerial_drone'"
+- [x] Add a row-level checkbox column to `st.data_editor` (exists) plus a "Select All" checkbox in the header
+- [x] Below the table, add a `st.selectbox("Apply category to selected", CATEGORY_LIST)` + "Apply" button
+- [x] On "Apply": iterate selected rows, update their `category` field, rebuild the DataFrame
+- [x] Show confirmation: "Updated 5 assets to category 'aerial_drone'"
 
 ### 3.3 Staging table column sorting
-- [ ] Replace the `st.data_editor` with a `st.data_editor` that enables column sorting
-  - Streamlit's `st.data_editor` does not natively support click-to-sort headers
-  - Workaround: render a sortable `st.dataframe` for display only, then a hidden editor for editing
-  - Alternative: add sort buttons (A-Z / Z-A) per column as `st.button()` above the table
-- [ ] Implement server-side sorting: when a sort button is clicked, reverse/order `st.session_state.staged_assets` and rerun
+- [x] Add sort dropdown (Original Name, Proposed Filename, Category, Summary) + Asc/Desc toggle above the table
+- [x] Implement server-side sorting: sort `staged_view` in-place by selected key and direction before rendering the data editor
 
 ### 3.4 Export staging as CSV
-- [ ] Add a "Download CSV" button above the staging matrix
-- [ ] Build a CSV string from `st.session_state.staged_assets` with columns: `original_name, proposed_filename, category, tags, summary`
-- [ ] Use `st.download_button()` with `data=csv_string, file_name="staging_export.csv", mime="text/csv"`
-- [ ] Same for JSON: add a second `st.download_button()` for JSON export
+- [x] Add `export_staging_csv()` and `export_staging_json()` to `engine.py`
+- [x] Add "Download CSV" and "Download JSON" buttons below the staging data editor
+- [x] CSV columns: `original_name, proposed_filename, category, tags, summary`
 
 ### 3.5 Import staging from CSV
-- [ ] Add a small file uploader labelled "Import staging CSV (overrides current)"
-- [ ] Parse CSV columns, validate against category list, populate `st.session_state.staged_assets`
-- [ ] Warn if imported rows have `original_name` values that don't match any uploaded file
-- [ ] Log `staging_imported` event with row count
+- [x] Add `import_staging_csv()` to `engine.py` returning `(assets, warnings)`
+- [x] Add collapsed expander with file uploader "Import staging CSV (overrides current)" below export buttons
+- [x] Parse CSV columns, validate against category list, populate `st.session_state.staged_assets`
+- [x] Show warnings for unknown categories (e.g., "unknown category 'xyz' → fallback to 'uncategorized'")
 
 ---
 
@@ -557,7 +553,7 @@ The phases are ordered by dependency — each phase can be worked on independent
 Phase A: 1.1, 9.3, 9.4          → Foundation (progress UI, gitignore, streamlit config)
 Phase B: 2.3, 9.2, 11.1          → Health checks + unit tests (confidence layer)
 Phase C: 1.2, 1.4, 1.3          → Upload hardening
-Phase D: 3.1, 3.2, 3.3          → Staging UX improvements
+Phase D: 3.1, 3.2, 3.3          → Staging UX improvements — DONE
 Phase E: 4.1, 4.4               → Commit flexibility (metadata-only + dry-run)
 Phase F: 5.1, 5.2, 5.3         → Session persistence + recovery
 Phase G: 2.1, 2.2, 2.4          → Analysis flexibility (re-analyze, model select, workers)
@@ -566,7 +562,7 @@ Phase I: 7.1, 7.2, 7.3, 7.4    → Analytics enhancements
 Phase J: 8.1, 8.2, 8.3         → CLI improvements
 Phase K: 9.1, 11.2, 11.3       → Docker + integration tests
 Phase L: 10.1, 10.2, 10.3, 10.4 → Quality of life (core)
-Phase M: 3.4, 3.5               → CSV import/export
+Phase M: 3.4, 3.5               → CSV import/export — DONE
 Phase N: 4.2                    → Naming templates
 Phase O: 10.5, 10.6, 10.7       → Quality of life (polish)
 Phase P: 4.4, 4.5, 10.8         → Advanced Features expander + naming controls

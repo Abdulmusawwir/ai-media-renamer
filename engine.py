@@ -950,3 +950,65 @@ def wipe_local_model(model_name="qwen2.5vl:7b"):
         return {"ok": True, "message": f"Model {model_name} deleted."}
     except Exception as exc:
         return {"ok": False, "message": str(exc)}
+
+
+# -----------------------------------------------------------------------------
+# 7. STAGING EXPORT / IMPORT
+# -----------------------------------------------------------------------------
+
+def export_staging_csv(staged_assets):
+    import csv
+    import io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["original_name", "proposed_filename", "category", "tags", "summary"])
+    for a in staged_assets:
+        writer.writerow([
+            a.get("original_name", ""),
+            a.get("staged_name", ""),
+            a.get("category", ""),
+            ", ".join(a.get("tags", [])),
+            a.get("summary", ""),
+        ])
+    return output.getvalue()
+
+
+def export_staging_json(staged_assets):
+    clean = []
+    for a in staged_assets:
+        clean.append({
+            "original_name": a.get("original_name", ""),
+            "proposed_filename": a.get("staged_name", ""),
+            "category": a.get("category", ""),
+            "tags": a.get("tags", []),
+            "summary": a.get("summary", ""),
+        })
+    return json.dumps(clean, indent=2)
+
+
+def import_staging_csv(csv_string, allowed_categories):
+    import csv
+    import io
+    assets = []
+    warnings = []
+    reader = csv.DictReader(io.StringIO(csv_string))
+    allowed = set(allowed_categories)
+    for row_num, row in enumerate(reader, start=2):
+        tags_raw = row.get("tags", "")
+        tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+        category = row.get("category", "").strip().lower().replace(" ", "_")
+        safe_chars = [c for c in category if c.isalpha() or c.isdigit() or c in ("_", "-")]
+        category = "".join(safe_chars).strip("_")
+        if category and category not in allowed:
+            warnings.append(f"Row {row_num}: unknown category '{category}' → fallback to 'uncategorized'")
+            category = "uncategorized"
+        if not category:
+            category = "uncategorized"
+        assets.append({
+            "original_name": row.get("original_name", ""),
+            "staged_name": row.get("proposed_filename", ""),
+            "category": category,
+            "tags": tags,
+            "summary": row.get("summary", ""),
+        })
+    return assets, warnings

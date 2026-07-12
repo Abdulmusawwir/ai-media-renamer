@@ -35,8 +35,11 @@ from engine import (
     config,
     detect_hw_accel,
     execute_commit,
+    export_staging_csv,
+    export_staging_json,
     get_active_profile,
     get_provider,
+    import_staging_csv,
     list_providers,
     load_api_key,
     log_event,
@@ -805,9 +808,46 @@ with tab_upload:
         st.divider()
         st.subheader("Staging Matrix \u2014 Review & Edit Before Committing")
 
-        col_ra_all, _ = st.columns([1, 6])
+        col_ra_all, col_filter = st.columns([1, 4])
         with col_ra_all:
             st.button("Re-analyze All", on_click=lambda: setattr(st.session_state, "reanalyze_target", -1))
+        with col_filter:
+            st.text_input("\U0001f50d", placeholder="Filter assets...", key="staging_filter",
+                          label_visibility="collapsed")
+
+        col_sort_key, col_sort_dir, col_count = st.columns([1, 1, 3])
+        with col_sort_key:
+            st.selectbox("Sort by", ["Original Name", "Proposed Filename", "Category", "Summary"],
+                         key="staging_sort_by", label_visibility="collapsed")
+        with col_sort_dir:
+            st.selectbox("Order", ["Asc", "Desc"], key="staging_sort_dir", label_visibility="collapsed")
+        with col_count:
+            staged_raw = st.session_state.staged_assets
+            filter_text = st.session_state.get("staging_filter", "").lower().strip()
+            if filter_text:
+                staged = [
+                    a for a in staged_raw
+                    if filter_text in a.get("original_name", "").lower()
+                    or filter_text in a.get("staged_name", "").lower()
+                    or filter_text in a.get("category", "").lower()
+                    or any(filter_text in t.lower() for t in a.get("tags", []))
+                ]
+                st.caption(f"Showing {len(staged)} of {len(staged_raw)} assets")
+            else:
+                staged = staged_raw
+                st.caption(f"{len(staged)} assets ready for review")
+
+        # Apply sorting
+        sort_key_map = {
+            "Original Name": lambda a: a.get("original_name", "").lower(),
+            "Proposed Filename": lambda a: a.get("staged_name", "").lower(),
+            "Category": lambda a: a.get("category", "").lower(),
+            "Summary": lambda a: a.get("summary", "").lower(),
+        }
+        sort_by = st.session_state.get("staging_sort_by", "Original Name")
+        sort_dir = st.session_state.get("staging_sort_dir", "Asc")
+        key_fn = sort_key_map.get(sort_by, sort_key_map["Original Name"])
+        staged.sort(key=key_fn, reverse=(sort_dir == "Desc"))
 
         with st.expander("Naming Settings (edits update previews below)", expanded=True):
             col_tmpl, col_case, col_chars = st.columns(3)
@@ -828,10 +868,12 @@ with tab_upload:
                 st.number_input("Max chars", min_value=0, max_value=200, step=5,
                                 key="staging_max_chars", on_change=_on_staging_chars)
 
-        staged = st.session_state.staged_assets
         template = st.session_state.template_string
         case_style = st.session_state.case_style
         max_chars = st.session_state.max_filename_chars
+
+        # Select-all checkbox above table
+        select_all = st.checkbox("Select all", key="staging_select_all")
 
         table_rows = []
         for asset in staged:
@@ -844,7 +886,7 @@ with tab_upload:
             rendered = apply_case_style(rendered, case_style)
             rendered = truncate_filename(rendered, max_chars)
             table_rows.append({
-                "select": True,
+                "select": select_all,
                 "original_name": asset["original_name"],
                 "proposed_filename": rendered,
                 "category": asset["category"] if asset["category"] != "uncategorized"
@@ -873,6 +915,46 @@ with tab_upload:
             width='stretch',
             num_rows="fixed",
         )
+
+        # Bulk category assignment
+        col_bulk_cat, col_bulk_btn = st.columns([2, 1])
+        with col_bulk_cat:
+            bulk_category = st.selectbox("Apply category to selected",
+                                         [""] + sorted(CATEGORY_LIST),
+                                         key="bulk_category_sel")
+        with col_bulk_btn:
+            if st.button("Apply", key="bulk_apply_btn") and bulk_category:
+                selected = edited_df[edited_df["select"]]
+                for idx in selected.index:
+                    staged[idx]["category"] = bulk_category
+                st.success(f"Updated {len(selected)} assets to '{bulk_category}'")
+                st.rerun()
+
+        # Export and import staging
+        col_csv, col_json, col_spacer = st.columns([1, 1, 4])
+        with col_csv:
+            csv_data = export_staging_csv(st.session_state.staged_assets)
+            st.download_button("\U0001f4e5 Export CSV", data=csv_data,
+                               file_name="staging_export.csv", mime="text/csv",
+                               key="export_csv_btn")
+        with col_json:
+            json_data = export_staging_json(st.session_state.staged_assets)
+            st.download_button("\U0001f4e5 Export JSON", data=json_data,
+                               file_name="staging_export.json", mime="application/json",
+                               key="export_json_btn")
+
+        with st.expander("Import staging CSV (overrides current staging)"):
+            imported_file = st.file_uploader("Upload CSV", type="csv", key="staging_import_csv")
+            if imported_file:
+                csv_text = imported_file.read().decode("utf-8")
+                imported_assets, warnings = import_staging_csv(csv_text, CATEGORY_LIST)
+                if warnings:
+                    for w in warnings:
+                        st.warning(w)
+                if imported_assets:
+                    st.session_state.staged_assets = imported_assets
+                    st.success(f"Imported {len(imported_assets)} assets from CSV")
+                    st.rerun()
 
         st.caption("Re-analyze individual assets:")
         ra_cols = st.columns(len(staged))
