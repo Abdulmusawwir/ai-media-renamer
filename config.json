@@ -130,11 +130,11 @@
     ".gif"
   ],
   "model": {
-    "name": "",
+    "name": "qwen2.5-coder:14b",
     "temperature": 0.15,
     "num_ctx": 8192,
     "keep_alive": "1h",
-    "last_provider": "openrouter",
+    "last_provider": "ollama",
     "providers": {
       "ollama": {
         "models": [

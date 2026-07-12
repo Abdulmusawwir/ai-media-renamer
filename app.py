@@ -360,18 +360,15 @@ if st.session_state.model_downloading:
 if st.session_state.provider_info == "ollama" and env and not env.get("ollama_running"):
     st.warning("Ollama is not running. Please start the Ollama application, "
                "then click 'Refresh Status' in the sidebar.", icon="\u26a0\ufe0f")
-    st.stop()
 
 if st.session_state.provider_info == "ollama" and env and not env.get("model_available"):
     st.warning("Qwen2.5-VL model is not installed. "
                "Use the download button in the sidebar to install it.", icon="\u26a0\ufe0f")
-    st.stop()
 
 if st.session_state.provider_info != "ollama":
     stored = load_api_key(st.session_state.provider_info)
     if not stored:
         st.warning(f"Enter your {st.session_state.provider_info} API key in the sidebar.", icon="\u26a0\ufe0f")
-        st.stop()
 
 # -----------------------------------------------------------------------------
 # Helper: load log data for analytics
