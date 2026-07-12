@@ -7,28 +7,28 @@
 ## Layer 1: Upload & Ingestion
 
 ### 1.1 Upload progress indicator
-- [ ] Add `st.progress()` bar during the file-copy loop in `app.py` (lines 128-131)
+- [x] Add `st.progress()` bar during the file-copy loop in `app.py`
   - Compute total bytes across all uploaded files (sum `uf.size`)
   - After each file copy, update progress as `cumulative_bytes / total_bytes`
   - Show per-file name in the progress text: `"Copying file_003.mp4 (3/12)"`
-- [ ] Guard: skip progress rendering if only 1 file (no progress bar needed for single-file uploads)
+- [x] Guard: skip progress rendering if only 1 file (no progress bar needed for single-file uploads)
 
 ### 1.2 File size validation
-- [ ] Add `max_upload_size` to `config.json` logging section (default: 10 GB in bytes)
-- [ ] In `app.py` upload handler, check each `uploaded_files` item against the limit
-- [ ] Show `st.warning()` for oversized files with the filename and size
-- [ ] Log a `file_skipped` event with reason "exceeds_max_size"
-- [ ] Remove oversized files from the upload set before saving to temp dir
+- [x] Add `max_upload_size` to `config.json` logging section (default: 10 GB in bytes)
+- [x] In `app.py` upload handler, check each `uploaded_files` item against the limit
+- [x] Show `st.warning()` for oversized files with the filename and size
+- [x] Log a `file_skipped` event with reason "exceeds_max_size"
+- [x] Remove oversized files from the upload set before saving to temp dir
 
 ### 1.3 Drag-and-drop visual feedback
-- [ ] Add custom CSS to `app.py` via `st.markdown()` that highlights the upload zone on dragover
-  - Style: dashed border turns solid, background tint changes, "Drop files here" overlay text
-- [ ] Use Streamlit's built-in `st.file_uploader` hover effects (no JS needed — CSS pseudo-classes on the uploader's rendered container)
+- [x] Add custom CSS to `app.py` via `st.markdown()` that highlights the upload zone on dragover
+  - Style: dashed border turns solid, background tint changes
+- [x] Use Streamlit's built-in `st.file_uploader` hover effects (no JS needed — CSS pseudo-classes on the uploader's rendered container)
 
 ### 1.4 File type mismatch warning
-- [ ] Before the eager-save loop, check each file's extension against `VIDEO_EXTENSIONS | IMAGE_EXTENSIONS`
-- [ ] For files with unrecognised extensions: show `st.warning()`, skip the file, log `file_skipped` with reason "unsupported_extension"
-- [ ] Do not abort the entire batch — skip just the offending files
+- [x] Before the eager-save loop, check each file's extension against `VIDEO_EXTENSIONS | IMAGE_EXTENSIONS`
+- [x] For files with unrecognised extensions: show `st.warning()`, skip the file, log `file_skipped` with reason "unsupported_extension"
+- [x] Do not abort the entire batch — skip just the offending files
 
 ---
 
@@ -568,4 +568,5 @@ Phase R: 2.6, 2.7               → Multi-provider + model auto-detect
 Phase S: S.1–S.5                → Desktop Bundling & Bootstrap Lifecycle Setup
 Phase T: 8.4                    → CLI subdirectories
 Phase U: 12.1, 12.2             → Duplicate detection + feedback
+Phase V: Support                 → Donation / sponsorship links, "Buy me a coffee" button
 ```
