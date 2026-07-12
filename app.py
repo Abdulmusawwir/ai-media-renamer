@@ -994,8 +994,9 @@ with tab_upload:
                     failed = 0
                     progress = st.progress(0, text="Committing...")
 
-                    for idx, row in selected.iterrows():
-                        asset = staged[idx]
+                    for commit_i in range(len(selected)):
+                        row = selected.iloc[commit_i]
+                        asset = staged[selected.index[commit_i]]
 
                         asset["staged_name"] = row["proposed_filename"]
                         new_cat = row["category"].strip().lower().replace(" ", "_")
@@ -1019,7 +1020,7 @@ with tab_upload:
                             log_event(logger, "ERROR", "file_commit_failed", file_name=asset["original_name"],
                                       details={"error": err})
 
-                        progress.progress((idx + 1) / len(selected))
+                        progress.progress((commit_i + 1) / len(selected))
 
                     log_event(logger, "INFO", "session_end", details={
                         "committed": committed, "failed": failed, "total": len(selected), "mode": "web_batch"
