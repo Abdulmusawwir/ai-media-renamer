@@ -589,8 +589,8 @@ def stream_model_download(model_name="qwen2.5vl:7b"):
                 yield {"status": "success", "message": f"Model {model_name} ready"}
                 return
 
-            completed = chunk.get('completed', 0)
-            total = chunk.get('total', 0)
+            completed = chunk.get('completed', 0) or 0
+            total = chunk.get('total', 0) or 0
             if total and completed:
                 percentage = (completed / total) * 100.0
                 yield {
