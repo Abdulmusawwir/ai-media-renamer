@@ -308,9 +308,13 @@ def process_asset_to_base64(file_path, hw_accel):
 # -----------------------------------------------------------------------------
 
 def validate_category(raw_category):
-    if not raw_category:
+    if not raw_category or not str(raw_category).strip():
         return 'uncategorized', True
-    normalized = str(raw_category).lower().strip()
+    normalized = str(raw_category).lower().strip().replace(" ", "_")
+    safe_chars = [c for c in normalized if c.isalpha() or c.isdigit() or c in ('_', '-')]
+    normalized = "".join(safe_chars).strip('_')
+    if not normalized:
+        return 'uncategorized', True
     if normalized in ALLOWED_CATEGORIES:
         return normalized, False
     return 'uncategorized', True

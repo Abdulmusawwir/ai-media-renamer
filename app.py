@@ -661,83 +661,6 @@ with tab_upload:
         st.rerun()
 
     # ------------------------------------------------------------------
-    # Advanced Features (collapsed by default)
-    # ------------------------------------------------------------------
-    if not st.session_state.analysis_in_progress and not st.session_state.analysis_done \
-            and st.session_state.get("uploaded_files"):
-        with st.expander("Advanced Features"):
-            preset_names = list(NAMED_TEMPLATES.keys())
-            template_presets = preset_names + ["custom"]
-
-            current_pattern = st.session_state.template_string
-            matched = "custom"
-            for name, pat in NAMED_TEMPLATES.items():
-                if pat == current_pattern:
-                    matched = name
-                    break
-            preset_idx = template_presets.index(matched)
-
-            def _on_template_preset():
-                name = st.session_state.template_preset_sel
-                if name in NAMED_TEMPLATES:
-                    st.session_state.template_string = NAMED_TEMPLATES[name]
-
-            def _template_label(name):
-                return f"{name}  ({NAMED_TEMPLATES[name]})" if name in NAMED_TEMPLATES else name
-
-            col_tmpl, col_pat = st.columns([1, 2])
-            with col_tmpl:
-                st.selectbox(
-                    "Naming template",
-                    template_presets,
-                    index=preset_idx,
-                    key="template_preset_sel",
-                    on_change=_on_template_preset,
-                    format_func=_template_label,
-                    help="Choose a preset or select 'custom' to type your own pattern. "
-                         "The template generates the raw name; then the case style below transforms it.",
-                )
-            with col_pat:
-                st.text_input(
-                    "Pattern",
-                    key="template_string",
-                    help="{category}, {topic}, {description}, {date} \u2014 in any order. "
-                         "Example: {category}_{topic}_{description}. "
-                         "The case style below overrides any capitalisation in this pattern.",
-                )
-                _demo = {"category": "aerial_drone", "topic": "golden_hour",
-                         "description": "aerial_coastline", "new_filename": "golden_hour_aerial_coastline"}
-                _raw = apply_naming_template(st.session_state.template_string, _demo)
-                _styled = apply_case_style(_raw, st.session_state.case_style)
-                _final = truncate_filename(_styled, st.session_state.max_filename_chars)
-                st.caption(f"Preview: {_final}")
-
-            col_case, col_chars = st.columns(2)
-            with col_case:
-                st.selectbox(
-                    "Filename case style",
-                    ["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase"],
-                    index=["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase"]
-                    .index(st.session_state.case_style),
-                    key="case_style",
-                    help="Applied AFTER the naming template. "
-                         "Overrides letter case from the pattern output. "
-                         "snake_case: golden_hour_aerial | "
-                         "camelCase: goldenHourAerial | "
-                         "kebab-case: golden-hour-aerial | "
-                         "pascal_case: GoldenHourAerial | "
-                         "lowercase: goldenhouraerial",
-                )
-            with col_chars:
-                st.number_input(
-                    "Max filename characters (0 = no limit)",
-                    min_value=0, max_value=200, step=5,
-                    key="max_filename_chars",
-                    help="Truncates the filename to this many characters (applied last). "
-                         "0 = no limit.",
-                )
-
-    # ------------------------------------------------------------------
     # Analysis trigger: button + Phase 1 (only when idle)
     # ------------------------------------------------------------------
     if not st.session_state.analysis_in_progress and not st.session_state.analysis_done \
@@ -813,41 +736,22 @@ with tab_upload:
             st.button("Re-analyze All", on_click=lambda: setattr(st.session_state, "reanalyze_target", -1))
         with col_filter:
             st.text_input("\U0001f50d", placeholder="Filter assets...", key="staging_filter",
-                          label_visibility="collapsed")
+                          label_visibility="collapsed", on_change=lambda: None)
 
-        col_sort_key, col_sort_dir, col_count = st.columns([1, 1, 3])
-        with col_sort_key:
-            st.selectbox("Sort by", ["Original Name", "Proposed Filename", "Category", "Summary"],
-                         key="staging_sort_by", label_visibility="collapsed")
-        with col_sort_dir:
-            st.selectbox("Order", ["Asc", "Desc"], key="staging_sort_dir", label_visibility="collapsed")
-        with col_count:
-            staged_raw = st.session_state.staged_assets
-            filter_text = st.session_state.get("staging_filter", "").lower().strip()
-            if filter_text:
-                staged = [
-                    a for a in staged_raw
-                    if filter_text in a.get("original_name", "").lower()
-                    or filter_text in a.get("staged_name", "").lower()
-                    or filter_text in a.get("category", "").lower()
-                    or any(filter_text in t.lower() for t in a.get("tags", []))
-                ]
-                st.caption(f"Showing {len(staged)} of {len(staged_raw)} assets")
-            else:
-                staged = staged_raw
-                st.caption(f"{len(staged)} assets ready for review")
-
-        # Apply sorting
-        sort_key_map = {
-            "Original Name": lambda a: a.get("original_name", "").lower(),
-            "Proposed Filename": lambda a: a.get("staged_name", "").lower(),
-            "Category": lambda a: a.get("category", "").lower(),
-            "Summary": lambda a: a.get("summary", "").lower(),
-        }
-        sort_by = st.session_state.get("staging_sort_by", "Original Name")
-        sort_dir = st.session_state.get("staging_sort_dir", "Asc")
-        key_fn = sort_key_map.get(sort_by, sort_key_map["Original Name"])
-        staged.sort(key=key_fn, reverse=(sort_dir == "Desc"))
+        staged_raw = st.session_state.staged_assets
+        filter_text = st.session_state.get("staging_filter", "").lower().strip()
+        if filter_text:
+            staged = [
+                a for a in staged_raw
+                if filter_text in a.get("original_name", "").lower()
+                or filter_text in a.get("staged_name", "").lower()
+                or filter_text in a.get("category", "").lower()
+                or any(filter_text in t.lower() for t in a.get("tags", []))
+            ]
+            st.caption(f"Showing {len(staged)} of {len(staged_raw)} assets")
+        else:
+            staged = staged_raw
+            st.caption(f"{len(staged)} assets ready for review")
 
         with st.expander("Naming Settings (edits update previews below)", expanded=True):
             col_tmpl, col_case, col_chars = st.columns(3)
@@ -917,18 +821,23 @@ with tab_upload:
         )
 
         # Bulk category assignment
-        col_bulk_cat, col_bulk_btn = st.columns([2, 1])
+        sel_count = int(edited_df["select"].sum())
+        col_bulk_cat, col_bulk_btn, col_bulk_info = st.columns([2, 1, 2])
         with col_bulk_cat:
             bulk_category = st.selectbox("Apply category to selected",
                                          [""] + sorted(CATEGORY_LIST),
                                          key="bulk_category_sel")
         with col_bulk_btn:
-            if st.button("Apply", key="bulk_apply_btn") and bulk_category:
+            disabled = sel_count == 0 or not bulk_category
+            if st.button("Apply", key="bulk_apply_btn", disabled=disabled) and bulk_category:
                 selected = edited_df[edited_df["select"]]
                 for idx in selected.index:
                     staged[idx]["category"] = bulk_category
                 st.success(f"Updated {len(selected)} assets to '{bulk_category}'")
                 st.rerun()
+        with col_bulk_info:
+            if sel_count == 0:
+                st.caption("Select assets using the checkbox column above.")
 
         # Export and import staging
         col_csv, col_json, col_spacer = st.columns([1, 1, 4])
@@ -957,11 +866,17 @@ with tab_upload:
                     st.rerun()
 
         st.caption("Re-analyze individual assets:")
-        ra_cols = st.columns(len(staged))
-        for i, asset in enumerate(staged):
-            with ra_cols[i]:
-                st.button(f"\u21bb #{i+1}", key=f"ra_{i}",
-                          on_click=lambda idx=i: setattr(st.session_state, "reanalyze_target", idx))
+        n_per_row = 5
+        for row_start in range(0, len(staged), n_per_row):
+            row_indices = list(range(row_start, min(row_start + n_per_row, len(staged))))
+            cols = st.columns(len(row_indices))
+            for col_idx, idx in enumerate(row_indices):
+                asset = staged[idx]
+                with cols[col_idx]:
+                    name = asset["original_name"]
+                    short = name[:18] + "\u2026" if len(name) > 20 else name
+                    st.button(f"\u21bb {short}", key=f"ra_{idx}",
+                              on_click=lambda i=idx: setattr(st.session_state, "reanalyze_target", i))
 
         with st.expander("Show preview thumbnails"):
             cols = st.columns(min(len(staged), 5))
@@ -1029,7 +944,6 @@ with tab_upload:
                     temp_dir = st.session_state.get("temp_dir")
                     if temp_dir:
                         shutil.rmtree(temp_dir, ignore_errors=True)
-                    st.session_state.pop("temp_dir", None)
 
                     if failed:
                         msg = f"Committed {committed} assets. {failed} failed."
@@ -1037,8 +951,11 @@ with tab_upload:
                     else:
                         msg = f"All {committed} assets committed successfully to {target_dir.resolve()}!"
                         st.toast(msg)
-                        st.session_state.staged_assets = []
-                        st.session_state.analysis_done = False
+
+                    for key in ["uploaded_files", "base64_cache", "staged_assets", "temp_dir",
+                                "analysis_done", "analysis_errors"]:
+                        st.session_state.pop(key, None)
+                    st.session_state.clear_counter += 1
             except Exception as exc:
                 import traceback
                 st.error(f"Commit crashed: {exc}")
