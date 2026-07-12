@@ -412,7 +412,7 @@ class TestOpenRouterProvider:
     def setup_method(self):
         self.prov = OpenRouterProvider()
         self.prov.api_key = "fake-or-key"
-        self.prov.model = "nvidia/nemotron-3-nano-omni"
+        self.prov.model = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 
     def test_inherits_from_openai(self):
         assert isinstance(self.prov, OpenAIProvider)
@@ -422,7 +422,7 @@ class TestOpenRouterProvider:
 
     def test_available_models(self):
         models = self.prov.available_models()
-        assert "nvidia/nemotron-3-nano-omni" in models
+        assert "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" in models
 
     @patch("engine.openai.OpenAI")
     def test_analyze_success(self, mock_openai):

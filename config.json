@@ -134,7 +134,7 @@
     "temperature": 0.15,
     "num_ctx": 8192,
     "keep_alive": "1h",
-    "last_provider": "groq",
+    "last_provider": "openrouter",
     "providers": {
       "ollama": {
         "models": [
@@ -182,7 +182,7 @@
       },
       "openrouter": {
         "models": [
-          "nvidia/nemotron-3-nano-omni"
+          "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
         ],
         "base_url": "https://openrouter.ai/api/v1"
       }
