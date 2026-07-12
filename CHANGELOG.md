@@ -1,5 +1,13 @@
 # Changelog
 
+## [Bugfix batch 1] — 2026-07-12
+- **VISION_MODEL_PREFIXES narrowed:** `"qwen2"` matched `qwen2.5-coder` (non-vision). Changed to `"qwen2.5vl"` and `"qwen2-vl"`.
+- **Model dropdown shows all models:** Removed vision filter from `available_models()` so all installed Ollama models appear in the dropdown.
+- **Non-vision model warning:** Sidebar now shows `⚠️ This model may not support vision analysis.` when a non-vision model is selected.
+- **Duplicate emoji fixed:** Upload warning no longer renders `⚠️` twice (`icon` param vs message text).
+- **Profile selector widget conflict:** Removed `index` param; uses session state init instead.
+- **config.json prompts fixed:** 3 profiles (`general_broll`, `cinematography`, `motion_overlays`) stored as JSON arrays instead of strings — `get_active_prompt().replace()` would crash on those profiles. Converted to single strings.
+
 ## [Milestone 4.2] — 2026-07-11
 - **Planning & Documentation overhaul:**
   - `prd.md` expanded with ~20 new feature checkboxes: prompt profiles, multi-provider AI, case styling, duplicate detection, Advanced Features expander, subdirectory CLI flag, config editor, naming templates, and more
