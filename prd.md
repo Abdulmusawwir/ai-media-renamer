@@ -39,13 +39,13 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] Support image formats: JPG, JPEG, PNG, WebP, GIF
 - [x] Eager file saving to temp directory (files survive Streamlit reruns)
 - [x] "Clear All Files" button to reset upload state
-- [ ] Progress indicator during upload / file copy
+- [x] Progress indicator during upload / file copy
 - [ ] `--include-subdirectories` flag for CLI scanning
 
 ### AI Analysis Pipeline
 - [x] Phase 1 — Parallel FFmpeg frame extraction with hardware acceleration detection (NVIDIA, Intel QSV, AMF, CPU fallback)
 - [x] High-resolution image downscaling in memory (1024px max edge, no temp files)
-- [x] Video storyboard extraction (10 frames, 5x2 grid, fast-seeking)
+- [x] Single frame extraction (midpoint, fast-seeking via ffmpeg)
 - [x] Phase 2 — Sequential AI analysis via Ollama vision model (qwen2.5vl:7b)
 - [x] Per-asset rerun loop: one AI call per script execution, advanced via `st.rerun()`
 - [x] Structured AI response parsing with typed error handling
@@ -53,30 +53,32 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] 40-category taxonomy validation — invalid suggestions fall back to uncategorized
 - [x] Stop Analysis button (immediate abort, preserves already-analyzed assets)
 - [x] Progress bar during extraction and analysis phases
-- [ ] Multiple AI prompt profiles (Religious, General, Videography, Custom) — selectable in web UI and CLI
-- [ ] Multi-provider AI support (Ollama, OpenAI, Anthropic, LM Studio) with provider abstraction layer
-- [ ] Auto-detect available Ollama models via `ollama.list()` and populate dropdown
-- [ ] Per-asset re-analysis button + "Re-analyze All"
-- [ ] Ollama health check with status indicator in web UI
+- [x] 6 AI prompt profiles (General Balanced, General B-Roll, Cinematography, Motion Overlays, Religious Landmarks, Custom) — selectable in web UI (main interface, before analysis) and CLI via `--profile`
+- [x] Multi-provider AI support (Ollama, OpenAI, Anthropic, Groq, OpenRouter) with provider abstraction layer — cloud providers disabled in UI, untested
+- [x] Auto-detect available Ollama models via `ollama.list()` and populate dropdown
+- [x] "Re-analyze Selected" button (replaced per-asset + Re-analyze All buttons)
+- [x] Ollama health check with status indicator in web UI
 
 ### Boot Diagnostics & Environment Lifecycle
-- [ ] 4-Stage Bootstrap Checklist on app startup (Core utilities, Ollama daemon, model manifest, cloud config)
-- [ ] Interactive model download UI with real-time progress bar (`/api/pull` streaming)
-- [ ] Hybrid AI switching (Local Ollama ↔ Cloud Gemini) with graceful RAM/VRAM decoupling (`keep_alive=0`)
-- [ ] Boot panel smart routing: if Ollama/model missing but cloud key present, bypass download
-- [ ] `[Wipe Local Model Cache]` button with confirmation guard in Configuration view
-- [ ] PyInstaller bundle with embedded binary path resolution (`_resolve_binary_path()`)
+- [x] 4-Stage Bootstrap Checklist on app startup (Core utilities, Ollama daemon, model manifest, cloud config)
+- [x] Interactive model download UI with real-time progress bar (`/api/pull` streaming)
+- [x] Hybrid AI switching (Local Ollama ↔ Cloud Gemini) with graceful RAM/VRAM decoupling (`keep_alive=0`)
+- [x] Boot panel smart routing: if Ollama/model missing but cloud key present, bypass download
+- [x] `[Wipe Local Model Cache]` button with confirmation guard in Configuration view
+- [x] PyInstaller bundle with embedded binary path resolution (`_resolve_binary_path()`)
 
 ### Staging & Review
-- [x] Editable `st.data_editor` with columns: select checkbox, original filename, proposed filename, category (dropdown), tags (comma-separated), summary (read-only)
+- [x] Editable `st.data_editor` with columns: select checkbox, original filename, proposed filename, category (dropdown with dynamic options including custom categories), tags (comma-separated), summary (read-only)
 - [x] Per-asset category override via dropdown with all 40 categories + custom text entry
-- [x] Preview thumbnails in expandable section
+- [x] Search/filter text input above the table (instant match by name, category, tags)
+- [x] Bulk category assignment — select-all checkbox + dropdown apply with custom category inline entry
+- [x] Native click-to-sort column headers
+- [x] CSV export ("Export Staged Changes") + CSV import expander
+- [x] Preview thumbnails in expandable section (single frame per video)
 - [x] "Sort into categorized subfolders" checkbox
 - [x] "Commit Selected" button — only checked rows are processed
 - [x] Collision-safe renaming (appends `_1`, `_2` etc. if target filename exists)
-- [ ] Naming template system (configurable `{category}_{topic}_{description}` patterns)
-- [ ] Case style selection (snake_case, camelCase, kebab-case, etc.) — under Advanced Features expander
-- [ ] Max filename character limit — under Advanced Features expander
+- [x] Naming template system in staging Naming Settings expander: pattern `{category}_{topic}_{description}`, case style selector (snake_case, camelCase, kebab-case, pascal_case, lowercase), max filename char limit — all with live preview updates in the staging table
 
 ### Metadata & File Commit
 - [x] In-place `Path.rename()` (no copy — fast, no duplication)
@@ -107,7 +109,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 
 ### Configuration
 - [x] Single `config.json` as source of truth for all tunable parameters
-- [x] Configurable: AI prompt, categories, model name/temperature/context/keep_alive, extensions, preview settings, logging limits
+- [x] Configurable: 6 AI prompt profiles, 40 categories, model/ provider settings, extensions, preview params, naming templates, logging limits
 - [x] No hardcoded constants in Python code
 - [ ] Config editor tab (read-only + editable modes) in web UI
 - [ ] In-app category management (add/delete/rename categories via UI)

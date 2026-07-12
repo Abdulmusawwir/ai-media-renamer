@@ -1,5 +1,22 @@
 # Changelog
 
+## [Layer 3 Complete] — 2026-07-12
+- **Staging search/filter:** `st.text_input` above the data editor filters by name, category, or tags with instant matching. "Showing N of M" caption.
+- **Bulk category assignment:** Select-all checkbox + dropdown apply to checked rows. Custom category entry via "custom" option with inline text input.
+- **Column sorting:** Removed redundant sort dropdown — Streamlit's `st.data_editor` provides native click-to-sort column headers.
+- **CSV export/import:** `export_staging_csv()` / `import_staging_csv()` in engine.py. "Export Staged Changes" button and import expander.
+- **Single-frame extraction:** `process_video_to_base64()` now extracts one frame at the video midpoint instead of a 5×2 storyboard grid. Eliminates "series of frames" / "grid of" descriptions in AI summaries. Previews show a single frame.
+- **AI Prompt Profile moved to main interface:** Removed from sidebar, placed right before the "Run AI Analysis" button — changeable per analysis run.
+- **Custom categories in data editor:** SelectboxColumn options dynamically include all categories found in staged assets (including previously applied custom ones).
+- **Pre-analysis Advanced Features expander removed:** Case style, max chars, and naming pattern controls consolidated into the staging "Naming Settings" expander with live preview updates.
+- **Re-analyze UX simplified:** Replaced per-asset row buttons + "Re-analyze All" with a single "Re-analyze Selected" button below the table. Filters `base64_cache` to checked rows and restarts Phase 2.
+- **Export JSON removed:** Only "Export Staged Changes" (CSV) remains.
+- **Commit cleanup:** Clears `uploaded_files`, `base64_cache`, `staged_assets`, `temp_dir`, and `analysis_done` so re-analysis works without re-upload.
+- **Blank category display fixed:** `asset.get("suggested_category") or "uncategorized"` handles empty strings properly.
+- **Vision model warning on first render:** Uses `cur_val` instead of `st.session_state.get(model_key, "")`, fixing the false warning on default model selection.
+- **Extraction status visibility:** `st.success("✅ Step 1 complete: N files extracted")` displayed at start of Phase 2 so progress doesn't appear empty during analysis.
+- **Apply button alignment:** Caption + collapsed selectbox + button in 3-column layout for proper alignment.
+
 ## [Bugfix batch 1] — 2026-07-12
 - **VISION_MODEL_PREFIXES narrowed:** `"qwen2"` matched `qwen2.5-coder` (non-vision). Changed to `"qwen2.5vl"` and `"qwen2-vl"`.
 - **Model dropdown shows all models:** Removed vision filter from `available_models()` so all installed Ollama models appear in the dropdown.
@@ -28,43 +45,36 @@
 - **Persistent commit message:** Simplified condition from `and not analysis_done and not analysis_in_progress` to bare `if commit_message:`.
 - **`st.text_input` widget caching fix:** Dynamic `key` parameter forces widget to re-read `value` when source context changes — prevents stale output_dir display.
 - **Context documentation files:**
-  - Added `AGENTS.md` — master orchestrator with mandatory file read order and verification gate
-  - Added `system_prompt.md` — codified language, architecture, naming, and framework rules
-  - Added `prd.md` — product requirements with MVP checklist and explicit out-of-scope list
-  - Added `implementation_plan.md` — 53-task milestone backlog across 11 technical layers
-  - Added `audit.md` — bug tracker, orphaned code, and PRD divergence log
-  - Added `task.md` — active session scratchpad
-  - Updated `PROJECT.md`, `README.md`, `CHANGELOG.md` to reflect current architecture
+  - Added `AGENTS.md`, `prd.md`, `implementation_plan.md`, `audit.md`, `task.md`
+  - Updated `PROJECT.md`, `README.md`, `CHANGELOG.md`
 
 ## [Milestone 4.0] — 2026-07-11
-- **Web application:** New `app.py` using Streamlit with 2 tabs — Upload & Analyze (with inline staging matrix) and Analytics Dashboard (auto-refreshing charts and timeline).
-- **Module split:** Core engine extracted to `engine.py`. CLI workflow moved to `cli.py`. Old monolithic script deleted.
-- **Extended AI prompt:** Added 9 more Islamic landmarks (Blue Mosque, Sheikh Zayed, Al-Aqsa, Imam Reza, Hassan II, Badshahi, Faisal, Cordoba, Wazir Khan) and full cinematography analysis instructions (shot types, camera movement, lighting, color, composition, mood).
-- **Cinematography config:** New `cinematography` section in `config.json` with categorized lookup tables for shot types, camera moves, lighting, color palettes, composition techniques, and moods.
-- **Editable staging table:** `st.data_editor` with dropdown category, editable filename, editable tags, and checkbox selection. Category override available for every asset, not just uncategorized.
-- **Live analytics dashboard:** Auto-refreshing every 10 seconds with stats cards, Plotly category pie chart, daily bar chart, and filterable event timeline reading from JSONL logs.
-- **File upload workflow:** Users upload files via Streamlit's file uploader. Files saved to temp directory. Parallel extraction + sequential AI analysis with progress bars.
+- **Web application:** New `app.py` using Streamlit with 2 tabs — Upload & Analyze (with inline staging matrix) and Analytics Dashboard.
+- **Module split:** Core engine extracted to `engine.py`. CLI workflow moved to `cli.py`.
+- **Extended AI prompt:** Full cinematography analysis instructions (shot types, camera movement, lighting, color, composition, mood).
+- **Cinematography config:** Reference tables for shot types, camera moves, lighting, color palettes, composition, moods.
+- **Editable staging table:** `st.data_editor` with dropdown category, editable filename, editable tags, checkbox selection.
+- **Live analytics dashboard:** Auto-refreshing stats cards, Plotly charts, filterable event timeline.
+- **File upload workflow:** Upload via Streamlit, save to temp dir, parallel extraction + sequential AI analysis.
 
 ## [Milestone 3.3] — 2026-07-11
-- **External configuration:** All configurable constants (AI prompt, categories, model settings, preview params) moved from hardcoded globals into `config.json`.
-- **Expanded categories:** Category taxonomy grew from 12 to 38 entries, covering footage, graphics, VFX, and media types.
-- **Custom category override:** Uncategorized assets now prompt the user to assign a custom category during staging review.
-- **File logging:** Pipeline logs every event (AI analysis, commits, errors, skips) as JSON Lines to `logs/renamer_YYYY-MM-DD.jsonl`.
-- **Streamlit analytics dashboard:** Consolidated into `app.py` Tab 2 — auto-refreshing stats cards, Plotly charts, and filterable event timeline from JSONL logs.
-- **CLI & UX:** Cleaner startup with config validation, more informative progress messages.
+- **External configuration:** All constants moved from hardcoded globals into `config.json`.
+- **Expanded categories:** Category taxonomy grew from 12 to 38 entries.
+- **Custom category override:** Uncategorized assets prompt user to assign a custom category.
+- **File logging:** JSON Lines logging to `logs/renamer_YYYY-MM-DD.jsonl`.
+- **CLI & UX:** Cleaner startup with config validation.
 
 ## [Milestone 3.2] — 2026-07-11
-- **Category validation:** AI `suggested_category` is validated against the allowed taxonomy; invalid or missing values fall back to `uncategorized` with optional verbose logging.
-- **Image preview downscaling:** Hi-res images are downscaled in memory via FFmpeg (1024px max edge, JPEG) before AI analysis; original files on disk are never modified.
-- **Structured AI error handling:** `analyze_asset_with_ai` returns typed error results (JSON parse, missing keys, Ollama errors) with actionable messages; added `--verbose` / `-v` CLI flag for raw model response debug output; one automatic retry on transient Ollama failures.
-- **Parallel metadata commits:** Apply All path uses `ThreadPoolExecutor` with one `ExifToolSession` per worker thread; interactive mode stays sequential.
-- **Documentation:** Updated README, PROJECT.md, and added `requirements.txt`.
+- **Category validation:** AI `suggested_category` validated against allowed taxonomy; invalid values fall back to `uncategorized`.
+- **Image preview downscaling:** Hi-res images downscaled in memory via FFmpeg (1024px max edge).
+- **Structured AI error handling:** Typed error results with actionable messages; `--verbose` debug flag; one automatic retry on transient failures.
+- **Parallel metadata commits:** `ThreadPoolExecutor` with one `ExifToolSession` per worker thread.
+- **Documentation:** README, PROJECT.md, requirements.txt.
 
 ## [Milestone 3.1] — 2026-07-08
-- Fixed error when analyzing hi-res images which caused an AI parse verification mismatch error — by changing num_ctx from 4096 to 8192 in the `analyze_asset_with_ai(base64_img)` function.
+- Fixed hi-res image analysis error — num_ctx increased from 4096 to 8192.
 
 ## [Milestone 3] — 2026-07-08
-- Implemented high-performance memory-based processing.
-- Switched to persistent ExifTool background processes.
-- Simplified terminal output for a user-friendly experience.
-- Added automated hardware acceleration with CPU fallback.
+- High-performance memory-based processing.
+- Persistent ExifTool background processes.
+- Automated hardware acceleration with CPU fallback.

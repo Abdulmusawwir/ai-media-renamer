@@ -1,49 +1,49 @@
 # AI Media Renamer
 
-A vibecoded utility that automatically organizes, renames, and tags media assets using local or cloud AI vision models. Comes with both a **CLI** and a **Streamlit web app**.
+Automatically organize, rename, and tag video/image assets using local AI vision models. 6 prompt profiles for different use cases. Comes with both a **CLI** and a **Streamlit web app**.
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
-```
-
-### Local Mode (Ollama)
-Ensure `ollama` is running with `qwen2.5vl:7b` installed, and `exiftool` + `ffmpeg` are in your PATH.
-
-### Cloud Mode (Gemini)
-No local AI model needed. Enter your Gemini API key in the sidebar.
-
-### Web App (recommended)
-```bash
 streamlit run app.py
 ```
 
+### Prerequisites
+- **Ollama** with a vision model (e.g. `qwen2.5vl:7b`) — [ollama.com](https://ollama.com)
+- **ExifTool 12+** — [exiftool.org](https://exiftool.org)
+- **FFmpeg 6+** (including ffprobe) — [ffmpeg.org](https://ffmpeg.org)
+
 ### CLI
 ```bash
-python cli.py "path/to/your/assets"
-python cli.py "path/to/your/assets" --verbose
+python cli.py "path/to/your/assets" [--verbose] [--profile cinematography]
 ```
 
 ## Modules
 
 | File | Purpose |
 |---|---|
-| `engine.py` | Core importable functions — config loading, ExifTool sessions, FFmpeg extraction, AI analysis, environment checks, file commits. Never run directly. |
-| `cli.py` | CLI workflow — scans directory, extracts, analyzes, stages, and commits with interactive prompts. |
-| `app.py` | Streamlit web app — 2 tabs: Upload & Analyze (file upload + inline staging matrix), Analytics Dashboard. |
-| `config.json` | All configuration — prompt, 40 categories, model settings, cinematography reference tables, preview params, cloud providers, naming templates. |
+| `engine.py` | Core importable functions — config, ExifTool sessions, FFmpeg frame extraction, AI analysis, environment checks, file commits |
+| `app.py` | Streamlit web app — Upload & Analyze tab (file upload, per-asset AI analysis, editable staging matrix, commit), Analytics Dashboard |
+| `cli.py` | CLI workflow — scan, extract, analyze, stage, commit |
+| `config.json` | Single source of truth — prompt profiles (6), categories (40), model settings, naming templates, providers, logging |
 
-## Web App Features (app.py)
+## Web App Features
 
-- **Upload & Analyze** — Drag-and-drop file upload with progress bar and extension validation, parallel FFmpeg frame extraction with hardware acceleration (CUDA/QSV/CPU/AMF), sequential per-asset AI analysis with progress bars, editable staging matrix (filename, category dropdown, comma-separated tags, checkbox selection), thumbnail previews, commit with optional categorized subfolders
-- **AI Provider Panel** — Sidebar toggle between Local (Ollama) and Cloud (Gemini) with environment status indicators, API key input, model download/wipe controls
-- **Analytics Dashboard** — Auto-refreshing every 10 seconds, stats cards (total events, committed, errors, skipped), Plotly category pie chart, daily activity bar chart, filterable event timeline from JSONL logs, Reset All button
-- **Naming Templates** — Configurable `{category}_{topic}_{description}` patterns with preset templates and custom case styles
+- **Upload & Analyze** — Drag-and-drop upload with extension/file-size validation, parallel FFmpeg frame extraction (single midpoint frame per video, hardware-accelerated), sequential per-asset AI analysis with progress bars
+- **Editable Staging Matrix** — `st.data_editor` with columns: select checkbox, original filename, editable proposed filename, category dropdown (with custom entry), comma-separated tags, read-only summary. Search/filter above the table. Native click-to-sort column headers.
+- **Bulk Category Assignment** — Select assets, pick a category (or type a custom one), apply to all checked rows at once
+- **AI Prompt Profiles** — 6 built-in profiles (General Balanced, General B-Roll, Cinematography, Motion Overlays, Religious Landmarks, Custom) selectable right before analysis. Changeable per run.
+- **Naming Settings** — Configurable `{category}_{topic}_{description}` pattern, case style (snake_case, camelCase, etc.), max filename length — all with live preview updates in the staging table
+- **Re-analyze Selected** — Check specific rows and re-analyze only those assets without re-processing the entire batch
+- **CSV Import/Export** — Export staging table as CSV ("Export Staged Changes"), re-import later to restore or modify
+- **Commit** — Write metadata (XMP, QuickTime, EXIF, IPTC) and optionally sort into categorized subfolders
+- **Analytics Dashboard** — Auto-refreshing stats cards, Plotly charts, filterable event timeline from JSONL logs, Reset All button
+- **Sidebar** — Provider (Ollama) + model selection, API key management, environment health check indicators
 
 ## Output Directory
 
-Renamed files land in `~/Desktop/RenamedMedia` by default. When `sort_folders` is enabled, files are sorted into subdirectories by category (e.g., `~/Desktop/RenamedMedia/aerial_drone/`, `~/Desktop/RenamedMedia/particles_dust/`).
+Renamed files land in `~/Desktop/RenamedMedia` by default. With `sort_folders` enabled, files are sorted into subdirectories by category (e.g. `~/Desktop/RenamedMedia/aerial_drone/`).
 
 ## Metadata
 
@@ -54,42 +54,33 @@ After renaming, every file receives structured metadata written directly into it
 | `XMP-dc:Description` | All | Visual summary from AI analysis |
 | `XMP-dc:Subject` | All | Keywords as individual array elements |
 | `Microsoft:Category` | All | Assigned taxonomy category |
-| `QuickTime:Description`, `QuickTime:Comment`, `QuickTime:Keywords` | MP4/MOV/MKV | Video-specific metadata |
-| `Keys:Description`, `Keys:Keywords` | MP4/MOV/MKV | Additional video metadata |
+| `QuickTime:Description/Comment/Keywords` | MP4/MOV/MKV | Video-specific metadata |
+| `Keys:Description/Keywords` | MP4/MOV/MKV | Additional video metadata |
 | `EXIF:XPKeywords` | JPG/PNG | Windows Explorer "Tags" column |
 | `IPTC:Keywords` | JPG/PNG | Individual keyword entries |
-| `EXIF:ImageDescription`, `EXIF:UserComment` | JPG/PNG | EXIF description fields |
+| `EXIF:ImageDescription/UserComment` | JPG/PNG | EXIF description fields |
 
-Metadata is confirmed compatible with **DaVinci Resolve** (Description and Keywords in Metadata panel) and **Adobe Premiere Pro** (Description and Dublin Core Keywords columns).
+Compatible with **DaVinci Resolve** and **Adobe Premiere Pro**.
 
 ## Configuration (`config.json`)
 
-All tunable settings in one file:
-- **`ai_prompt`** — Extended system prompt with full cinematography analysis (shot types, camera movement, lighting, color, composition, mood)
+- **`prompt_profiles`** — 6 AI prompt profiles with per-profile allowed categories
 - **`allowed_categories`** — 40 taxonomy entries
-- **`cinematography`** — Reference tables for shot types, camera moves, lighting, palettes, composition, moods
-- **`model`** — Model name, temperature, num_ctx, keep_alive
-- **`preview`** — Image max edge, video grid tile/scale
-- **`naming_templates`** — Preset filename patterns with {category}, {topic}, {description}, {date}
-- **`cloud`** — Cloud provider list (gemini, openai, anthropic)
-- **`logging`** — Log directory, file rotation, max upload size
-
-## Image Preview
-
-High-resolution images are downscaled in memory (max 1024px long edge, JPEG via FFmpeg) before AI analysis. Originals are never modified. Videos use a 5x2 frame grid at 300px scale with fast-seeking.
+- **`cinematography`** — Reference tables for shot types, camera moves, lighting, color palettes, composition, moods
+- **`model`** — Provider, model name, temperature, num_ctx, keep_alive
+- **`preview`** — Image max edge (1024px), video frame scale (300px)
+- **`naming_templates`** — Preset filename patterns with `{category}`, `{topic}`, `{description}`, `{date}`
+- **`cloud`** — Provider list with base URLs (Ollama active; Gemini, OpenAI, Anthropic, Groq, OpenRouter implemented but untested)
+- **`logging`** — Log directory, file rotation, max upload size (10 GB)
 
 ## Logging
 
-Events are logged as JSON Lines to `logs/renamer_YYYY-MM-DD.jsonl`. Each line: timestamp (UTC), level (INFO/WARNING/ERROR), event type, filename, and structured details.
+Events logged as JSON Lines to `logs/renamer_YYYY-MM-DD.jsonl`. Each line: timestamp (UTC), level, event type, filename, structured details.
 
 ## System Requirements
 
 - **Python 3.10+**
-- **Ollama** with `qwen2.5vl:7b` (or compatible vision model) — for local mode only
-- **ExifTool 12+** — in system PATH
-- **FFmpeg 6+** (including ffprobe) — in system PATH
+- **Ollama** with a vision model (e.g. `qwen2.5vl:7b`)
+- **ExifTool 12+** in PATH
+- **FFmpeg 6+** (including ffprobe) in PATH
 - **Windows 10/11** (primary target; Linux/macOS compatible but untested)
-
----
-
-*If you find this tool useful, consider supporting its development. More details coming soon.*

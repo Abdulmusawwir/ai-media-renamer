@@ -122,8 +122,8 @@
 - [x] Show confirmation: "Updated 5 assets to category 'aerial_drone'"
 
 ### 3.3 Staging table column sorting
-- [x] Add sort dropdown (Original Name, Proposed Filename, Category, Summary) + Asc/Desc toggle above the table
-- [x] Implement server-side sorting: sort `staged_view` in-place by selected key and direction before rendering the data editor
+- [x] Use Streamlit's native click-to-sort on `st.data_editor` column headers (replaces custom sort dropdown)
+- [x] Removed redundant sort dropdown — `st.data_editor` in Streamlit 1.59.1 provides built-in column sorting
 
 ### 3.4 Export staging as CSV
 - [x] Add `export_staging_csv()` and `export_staging_json()` to `engine.py`
@@ -550,26 +550,26 @@
 The phases are ordered by dependency — each phase can be worked on independently but earlier phases unblock later ones.
 
 ```
-Phase A: 1.1, 9.3, 9.4          → Foundation (progress UI, gitignore, streamlit config)
-Phase B: 2.3, 9.2, 11.1          → Health checks + unit tests (confidence layer)
-Phase C: 1.2, 1.4, 1.3          → Upload hardening
-Phase D: 3.1, 3.2, 3.3          → Staging UX improvements — DONE
+Phase A: 1.1, 9.3, 9.4          → Foundation (progress UI, gitignore, streamlit config) — DONE
+Phase B: 2.3, 9.2, 11.1          → Health checks + unit tests (confidence layer) — DONE
+Phase C: 1.2, 1.4, 1.3          → Upload hardening — DONE
+Phase D: 3.1, 3.2, 3.3          → Staging UX improvements — DONE (sort via native click-to-sort)
 Phase E: 4.1, 4.4               → Commit flexibility (metadata-only + dry-run)
 Phase F: 5.1, 5.2, 5.3         → Session persistence + recovery
-Phase G: 2.1, 2.2, 2.4          → Analysis flexibility (re-analyze, model select, workers)
+Phase G: 2.1, 2.2, 2.4          → Analysis flexibility (re-analyze, model select, workers) — DONE
 Phase H: 6.1, 6.2, 6.3, 6.4    → Configuration UI
 Phase I: 7.1, 7.2, 7.3, 7.4    → Analytics enhancements
 Phase J: 8.1, 8.2, 8.3         → CLI improvements
 Phase K: 9.1, 11.2, 11.3       → Docker + integration tests
 Phase L: 10.1, 10.2, 10.3, 10.4 → Quality of life (core)
 Phase M: 3.4, 3.5               → CSV import/export — DONE
-Phase N: 4.2                    → Naming templates
-Phase O: 10.5, 10.6, 10.7       → Quality of life (polish)
-Phase P: 4.4, 4.5, 10.8         → Advanced Features expander + naming controls
-Phase Q: 2.5                    → Multi-profile AI prompts
-Phase R: 2.6, 2.7               → Multi-provider + model auto-detect
-Phase S: S.1–S.5                → Desktop Bundling & Bootstrap Lifecycle Setup
+Phase N: 4.2                    → Naming templates — DONE (full template system with case style + max chars in staging expander)
+Phase O: 10.5, 10.6, 10.7       → Quality of life (polish) — DONE
+Phase P: 4.4, 4.5, 10.8         → Advanced Features expander + naming controls — DONE (consolidated into staging Naming Settings)
+Phase Q: 2.5                    → Multi-profile AI prompts — DONE
+Phase R: 2.6, 2.7               → Multi-provider + model auto-detect — DONE (providers implemented, cloud disabled in UI)
+Phase S: S.1–S.5                → Desktop Bundling & Bootstrap Lifecycle Setup — DONE
 Phase T: 8.4                    → CLI subdirectories
 Phase U: 12.1, 12.2             → Duplicate detection + feedback
-Phase V: Support                 → Donation / sponsorship links, "Buy me a coffee" button
+Phase V: Support                 → Donation / sponsorship links
 ```

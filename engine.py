@@ -251,20 +251,17 @@ def get_video_duration(video_path):
 
 def process_video_to_base64(video_path, hw_accel):
     duration = get_video_duration(video_path)
-    start_offset = duration * 0.05
-    usable_duration = duration * 0.90
-    rate = 10 / usable_duration
+    mid_offset = max(1.0, duration * 0.5)
 
     cmd = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error']
     if hw_accel:
         cmd.extend(['-hwaccel', hw_accel])
 
     cmd.extend([
-        '-ss', str(start_offset),
+        '-ss', str(mid_offset),
         '-i', str(video_path),
-        '-t', str(usable_duration),
-        '-vf', f"fps={rate},scale={VIDEO_GRID_SCALE}:-1,tile={VIDEO_GRID_TILE}",
-        '-frames:v', '1',
+        '-vframes', '1',
+        '-vf', f"scale={VIDEO_GRID_SCALE}:-1",
         '-f', 'image2pipe',
         '-vcodec', 'mjpeg',
         '-'

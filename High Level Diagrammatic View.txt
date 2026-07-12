@@ -1,0 +1,20 @@
+Based on the uploaded MD files just now, can you create a High-level diagrammatic overview of the application depiction.
+
+
+[ User Interface Layer ]
+       │  (Streamlit Web UI / CLI)
+       ▼
+[ Bootstrap & Diagnostics Panel ] ──► (Validates FFmpeg, ExifTool, Ollama Daemon & Model Cache)
+       │
+       ▼
+[ Core Processing Engine ] ◄────────► [ AI Inference Layer ]
+  (engine.py)                           ├── Local: Ollama (Qwen2.5-VL via VRAM)
+       │                                └── Cloud: Gemini Flash API (Keyring)
+       ├──► 1. Media Ingestion & Downscaling (In-memory JPEGs)
+       ├──► 2. Storyboard Frame Extraction (Parallel FFmpeg Workers)
+       └──► 3. Payload Structuring & AI Inference
+       │
+       ▼
+[ Local File System & NLE Commit ]
+       ├──► Applies Metadata (Persistent ExifTool -stay_open Sessions)
+       └──► Executes Post-Hoc Naming Templates ──► Writes to ~/Desktop/RenamedMedia

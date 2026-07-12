@@ -263,51 +263,6 @@ with st.sidebar:
         if api_key:
             st.caption("\u2713 Key saved in system keychain")
 
-    # Prompt profile selector
-    st.divider()
-    st.caption("AI Prompt Profile")
-    profile_keys = list(PROMPT_PROFILES.keys())
-    current_profile = get_active_profile()
-
-    def _on_profile_change():
-        new_p = st.session_state.profile_selector
-        set_active_profile(new_p)
-
-    if "profile_selector" not in st.session_state:
-        st.session_state.profile_selector = current_profile
-
-    st.selectbox("Profile", profile_keys, format_func=lambda k: PROMPT_PROFILES.get(k, k),
-                 key="profile_selector", on_change=_on_profile_change,
-                 label_visibility="collapsed")
-
-    current_profile = st.session_state.profile_selector
-
-    if current_profile == "custom":
-        profile_data = config.get("prompt_profiles", {}).get("profiles", {}).get("custom", {})
-        current_custom = profile_data.get("prompt", "")
-
-        def _on_custom_prompt_change():
-            text = st.session_state.custom_prompt_area
-            if "prompt_profiles" not in config:
-                config["prompt_profiles"] = {"active": "custom", "profiles": {}}
-            if "custom" not in config["prompt_profiles"].setdefault("profiles", {}):
-                cfg_custom = {"label": "Custom Prompt", "prompt": "", "allowed_categories": []}
-                config["prompt_profiles"]["profiles"]["custom"] = cfg_custom
-            config["prompt_profiles"]["profiles"]["custom"]["prompt"] = text
-            save_config()
-
-        st.text_area("Write your own prompt", value=current_custom,
-                     key="custom_prompt_area", on_change=_on_custom_prompt_change,
-                     height=200,
-                     help="This prompt is auto-saved to config.json. Use the export button below to download it.")
-
-        st.download_button(
-            "Export Custom Prompt",
-            data=current_custom,
-            file_name="custom_ai_prompt.txt",
-            mime="text/plain",
-            help="Download your custom prompt as a .txt file.",
-        )
 
     st.divider()
     st.caption("Environment Status")
@@ -646,6 +601,56 @@ with tab_upload:
             st.success(f"✅ Analysis complete: {n} asset{'s' if n != 1 else ''} ready for review below.")
 
     # ------------------------------------------------------------------
+    # AI Prompt Profile (before analysis, changeable per run)
+    # ------------------------------------------------------------------
+    profile_keys = list(PROMPT_PROFILES.keys())
+    current_profile = get_active_profile()
+
+    def _on_profile_change():
+        new_p = st.session_state.profile_selector
+        set_active_profile(new_p)
+
+    if "profile_selector" not in st.session_state:
+        st.session_state.profile_selector = current_profile
+
+    col_prof_label, col_prof_sel = st.columns([1, 3])
+    with col_prof_label:
+        st.caption("AI Prompt Profile")
+    with col_prof_sel:
+        st.selectbox("Profile", profile_keys, format_func=lambda k: PROMPT_PROFILES.get(k, k),
+                     key="profile_selector", on_change=_on_profile_change,
+                     label_visibility="collapsed")
+
+    current_profile = st.session_state.profile_selector
+
+    if current_profile == "custom":
+        profile_data = config.get("prompt_profiles", {}).get("profiles", {}).get("custom", {})
+        current_custom = profile_data.get("prompt", "")
+
+        def _on_custom_prompt_change():
+            text = st.session_state.custom_prompt_area
+            if "prompt_profiles" not in config:
+                config["prompt_profiles"] = {"active": "custom", "profiles": {}}
+            if "custom" not in config["prompt_profiles"].setdefault("profiles", {}):
+                cfg_custom = {"label": "Custom Prompt", "prompt": "", "allowed_categories": []}
+                config["prompt_profiles"]["profiles"]["custom"] = cfg_custom
+            config["prompt_profiles"]["profiles"]["custom"]["prompt"] = text
+            save_config()
+
+        st.text_area("Write your own prompt", value=current_custom,
+                     key="custom_prompt_area", on_change=_on_custom_prompt_change,
+                     height=200,
+                     help="This prompt is auto-saved to config.json.")
+
+        st.download_button(
+            "Export Custom Prompt",
+            data=current_custom,
+            file_name="custom_ai_prompt.txt",
+            mime="text/plain",
+            help="Download your custom prompt as a .txt file.",
+        )
+
+    # ------------------------------------------------------------------
     # Analysis trigger: button + Phase 1 (only when idle)
     # ------------------------------------------------------------------
     if not st.session_state.analysis_in_progress and not st.session_state.analysis_done \
@@ -784,6 +789,13 @@ with tab_upload:
 
         df = pd.DataFrame(table_rows)
 
+        cat_options_set = set(CATEGORY_LIST)
+        for a in st.session_state.staged_assets:
+            cat = a.get("category") or ""
+            if cat:
+                cat_options_set.add(cat)
+        cat_options = sorted(cat_options_set) + ["uncategorized"]
+
         edited_df = st.data_editor(
             df,
             column_config={
@@ -792,7 +804,7 @@ with tab_upload:
                 "proposed_filename": st.column_config.TextColumn("Proposed Filename", width="medium"),
                 "category": st.column_config.SelectboxColumn(
                     "Category",
-                    options=sorted(CATEGORY_LIST) + ["uncategorized"],
+                    options=cat_options,
                     width="medium",
                 ),
                 "tags": st.column_config.TextColumn("Tags (comma-separated)", width="large"),
@@ -805,21 +817,25 @@ with tab_upload:
 
         # Bulk category assignment
         sel_count = int(edited_df["select"].sum())
-        col_bulk_label, col_bulk_cat, col_bulk_btn = st.columns([1, 2, 1])
-        with col_bulk_label:
-            st.caption("Apply category:")
-        with col_bulk_cat:
-            bulk_category = st.selectbox("Category", [""] + sorted(CATEGORY_LIST),
-                                         key="bulk_category_sel", label_visibility="collapsed")
-        with col_bulk_btn:
-            disabled = sel_count == 0 or not bulk_category
-            st.button("Apply", key="bulk_apply_btn", disabled=disabled)
+        bulk_category = st.selectbox(
+            "Apply category to selected",
+            [""] + sorted(CATEGORY_LIST) + ["custom"],
+            key="bulk_category_sel"
+        )
+        if bulk_category == "custom":
+            custom_cat = st.text_input("Custom category name", key="bulk_custom_cat")
+            effective_category = custom_cat.strip()
+        else:
+            effective_category = bulk_category
 
-        if st.session_state.get("bulk_apply_btn") and bulk_category:
+        disabled = sel_count == 0 or not effective_category
+        st.button("Apply", key="bulk_apply_btn", disabled=disabled)
+
+        if st.session_state.get("bulk_apply_btn") and effective_category:
             selected = edited_df[edited_df["select"]]
             for idx in selected.index:
-                staged[idx]["category"] = bulk_category
-            st.success(f"Updated {len(selected)} assets to '{bulk_category}'")
+                staged[idx]["category"] = effective_category
+            st.success(f"Updated {len(selected)} assets to '{effective_category}'")
             st.rerun()
 
         if sel_count == 0:

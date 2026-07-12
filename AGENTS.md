@@ -63,6 +63,13 @@ pytest                            # unit tests
 - Phase 1 (parallel FFmpeg extraction) runs ONCE per session.
 - Phase 2 does ONE `analyze_asset_with_ai()` call per script execution, increments `analysis_index`, calls `st.rerun()`.
 - Never batch AI calls in a single execution.
+- Re-analysis: filters `base64_cache` to selected file names, resets `analysis_index=0`, sets `analysis_in_progress=True`. Uses same Phase 2 loop.
+
+### Single-frame extraction (engine.py)
+- `process_video_to_base64()` extracts ONE frame at the video midpoint (replaced the old 5×2 storyboard grid).
+- AI receives a single representative frame per video — no more grid descriptions in summaries.
+- `-ss` before `-i` (input seeking) for speed; `-vframes 1`; scale via `VIDEO_GRID_SCALE`.
+- Images: downscaled via FFmpeg to `IMAGE_PREVIEW_MAX_EDGE` (1024px) in memory.
 
 ### ExifTool metadata (engine.py — most commonly misconfigured)
 - `XMP-dc:Subject=` — one arg PER TAG. Never comma-separated.
@@ -72,6 +79,16 @@ pytest                            # unit tests
 ### Session state reset pattern
 On file change → reset: `analysis_done`, `analysis_in_progress`, `analysis_aborted`, `staged_assets`, `base64_cache`.
 On Clear All → also pop: `uploaded_files`, `temp_dir`, increment `clear_counter`.
+On commit success → clear: `uploaded_files`, `base64_cache`, `staged_assets`, `temp_dir`, `analysis_done`, `output_dir`, `logger`; increment `clear_counter`.
+
+### AI Profile selector location
+- In `app.py` main interface (NOT sidebar), placed right before the "Run AI Analysis" button.
+- Changeable per analysis run. Has `on_change` that calls `set_active_profile()`.
+- Custom profile shows text area for user prompt + export button.
+
+### Staging table dynamic category options
+- `st.column_config.SelectboxColumn` options built from `set(CATEGORY_LIST) | set(all categories in staged_assets)`.
+- Ensures custom categories applied via bulk apply remain selectable in the data editor.
 
 ### Windows constraints
 - `str(fp).startswith()` for path checks (not `Path.startswith()` — positional on Windows).
