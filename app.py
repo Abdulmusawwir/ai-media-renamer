@@ -286,6 +286,20 @@ with st.sidebar:
                         st.error(result["message"])
 
 # -----------------------------------------------------------------------------
+# Footer (render early so it appears even when st.stop() blocks below)
+# -----------------------------------------------------------------------------
+
+st.markdown(
+    "<hr style='margin-top: 3rem; margin-bottom: 0.5rem; border-color: #334155;'>"
+    "<p style='text-align: center; color: #94a3b8; font-size: 0.8rem;'>"
+    "Made with love from Tanzania by "
+    "<a href='https://github.com/Abdulmusawwir/ai-media-renamer' "
+    "   style='color: #60a5fa; text-decoration: none;'>Abdul Musawwir</a>"
+    "</p>",
+    unsafe_allow_html=True,
+)
+
+# -----------------------------------------------------------------------------
 # Bootstrap diagnostics panel (blocks upload if critical dependency missing)
 # -----------------------------------------------------------------------------
 
@@ -972,16 +986,4 @@ with tab_analytics:
     else:
         st.info("No matching entries.")
 
-# -----------------------------------------------------------------------------
-# Footer
-# -----------------------------------------------------------------------------
 
-st.markdown(
-    "<hr style='margin-top: 3rem; margin-bottom: 0.5rem; border-color: #334155;'>"
-    "<p style='text-align: center; color: #94a3b8; font-size: 0.8rem;'>"
-    "Made with love from Tanzania by "
-    "<a href='https://github.com/Abdulmusawwir/ai-media-renamer' "
-    "   style='color: #60a5fa; text-decoration: none;'>Abdul Musawwir</a>"
-    "</p>",
-    unsafe_allow_html=True,
-)
