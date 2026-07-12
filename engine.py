@@ -598,9 +598,11 @@ def stream_model_download(model_name="qwen2.5vl:7b"):
                     "completed": completed,
                     "total": total,
                     "percentage": percentage,
+                    "detail": status,
                 }
             else:
-                yield {"status": "progress", "completed": completed, "total": total, "percentage": 0.0}
+                yield {"status": "status", "detail": status,
+                       "completed": completed, "total": total}
 
         yield {"status": "success", "message": f"Model {model_name} ready"}
     except Exception as exc:

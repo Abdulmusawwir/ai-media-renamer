@@ -98,6 +98,9 @@ if "env_check" not in st.session_state:
 if "model_downloading" not in st.session_state:
     st.session_state.model_downloading = False
 
+if "model_download_gen" not in st.session_state:
+    st.session_state.model_download_gen = None
+
 if "clear_counter" not in st.session_state:
     st.session_state.clear_counter = 0
 
@@ -230,22 +233,49 @@ if st.session_state.model_downloading:
         st.subheader("Downloading Qwen2.5-VL Model")
         progress_bar = st.progress(0)
         status_text = st.empty()
-        for update in stream_model_download("qwen2.5vl:7b"):
-            if update["status"] == "progress":
-                pct = update["percentage"]
-                progress_bar.progress(int(pct) / 100.0)
-                completed_gb = update["completed"] / (1024 ** 3)
-                total_gb = update["total"] / (1024 ** 3)
-                status_text.text(f"Downloading Qwen2.5-VL: {completed_gb:.1f}GB / {total_gb:.1f}GB ({pct:.0f}%)")
-            elif update["status"] == "success":
-                progress_bar.progress(1.0)
-                status_text.text("Download complete!")
-                st.session_state.model_downloading = False
-                st.session_state.env_check = None
-                st.rerun()
-            elif update["status"] == "error":
-                status_text.text(f"Download failed: {update['message']}")
-                st.session_state.model_downloading = False
+        st.caption("Model is ~5.9 GB. Download progress updates every few seconds.")
+        if st.button("Cancel Download"):
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+            st.rerun()
+
+        gen = st.session_state.model_download_gen
+        if gen is None:
+            gen = stream_model_download("qwen2.5vl:7b")
+            st.session_state.model_download_gen = gen
+
+        try:
+            update = next(gen)
+        except StopIteration:
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+            st.rerun()
+            st.stop()
+
+        if update["status"] == "progress":
+            pct = update["percentage"]
+            progress_bar.progress(int(pct) / 100.0)
+            completed_gb = update["completed"] / (1024 ** 3)
+            total_gb = update["total"] / (1024 ** 3)
+            status_text.text(f"Downloading: {completed_gb:.1f}GB / {total_gb:.1f}GB ({pct:.0f}%)")
+            st.session_state.model_download_gen = gen
+            st.rerun()
+        elif update["status"] == "status":
+            status_text.text(f"{update['detail']}...")
+            st.session_state.model_download_gen = gen
+            st.rerun()
+        elif update["status"] == "success":
+            progress_bar.progress(1.0)
+            status_text.success("Download complete! Model installed. Refreshing environment...")
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+            st.session_state.env_check = None
+            st.rerun()
+        elif update["status"] == "error":
+            status_text.error(f"Download failed: {update['message']}")
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+
     if st.session_state.model_downloading:
         st.stop()
 
