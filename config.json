@@ -130,11 +130,11 @@
     ".gif"
   ],
   "model": {
-    "name": "llama-3.2-90b-vision-preview",
+    "name": "",
     "temperature": 0.15,
     "num_ctx": 8192,
     "keep_alive": "1h",
-    "last_provider": "anthropic",
+    "last_provider": "ollama",
     "providers": {
       "ollama": {
         "models": [
@@ -142,7 +142,7 @@
           "qwen2.5vl:32b",
           "llava:13b"
         ],
-        "selected_model": "llama-3.2-90b-vision-preview"
+        "selected_model": "qwen2.5-coder:14b"
       },
       "gemini": {
         "models": [
@@ -160,11 +160,8 @@
           "gpt-4o",
           "gpt-4o-mini",
           "gpt-4-turbo",
-          "gpt-4o-2024-08-06",
-          "o1",
-          "o3-mini"
-        ],
-        "selected_model": "gemini-2.0-flash-001"
+          "gpt-4o-2024-08-06"
+        ]
       },
       "anthropic": {
         "models": [
@@ -174,7 +171,7 @@
           "claude-3-sonnet-20240229",
           "claude-3-haiku-20240307"
         ],
-        "selected_model": "llama-3.2-90b-vision-preview"
+        "selected_model": ""
       },
       "groq": {
         "models": [

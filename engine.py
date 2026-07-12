@@ -358,6 +358,20 @@ def _parse_ai_response(raw_text):
 # 5b. AI PROVIDERS (Abstract base + implementations)
 # -----------------------------------------------------------------------------
 
+VISION_MODEL_PREFIXES = {
+    "llava", "bakllava", "qwen2", "minicpm", "cogvlm", "moondream",
+    "yi-vl", "gemma3", "xclip", "llama3.2-vision", "llama3.2-11b-vision",
+    "llama3.2-90b-vision", "pixtral",
+}
+
+
+def _is_vision_model(name):
+    name_lower = name.lower().replace(":", "-")
+    for prefix in VISION_MODEL_PREFIXES:
+        if name_lower.startswith(prefix.lower()):
+            return True
+    return False
+
 
 class AIProvider(ABC):
     def __init__(self):
@@ -465,7 +479,7 @@ class OllamaProvider(AIProvider):
                     name = m.model
                 else:
                     name = str(m)
-                if name:
+                if name and _is_vision_model(name):
                     models.append(name)
             return models
         except Exception:
@@ -619,13 +633,12 @@ def get_provider(name):
     if name != "ollama":
         inst.api_key = load_api_key(name)
     pconf = config.get("model", {}).get("providers", {}).get(name, {})
+    valid_models = pconf.get("models", [])
     saved_model = pconf.get("selected_model", "")
-    if saved_model:
+    if saved_model and (name == "ollama" or saved_model in valid_models):
         inst.model = saved_model
-    elif name != "ollama":
-        models = pconf.get("models", [])
-        if models:
-            inst.model = models[0]
+    elif name != "ollama" and valid_models:
+        inst.model = valid_models[0]
     return inst
 
 
