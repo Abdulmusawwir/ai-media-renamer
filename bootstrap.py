@@ -232,16 +232,59 @@ def _stream_model_with_progress(win, step_num, label, model_name):
     win.update()
 
 
+def _log(msg):
+    try:
+        log_path = CACHE_DIR / "debug.log"
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        import datetime
+        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {msg}\n")
+    except Exception:
+        pass
+
+
 def main():
+    _log(f"main() argv={sys.argv} frozen={getattr(sys, 'frozen', False)}")
+
     if "--streamlit-server" in sys.argv:
-        from streamlit.web import cli as stcli
         if "--check-only" in sys.argv:
+            import importlib.metadata
+            importlib.metadata.version("streamlit")
             sys.exit(0)
-        sys.argv = ["streamlit", "run", str(APP_PATH),
-                    "--server.port", "8501",
-                    "--global.developmentMode", "false",
-                    "--browser.gatherUsageStats", "false"]
-        stcli.main()
+
+        _log(f"APP_PATH={APP_PATH} exists={APP_PATH.exists()}")
+        from streamlit.web import bootstrap as st_bootstrap
+        _log("calling st_bootstrap.run()")
+        st_bootstrap.run(
+            main_script_path=str(APP_PATH),
+            is_hello=False,
+            args=[],
+            flag_options={
+                "server.port": 8501,
+                "global.developmentMode": False,
+                "browser.gatherUsageStats": False,
+                "server.headless": True,
+            },
+        )
+        _log("st_bootstrap.run() returned")
+        return
+
+    # Hide console window for GUI mode
+    try:
+        import ctypes
+        ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+    except Exception:
+        pass
+
+    if "--no-gui" in sys.argv:
+        class _StubWin:
+            def set_step(self, *a): pass
+            def set_progress(self, *a): pass
+            def set_info(self, *a): pass
+            def update(self): pass
+            def close(self): pass
+        _launch_app(_StubWin())
         return
 
     win = SetupWindow()
@@ -424,12 +467,17 @@ def _launch_app(win):
     win.set_info("Starting Streamlit server...")
     win.update()
 
+    _log(f"launch_app: spawning subprocess {sys.executable} --streamlit-server")
+    log_path = CACHE_DIR / "server.log"
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    log_fh = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(
         [sys.executable, "--streamlit-server"],
         creationflags=subprocess.CREATE_NO_WINDOW,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_fh,
+        stderr=log_fh,
     )
+    _log(f"launch_app: child PID={proc.pid}")
 
     # Wait for Streamlit to be ready
     import time
@@ -441,17 +489,36 @@ def _launch_app(win):
             r = requests.get(health_url, timeout=2)
             if r.status_code == 200:
                 ready = True
+                _log("health check: OK (200)")
                 break
-        except Exception:
-            pass
+        except Exception as e:
+            _log(f"health check: {e}")
         time.sleep(0.5)
 
     if not ready:
+        _log("health check: FAILED after 30s")
+        # Dump child process stderr
+        log_fh.close()
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                _log(f"child stdout/stderr:\n{f.read()}")
+        except Exception:
+            pass
         win.set_info("App taking longer than expected — opening browser...")
         win.update()
     else:
         win.set_info("Opening app window...")
         win.update()
+
+    # Also dump server log for success case
+    log_fh.close()
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            server_out = f.read().strip()
+            if server_out:
+                _log(f"child server output:\n{server_out}")
+    except Exception:
+        pass
 
     win.close()
 

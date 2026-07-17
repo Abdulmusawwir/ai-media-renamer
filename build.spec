@@ -1,26 +1,38 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import copy_metadata
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 block_cipher = None
+
+# Collect ALL Streamlit submodules — manual listing misses dynamic imports like magic_funcs
+_streamlit_submodules = collect_submodules('streamlit')
+
+# Collect frontend assets for Streamlit component packages
+_autorefresh_data = collect_data_files('streamlit_autorefresh')
+
+# Locate Streamlit's static assets (index.html, JS bundles, CSS, etc.)
+_streamlit_static = os.path.join(
+    os.path.dirname(__import__("streamlit").__file__), "static"
+)
 
 a = Analysis(
     ['bootstrap.py'],
     pathex=[],
     binaries=[],
     datas=copy_metadata('streamlit') + [
+        (_streamlit_static, os.path.join("streamlit", "static")),
         ('.streamlit', '.streamlit'),
         ('app.py', '.'),
         ('engine.py', '.'),
         ('config.json', '.'),
         ('icon.ico', '.'),
-    ],
+    ] + _autorefresh_data,
     hiddenimports=[
         'ollama',
-        'streamlit',
         'PIL',
         'PIL._tkinter_finder',
         'tkinter',
@@ -33,7 +45,7 @@ a = Analysis(
         'anthropic',
         'keyring',
         'streamlit_autorefresh',
-    ],
+    ] + _streamlit_submodules,
     hookspath=['hooks'],
     runtime_hooks=[],
     excludes=[],
@@ -59,7 +71,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

@@ -12,6 +12,3 @@ primaryColor = "#3b82f6"
 
 [browser]
 gatherUsageStats = false
-
-[runner]
-runOnSave = false
