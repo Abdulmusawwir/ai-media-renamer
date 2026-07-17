@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import webbrowser
 from pathlib import Path
 
@@ -108,8 +109,6 @@ class SetupWindow:
         self._update_info = {}
 
         self._stopped = False
-        self._continue_event = threading.Event() if __import__("threading") else None
-        import threading
         self._continue_event = threading.Event()
 
     def _center_window(self):
