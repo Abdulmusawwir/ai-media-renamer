@@ -1,6 +1,10 @@
+[global]
+developmentMode = false
+
 [server]
 maxUploadSize = 10240
 headless = true
+port = 8501
 
 [theme]
 base = "dark"

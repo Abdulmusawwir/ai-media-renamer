@@ -237,9 +237,7 @@ def main():
         from streamlit.web import cli as stcli
         if "--check-only" in sys.argv:
             sys.exit(0)
-        sys.argv = ["streamlit", "run", str(APP_PATH),
-                     "--server.port", "8501",
-                     "--browser.gatherUsageStats", "false"]
+        sys.argv = ["streamlit", "run", str(APP_PATH)]
         stcli.main()
         return
 
