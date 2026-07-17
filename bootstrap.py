@@ -235,6 +235,8 @@ def _stream_model_with_progress(win, step_num, label, model_name):
 def main():
     if "--streamlit-server" in sys.argv:
         from streamlit.web import cli as stcli
+        if "--check-only" in sys.argv:
+            sys.exit(0)
         sys.argv = ["streamlit", "run", str(APP_PATH),
                      "--server.port", "8501",
                      "--browser.gatherUsageStats", "false"]

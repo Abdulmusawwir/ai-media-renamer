@@ -18,6 +18,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Build EXE
         run: pyinstaller build.spec
+      - name: Smoke test EXE
+        run: dist\AIMediaRenamer.exe --streamlit-server --check-only
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v3.0.2
         with:

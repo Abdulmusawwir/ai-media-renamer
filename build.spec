@@ -3,13 +3,15 @@
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import copy_metadata
+
 block_cipher = None
 
 a = Analysis(
     ['bootstrap.py'],
     pathex=[],
     binaries=[],
-    datas=[
+    datas=copy_metadata('streamlit') + [
         ('.streamlit', '.streamlit'),
         ('app.py', '.'),
         ('engine.py', '.'),
