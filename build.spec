@@ -22,6 +22,8 @@ a = Analysis(
         'PIL',
         'PIL._tkinter_finder',
         'tkinter',
+        'webview',
+        'pywebview',
         'requests',
         'pandas',
         'plotly',

@@ -10,6 +10,7 @@ import requests
 
 from engine import (
     VERSION,
+    _is_vision_model,
     _resolve_binary_path,
     check_for_updates,
     download_file,
@@ -63,7 +64,7 @@ class SetupWindow:
                          bg=BG, fg=FG)
         title.pack(pady=(20, 4))
 
-        self.version_label = tk.Label(self.root, text=f"v{VERSION}",
+        self.version_label = tk.Label(self.root, text=f"{VERSION}",
                                       font=("Segoe UI", 9), bg=BG, fg="#888888")
         self.version_label.pack(pady=(0, 16))
 
@@ -232,6 +233,14 @@ def _stream_model_with_progress(win, step_num, label, model_name):
 
 
 def main():
+    if "--streamlit-server" in sys.argv:
+        from streamlit.web import cli as stcli
+        sys.argv = ["streamlit", "run", str(APP_PATH),
+                     "--server.port", "8501",
+                     "--browser.gatherUsageStats", "false"]
+        stcli.main()
+        return
+
     win = SetupWindow()
 
     if not win.root:
@@ -283,12 +292,10 @@ def main():
         win.update()
 
         # ---- Step 3: Ollama ----
-        if shutil.which("ollama"):
-            win.set_step(3, "\u2713 Checking Ollama... found")
-            win.set_progress(100)
-            win.set_info("")
-        else:
-            installer_path = OLLAMA_INSTALLER_CACHE / "OllamaSetup.exe"
+        ollama_binary = shutil.which("ollama")
+        installer_path = OLLAMA_INSTALLER_CACHE / "OllamaSetup.exe"
+
+        if not ollama_binary:
             if not installer_path.exists():
                 url = "https://ollama.com/download/OllamaSetup.exe"
                 win.set_step(3, "\u27f3 Downloading Ollama installer...")
@@ -305,35 +312,70 @@ def main():
             win.set_info("Running silent installer (this may take a moment)...")
             win.update()
             subprocess.run([str(installer_path), "/S"], check=True, capture_output=True)
-            win.set_info("Waiting for Ollama service to start...")
+            ollama_binary = shutil.which("ollama")
+
+        # Check if the Ollama service is actually running
+        ollama_running = False
+        try:
+            resp = requests.get("http://localhost:11434/api/tags", timeout=2)
+            ollama_running = resp.status_code == 200
+        except Exception:
+            pass
+
+        if ollama_running:
+            win.set_step(3, "\u2713 Checking Ollama... running")
+            win.set_progress(100)
+            win.set_info("")
+        elif ollama_binary:
+            win.set_step(3, "\u27f3 Starting Ollama service...")
+            win.set_progress(50)
+            win.set_info("Launching Ollama in background...")
             win.update()
-            if wait_for_ollama_service(timeout=120):
-                win.set_step(3, "\u2713 Checking Ollama... installed")
+            subprocess.Popen(
+                [ollama_binary, "serve"],
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            if wait_for_ollama_service(timeout=30):
+                win.set_step(3, "\u2713 Checking Ollama... running")
                 win.set_progress(100)
                 win.set_info("")
             else:
-                win.set_step(3, "\u26a0 Ollama installed but service not detected")
+                win.set_step(3, "\u26a0 Ollama service did not start")
                 win.set_progress(100)
                 win.set_info("Please start Ollama manually and restart this app.")
                 win.wait_for_user()
                 win.close()
                 return
+        else:
+            win.set_step(3, "\u26a0 Ollama not found")
+            win.set_progress(100)
+            win.set_info("Ollama installation may have failed. Please install manually from ollama.com.")
+            win.wait_for_user()
+            win.close()
+            return
         win.update()
 
         # ---- Step 4: AI Model ----
-        try:
-            import ollama as _ollama
-            models = _ollama.list().get("models", [])
-            has_model = any(
-                m.get("name", "").startswith("qwen2.5vl") if isinstance(m, dict)
-                else str(m).startswith("qwen2.5vl")
-                for m in models
-            )
-        except Exception:
-            has_model = False
+        def _vision_model_installed():
+            try:
+                import ollama as _ollama
+                tags = _ollama.list()
+                for m in tags.get("models", []):
+                    if isinstance(m, dict):
+                        name = m.get("name", "")
+                    elif hasattr(m, "model"):
+                        name = m.model
+                    else:
+                        name = str(m)
+                    if name and _is_vision_model(name):
+                        return True
+            except Exception:
+                pass
+            return False
 
-        if has_model:
-            win.set_step(4, "\u2713 Downloading AI model... found")
+        if _vision_model_installed():
+            win.set_step(4, "\u2713 AI model (qwen2.5vl:7b)... found")
             win.set_progress(100)
             win.set_info("")
         else:
@@ -376,34 +418,61 @@ def main():
 def _launch_app(win):
     win.set_step(6, "\u2713 Starting app...")
     win.set_progress(100)
-    win.set_info("Opening browser...")
+    win.set_info("Starting Streamlit server...")
     win.update()
 
-    streamlit_cmd = [sys.executable, "-m", "streamlit", "run", str(APP_PATH),
-                     "--server.port", "8501",
-                     "--browser.gatherUsageStats", "false"]
+    proc = subprocess.Popen(
+        [sys.executable, "--streamlit-server"],
+        creationflags=subprocess.CREATE_NO_WINDOW,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
-    if getattr(sys, "frozen", False):
-        streamlit_cmd = ["streamlit", "run", str(APP_PATH),
-                         "--server.port", "8501",
-                         "--browser.gatherUsageStats", "false"]
+    # Wait for Streamlit to be ready
+    import time
+    health_url = "http://localhost:8501/_stcore/health"
+    deadline = time.time() + 30
+    ready = False
+    while time.time() < deadline:
+        try:
+            r = requests.get(health_url, timeout=2)
+            if r.status_code == 200:
+                ready = True
+                break
+        except Exception:
+            pass
+        time.sleep(0.5)
 
-    try:
-        proc = subprocess.Popen(
-            streamlit_cmd,
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception:
-        proc = subprocess.Popen(
-            streamlit_cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    if not ready:
+        win.set_info("App taking longer than expected — opening browser...")
+        win.update()
+    else:
+        win.set_info("Opening app window...")
+        win.update()
 
-    webbrowser.open("http://localhost:8501")
     win.close()
+
+    # Try pywebview native window; fall back to browser
+    try:
+        import webview
+        webview.create_window("AI Media Renamer", "http://localhost:8501",
+                              width=1280, height=800, resizable=True)
+        webview.start(private_mode=True, gui="edgechromium")
+    except Exception:
+        webbrowser.open("http://localhost:8501")
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+        sys.exit(0)
+
+    # Clean shutdown on window close
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        proc.kill()
     sys.exit(0)
 
 
