@@ -11,4 +11,6 @@ base = "dark"
 primaryColor = "#3b82f6"
 
 [browser]
+serverAddress = ""
 gatherUsageStats = false
+

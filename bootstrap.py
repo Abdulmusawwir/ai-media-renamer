@@ -254,20 +254,24 @@ def main():
             sys.exit(0)
 
         _log(f"APP_PATH={APP_PATH} exists={APP_PATH.exists()}")
-        from streamlit.web import bootstrap as st_bootstrap
-        _log("calling st_bootstrap.run()")
-        st_bootstrap.run(
-            main_script_path=str(APP_PATH),
-            is_hello=False,
-            args=[],
-            flag_options={
-                "server.port": 8501,
-                "global.developmentMode": False,
-                "browser.gatherUsageStats": False,
-                "server.headless": True,
-            },
-        )
-        _log("st_bootstrap.run() returned")
+        os.environ["STREAMLIT_CONFIG_PATH"] = str(BASE_DIR / ".streamlit" / "config.toml")
+        sys.argv = [
+            "streamlit",
+            "run",
+            str(APP_PATH),
+            "--server.port=8501",
+            "--server.headless=true",
+            "--browser.serverAddress=",
+            "--global.developmentMode=false",
+            "--browser.gatherUsageStats=false",
+        ]
+        _log(f"argv set to {sys.argv}")
+        _log(f"STREAMLIT_CONFIG_PATH={os.environ.get('STREAMLIT_CONFIG_PATH')}")
+        from streamlit.runtime.scriptrunner import magic_funcs  # noqa: F401
+        from streamlit.web.cli import main as stcli_main
+        _log("calling stcli.main()")
+        stcli_main()
+        _log("stcli.main() returned")
         return
 
     # Hide console window for GUI mode
