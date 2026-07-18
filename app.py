@@ -890,8 +890,7 @@ with tab_upload:
                 "select": select_all,
                 "original_name": asset["original_name"],
                 "proposed_filename": rendered,
-                "category": asset["category"] if asset["category"] and asset["category"] != "uncategorized"
-            else (asset.get("suggested_category") or "uncategorized"),
+                "category": asset["category"] or "uncategorized",
                 "tags": ", ".join(asset["tags"]),
                 "summary": asset["summary"],
             })
