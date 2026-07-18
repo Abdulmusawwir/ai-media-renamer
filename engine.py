@@ -721,7 +721,7 @@ register_provider("openrouter", OpenRouterProvider)
 
 def analyze_asset_with_ai(base64_img, verbose=False, retry=True):
     provider = get_provider("ollama")
-    provider.model = MODEL_NAME
+    provider.model = config["model"]["name"]
     return provider.analyze(base64_img, verbose=verbose)
 
 
@@ -979,7 +979,7 @@ def switch_ai_provider(new_provider, api_key=None):
 
     if CURRENT_PROVIDER == "ollama" and new_provider != "ollama":
         try:
-            ollama.generate(model=MODEL_NAME, keep_alive=0)
+            ollama.generate(model=config["model"]["name"], keep_alive=0)
         except Exception:
             pass
 
@@ -995,7 +995,7 @@ def switch_ai_provider(new_provider, api_key=None):
         CURRENT_API_KEY = stored
         provider.api_key = stored
     pconf = config.get("model", {}).get("providers", {}).get(new_provider, {})
-    provider.model = pconf.get("selected_model", "") or (pconf.get("models") or [None])[0] or MODEL_NAME
+    provider.model = pconf.get("selected_model", "") or (pconf.get("models") or [None])[0] or config["model"]["name"]
 
     CURRENT_PROVIDER_INSTANCE = provider
     config["model"]["last_provider"] = new_provider

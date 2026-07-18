@@ -241,6 +241,13 @@ with st.sidebar:
     model_key = f"model_{new_provider}"
     if models:
         cur_val = st.session_state.get(model_key, p.model or models[0])
+        if new_provider == "ollama" and cur_val and not _is_vision_model(cur_val):
+            vl_first = next((m for m in models if _is_vision_model(m)), None)
+            if vl_first:
+                cur_val = vl_first
+                config["model"]["providers"].setdefault("ollama", {})["selected_model"] = vl_first
+                config["model"]["name"] = vl_first
+                save_config()
         m_idx = models.index(cur_val) if cur_val in models else 0
         st.selectbox("Model", models, index=m_idx, key=model_key, on_change=_on_model_change)
     else:
