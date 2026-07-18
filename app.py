@@ -15,6 +15,7 @@ from streamlit_autorefresh import st_autorefresh
 
 from engine import (
     ALLOWED_CATEGORIES,
+    CASE_STYLE_LABELS,
     CASE_STYLE_OPTIONS,
     DEFAULT_CASE_STYLE,
     DEFAULT_MAX_FILENAME_CHARS,
@@ -786,8 +787,8 @@ with tab_upload:
             with col_case:
                 def _on_staging_case():
                     st.session_state.case_style = st.session_state.staging_case_style
-                st.selectbox("Case style",
-                             CASE_STYLE_OPTIONS,
+                st.selectbox("Case style", CASE_STYLE_OPTIONS,
+                             format_func=lambda s: CASE_STYLE_LABELS.get(s, s),
                              index=CASE_STYLE_OPTIONS
                              .index(st.session_state.case_style),
                              key="staging_case_style", on_change=_on_staging_case)

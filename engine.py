@@ -190,7 +190,8 @@ class ExifToolSession:
             self.process = subprocess.Popen(
                 ['exiftool', '-stay_open', 'True', '-@', '-'],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding='utf-8', bufsize=1
+                text=True, encoding='utf-8', bufsize=1,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             )
         except FileNotFoundError:
             print("Error: ExifTool is not installed or not in system PATH.")
@@ -355,6 +356,15 @@ def apply_case_style(name, style):
 
 
 CASE_STYLE_OPTIONS = ["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase", "title_case"]
+
+CASE_STYLE_LABELS = {
+    "snake_case": "Snake Case",
+    "camelCase": "Camel Case",
+    "kebab-case": "Kebab Case",
+    "pascal_case": "Pascal Case",
+    "lowercase": "Lowercase",
+    "title_case": "Title Case",
+}
 
 
 def truncate_filename(name, max_chars):
