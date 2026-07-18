@@ -11,7 +11,6 @@ from pathlib import Path
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
 from engine import (
     ALLOWED_CATEGORIES,
@@ -337,7 +336,7 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button("⚠️ Reset All",
+    if st.button("⚠️ Reset App and Settings",
                  help="Resets everything: pipeline state, staged files, extracted frames, "
                       "analysis progress, analytics logs, and output directory setting."):
         temp_dir = st.session_state.get("temp_dir")
@@ -870,6 +869,7 @@ with tab_upload:
             hide_index=True,
             width='stretch',
             num_rows="fixed",
+            key="staging_data_editor",
         )
 
         # Bulk category assignment
@@ -1026,13 +1026,7 @@ with tab_upload:
                     else:
                         msg = f"All {committed} assets committed successfully to {target_dir.resolve()}!"
                         st.toast(msg)
-                        temp_dir = st.session_state.get("temp_dir")
-                        if temp_dir:
-                            shutil.rmtree(temp_dir, ignore_errors=True)
-                        for key in ["uploaded_files", "base64_cache", "staged_assets", "temp_dir",
-                                    "analysis_done", "analysis_errors"]:
-                            st.session_state.pop(key, None)
-                        st.session_state.clear_counter += 1
+                        st.rerun()
             except Exception as exc:
                 import traceback
                 st.error(f"Commit crashed: {exc}")
@@ -1058,7 +1052,7 @@ with tab_analytics:
                 log_path.unlink(missing_ok=True)
             st.rerun()
     with col_reset:
-        if st.button("Reset All", type="secondary"):
+        if st.button("Reset App and Settings", type="secondary"):
             temp_dir = st.session_state.get("temp_dir")
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1074,9 +1068,6 @@ with tab_analytics:
             for log_path in LOG_DIR.glob("renamer_*.jsonl"):
                 log_path.unlink(missing_ok=True)
             st.rerun()
-
-    # Auto-refresh every 10 seconds
-    st_autorefresh(interval=10000, key="analytics_autorefresh")
 
     entries = load_log_entries()
     if not entries:

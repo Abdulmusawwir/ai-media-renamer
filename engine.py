@@ -111,11 +111,11 @@ CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
 CURRENT_API_KEY = ""
 
 NAMED_TEMPLATES = config.get('naming_templates', {
-    "default": "{category}_{topic}_{description}",
+    "default": "{topic}_{description}",
     "short": "{topic}_{description}",
-    "editorial": "{date}_{category}_{topic}"
+    "editorial": "{date}_{topic}"
 })
-DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{category}_{topic}_{description}")
+DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}")
 
 LOG_DIR = Path(config['logging']['directory'])
 MAX_UPLOAD_SIZE = int(config['logging'].get('max_upload_size', 10737418240))

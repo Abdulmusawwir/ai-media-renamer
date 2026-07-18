@@ -188,7 +188,7 @@
     }
   },
   "naming": {
-    "case_style": "snake_case",
+    "case_style": "title_case",
     "max_filename_chars": 0
   },
   "preview": {
@@ -205,9 +205,9 @@
     "max_upload_size": 10737418240
   },
   "naming_templates": {
-    "default": "{category}_{topic}_{description}",
+    "default": "{topic}_{description}",
     "short": "{topic}_{description}",
-    "editorial": "{date}_{category}_{topic}"
+    "editorial": "{date}_{topic}"
   },
   "cloud": {
     "providers": [
