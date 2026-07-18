@@ -70,11 +70,9 @@ st.markdown("""
 #MainMenu {visibility: hidden;}
 .stAppDeployButton {display: none;}
 footer {visibility: hidden;}
-header {visibility: hidden;}
 [data-testid="stStatusWidget"] {visibility: hidden;}
 [data-testid="stToolbar"] {display: none;}
 div[data-testid="stDecoration"] {display: none;}
-[data-testid="stSidebarCollapsedControl"] {display: none;}
 </style>
 """, unsafe_allow_html=True)
 
