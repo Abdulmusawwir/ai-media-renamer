@@ -5,3 +5,4 @@ __pycache__/
 build/
 dist/
 task.md
+.streamlit/secrets.toml

@@ -15,7 +15,7 @@ import ollama
 import openai
 import requests
 
-VERSION = "v1.2.0"
+VERSION = "v1.3.0"
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -764,7 +764,7 @@ def _format_ai_error(ai_result, verbose=False):
     return msg
 
 
-def execute_commit(asset, target_dir, sort_into_folders, exiftool_session):
+def execute_commit(asset, target_dir, sort_into_folders, exiftool_session, skip_rename=False):
     old_path = asset['original_path']
     safe_name = asset['staged_name']
     suffix = old_path.suffix.lower()
@@ -782,7 +782,11 @@ def execute_commit(asset, target_dir, sort_into_folders, exiftool_session):
         counter += 1
 
     try:
-        old_path.rename(new_path)
+        if skip_rename:
+            target_file = old_path
+        else:
+            old_path.rename(new_path)
+            target_file = new_path
 
         tag_string = ", ".join(asset['tags'])
         summary = asset['summary']
@@ -814,12 +818,91 @@ def execute_commit(asset, target_dir, sort_into_folders, exiftool_session):
                 f"-Comment={summary}",
             ] + [f"-Keywords={t}" for t in asset['tags']])
 
-        args.append(str(new_path))
+        args.append(str(target_file))
         exiftool_session.execute(args)
 
+        if skip_rename:
+            return target_file
         return new_path.relative_to(target_dir)
     except Exception as e:
         return f"ERROR:{e}"
+
+
+# -----------------------------------------------------------------------------
+# 5b. SESSION PERSISTENCE
+# -----------------------------------------------------------------------------
+
+SESSION_DIR = Path(os.environ.get('APPDATA', Path.home())) / "ai-media-renamer" / "sessions"
+
+
+def save_session(staged_assets, uploaded_files, settings):
+    """Save session state to a JSON file for later restoration."""
+    SESSION_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    session_path = SESSION_DIR / f"session_{ts}.json"
+
+    serializable_assets = []
+    for a in staged_assets:
+        entry = dict(a)
+        entry["original_path"] = str(entry["original_path"])
+        serializable_assets.append(entry)
+
+    serializable_files = {name: str(p) for name, p in uploaded_files.items()}
+
+    data = {
+        "version": 1,
+        "created": ts,
+        "staged_assets": serializable_assets,
+        "uploaded_files": serializable_files,
+        "settings": settings,
+    }
+    session_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    return session_path
+
+
+def list_sessions():
+    """Return list of saved sessions sorted by date (newest first)."""
+    if not SESSION_DIR.exists():
+        return []
+    sessions = sorted(SESSION_DIR.glob("session_*.json"), reverse=True)
+    result = []
+    for s in sessions:
+        try:
+            data = json.loads(s.read_text(encoding="utf-8"))
+            asset_count = len(data.get("staged_assets", []))
+            created = data.get("created", s.stem.replace("session_", ""))
+            result.append({"path": s, "created": created, "asset_count": asset_count})
+        except Exception:
+            continue
+    return result
+
+
+def load_session(session_path):
+    """Load a saved session, validating that original files still exist on disk."""
+    data = json.loads(Path(session_path).read_text(encoding="utf-8"))
+
+    staged_assets = []
+    missing_files = []
+    for a in data.get("staged_assets", []):
+        a["original_path"] = Path(a["original_path"])
+        if a["original_path"].exists():
+            staged_assets.append(a)
+        else:
+            missing_files.append(a["original_name"])
+
+    uploaded_files = {}
+    for name, path_str in data.get("uploaded_files", {}).items():
+        p = Path(path_str)
+        if p.exists():
+            uploaded_files[name] = p
+
+    settings = data.get("settings", {})
+    return {
+        "staged_assets": staged_assets,
+        "uploaded_files": uploaded_files,
+        "settings": settings,
+        "missing_files": missing_files,
+    }
 
 
 # -----------------------------------------------------------------------------

@@ -141,13 +141,13 @@
 ## Layer 4: File Commit & Metadata
 
 ### 4.1 Metadata-only mode (commit without rename)
-- [ ] Add a checkbox in the commit section: "Update metadata only (keep original filename)"
-- [ ] When checked, pass `skip_rename=True` to `execute_commit()`
-- [ ] In `engine.py` `execute_commit()`:
+- [x] Add a checkbox in the commit section: "Update metadata only (keep original filename)"
+- [x] When checked, pass `skip_rename=True` to `execute_commit()`
+- [x] In `engine.py` `execute_commit()`:
   - If `skip_rename`: skip `old_path.rename(new_path)`, use `old_path` as the target
   - Write all metadata tags to the file's current location
   - Return the original path instead of `new_path`
-- [ ] Update both `app.py` commit handler and `cli.py` commit path
+- [x] Update both `app.py` commit handler and `cli.py` commit path
 
 ### 4.2 Naming template system
 - [x] Add `naming_templates` section to `config.json`:
@@ -191,18 +191,18 @@
 ## Layer 5: Session Persistence & Recovery
 
 ### 5.1 Save session to disk
-- [ ] Create a `sessions/` directory (gitignored)
-- [ ] Add "Save Session" button in the Upload & Analyze tab
-- [ ] Serialize to JSON: `st.session_state.uploaded_files` (paths only, not buffers), `staged_assets`, `analysis_done`, `output_dir`
+- [x] Create a `sessions/` directory (gitignored)
+- [x] Add "Save Session" button in the Upload & Analyze tab
+- [x] Serialize to JSON: `st.session_state.uploaded_files` (paths only, not buffers), `staged_assets`, `analysis_done`, `output_dir`
   - Do NOT serialize `base64_cache` (too large — re-extract on restore)
-- [ ] Write to `sessions/session_YYYY-MM-DD_HHmmss.json`
-- [ ] Log a `session_saved` event
+- [x] Write to `sessions/session_YYYY-MM-DD_HHmmss.json`
+- [x] Log a `session_saved` event
 
 ### 5.2 Restore session from disk
-- [ ] Add a file uploader or dropdown in the Upload & Analyze tab: "Restore Session"
+- [x] Add a file uploader or dropdown in the Upload & Analyze tab: "Restore Session"
   - file uploader: load JSON file, parse, restore state
   - dropdown: list `sessions/*.json` files sorted by date
-- [ ] On restore:
+- [x] On restore:
   - Set `uploaded_files` from saved paths (validate files still exist on disk; warn if missing)
   - Set `staged_assets`, `analysis_done`, `output_dir`
   - Clear `base64_cache` (will be re-extracted on next analysis)

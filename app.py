@@ -44,12 +44,15 @@ from engine import (
     get_provider,
     import_staging_csv,
     list_providers,
+    list_sessions,
     load_api_key,
+    load_session,
     log_event,
     process_asset_to_base64,
     sanitize_name,
     save_api_key,
     save_config,
+    save_session,
     set_active_profile,
     setup_logging,
     stream_model_download,
@@ -567,6 +570,56 @@ with tab_upload:
             st.session_state.clear_counter += 1
             st.rerun()
 
+    # Session persistence — save / restore
+    has_work = bool(st.session_state.get("staged_assets")) or bool(st.session_state.get("uploaded_files"))
+    saved = list_sessions()
+    if has_work or saved:
+        with st.expander("Session", expanded=False):
+            col_save, col_restore = st.columns(2)
+            with col_save:
+                if st.button("Save Session", disabled=not has_work):
+                    settings = {
+                        "output_dir": st.session_state.get("output_dir", ""),
+                        "case_style": st.session_state.get("case_style", "title_case"),
+                        "max_filename_chars": st.session_state.get("max_filename_chars", 0),
+                        "template_string": st.session_state.get("template_string", ""),
+                    }
+                    path = save_session(
+                        st.session_state.get("staged_assets", []),
+                        st.session_state.get("uploaded_files", {}),
+                        settings,
+                    )
+                    st.toast(f"Session saved: {path.name}")
+            with col_restore:
+                if saved:
+                    options = [f"{s['created']}  ({s['asset_count']} assets)" for s in saved]
+                    chosen = st.selectbox("Saved sessions", options, key="session_picker")
+                    if st.button("Restore Session"):
+                        idx = options.index(chosen)
+                        result = load_session(saved[idx]["path"])
+                        st.session_state.staged_assets = result["staged_assets"]
+                        st.session_state.uploaded_files = result["uploaded_files"]
+                        s = result["settings"]
+                        if s.get("output_dir"):
+                            st.session_state.output_dir = s["output_dir"]
+                        if s.get("case_style"):
+                            st.session_state.case_style = s["case_style"]
+                        if s.get("max_filename_chars") is not None:
+                            st.session_state.max_filename_chars = s["max_filename_chars"]
+                        if s.get("template_string"):
+                            st.session_state.template_string = s["template_string"]
+                        st.session_state.analysis_done = True
+                        st.session_state.analysis_in_progress = False
+                        st.session_state.analysis_index = 0
+                        st.session_state.base64_cache = {}
+                        msg = f"Session restored ({len(result['staged_assets'])} assets)"
+                        if result["missing_files"]:
+                            msg += f". {len(result['missing_files'])} file(s) missing from disk."
+                        st.toast(msg)
+                        st.rerun()
+                else:
+                    st.caption("No saved sessions yet.")
+
     # ------------------------------------------------------------------
     # Phase 2: Per-asset rerun loop (one AI call per script execution)
     # ------------------------------------------------------------------
@@ -954,12 +1007,17 @@ with tab_upload:
                         st.caption(f"No preview: {asset['original_name']}")
 
         sort_folders = st.checkbox("Sort assets into categorized subfolders", value=True)
+        metadata_only = st.checkbox("Metadata only — keep original filenames",
+                                    help="Write AI-generated tags and summary to files without renaming them.")
 
         col_commit, col_refresh = st.columns([1, 3])
         with col_commit:
             commit_btn = st.button("Commit Selected", type="primary")
         with col_refresh:
-            st.caption("Selected rows will be renamed and tagged. Unchecked rows are skipped.")
+            if metadata_only:
+                st.caption("Selected rows will be tagged in-place. Original filenames preserved.")
+            else:
+                st.caption("Selected rows will be renamed and tagged. Unchecked rows are skipped.")
 
         if commit_btn:
             try:
@@ -987,7 +1045,8 @@ with tab_upload:
                             asset["category"] = safe_cat
                         asset["tags"] = [t.strip() for t in row["tags"].split(",") if t.strip()]
 
-                        result = execute_commit(asset, target_dir, sort_folders, exif)
+                        result = execute_commit(asset, target_dir, sort_folders, exif,
+                                                 skip_rename=metadata_only)
 
                         if result and not (isinstance(result, str) and result.startswith("ERROR:")):
                             committed += 1

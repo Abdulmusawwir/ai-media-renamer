@@ -51,9 +51,9 @@ def _init_commit_worker():
 
 
 def _parallel_execute_commit(args):
-    asset, target_dir, sort_into_folders = args
+    asset, target_dir, sort_into_folders, skip_rename = args
     session = _commit_thread_local.exif_session
-    result = execute_commit(asset, target_dir, sort_into_folders, session)
+    result = execute_commit(asset, target_dir, sort_into_folders, session, skip_rename=skip_rename)
     return asset, result
 
 
@@ -79,7 +79,7 @@ def _sanitize_category(raw):
 
 def process_library(directory_path, verbose=False, template_string=None, workers=None,
                     profile=None, case_style="snake_case", max_chars=0, force=False,
-                    export_csv=None, import_csv=None, dry_run=False):
+                    export_csv=None, import_csv=None, dry_run=False, metadata_only=False):
     extraction_workers = workers if workers is not None else EXTRACTION_WORKERS
     if profile:
         set_active_profile(profile)
@@ -135,7 +135,7 @@ def process_library(directory_path, verbose=False, template_string=None, workers
         # Skip to Phase 3
         _run_staging_phase(staged_assets, target_dir, logger, exif_session=None,
                            template_string=template_string, case_style=case_style,
-                           max_chars=max_chars, dry_run=dry_run)
+                           max_chars=max_chars, dry_run=dry_run, metadata_only=metadata_only)
         return
 
     # ------------------------------------------------------------------
@@ -267,7 +267,8 @@ def process_library(directory_path, verbose=False, template_string=None, workers
 
     # Phase 3: Summary & interactive staging
     _run_staging_phase(staged_assets, target_dir, logger, exif_session,
-                       template_string, case_style, max_chars, dry_run)
+                       template_string, case_style, max_chars, dry_run,
+                       metadata_only=metadata_only)
     exif_session.close()
 
 
@@ -276,7 +277,8 @@ def process_library(directory_path, verbose=False, template_string=None, workers
 # -----------------------------------------------------------------------------
 
 def _run_staging_phase(staged_assets, target_dir, logger, exif_session,
-                       template_string, case_style, max_chars, dry_run):
+                       template_string, case_style, max_chars, dry_run,
+                       metadata_only=False):
     print("\n" + "=" * 85)
     print("AI STAGING MATRIX SUMMARY VIEW")
     print("=" * 85)
@@ -331,12 +333,14 @@ def _run_staging_phase(staged_assets, target_dir, logger, exif_session,
             break
 
         elif choice == 'a' or (dry_run and choice == 'a'):
-            _commit_all(staged_assets, target_dir, sort_into_folders, logger, dry_run)
+            _commit_all(staged_assets, target_dir, sort_into_folders, logger, dry_run,
+                        metadata_only=metadata_only)
             break
 
         elif choice == 'i' or (dry_run and choice == 'i'):
             _interactive_commit(staged_assets, target_dir, sort_into_folders, logger,
-                                exif_session, template_string, case_style, max_chars, dry_run)
+                                exif_session, template_string, case_style, max_chars, dry_run,
+                                metadata_only=metadata_only)
             break
 
         elif choice == 'd':
@@ -351,14 +355,15 @@ def _run_staging_phase(staged_assets, target_dir, logger, exif_session,
 # Apply All (batch commit)
 # -----------------------------------------------------------------------------
 
-def _commit_all(staged_assets, target_dir, sort_into_folders, logger, dry_run):
+def _commit_all(staged_assets, target_dir, sort_into_folders, logger, dry_run,
+                metadata_only=False):
     if dry_run:
         print("\n[DRY RUN] Previewing batch commit...")
         _preview_dry_run(staged_assets, target_dir, sort_into_folders)
         return
 
     print("\nWriting metadata tags to files (parallel)...")
-    commit_args = [(asset, target_dir, sort_into_folders) for asset in staged_assets]
+    commit_args = [(asset, target_dir, sort_into_folders, metadata_only) for asset in staged_assets]
     max_workers = min(len(commit_args), os.cpu_count() or 4)
     committed_count = 0
     with ThreadPoolExecutor(max_workers=max_workers, initializer=_init_commit_worker) as executor:
@@ -384,7 +389,8 @@ def _commit_all(staged_assets, target_dir, sort_into_folders, logger, dry_run):
 # -----------------------------------------------------------------------------
 
 def _interactive_commit(staged_assets, target_dir, sort_into_folders, logger,
-                        exif_session, template_string, case_style, max_chars, dry_run):
+                        exif_session, template_string, case_style, max_chars, dry_run,
+                        metadata_only=False):
     print("\nInteractive Mode. Review individual assets:")
     committed_count = 0
     skipped_count = 0
@@ -413,7 +419,8 @@ def _interactive_commit(staged_assets, target_dir, sort_into_folders, logger,
             if dry_run:
                 print(f"  [DRY RUN] Would commit: {asset['original_name']} -> {asset['staged_name']}")
                 continue
-            final_rel_path = execute_commit(asset, target_dir, sort_into_folders, exif_session)
+            final_rel_path = execute_commit(asset, target_dir, sort_into_folders, exif_session,
+                                             skip_rename=metadata_only)
             if final_rel_path:
                 print(f"  Applied: {final_rel_path}")
                 log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
@@ -472,7 +479,8 @@ def _interactive_commit(staged_assets, target_dir, sort_into_folders, logger,
                 else:
                     print("  Invalid name, keeping original.")
             if not dry_run:
-                final_rel_path = execute_commit(asset, target_dir, sort_into_folders, exif_session)
+                final_rel_path = execute_commit(asset, target_dir, sort_into_folders, exif_session,
+                                                 skip_rename=metadata_only)
                 if final_rel_path:
                     print(f"  Applied: {final_rel_path}")
                     log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
@@ -491,7 +499,8 @@ def _interactive_commit(staged_assets, target_dir, sort_into_folders, logger,
                           details={"bulk_category": safe_bulk, "asset_count": len(staged_assets) - idx + 1})
                 print(f"  Category '{safe_bulk}' applied to {len(staged_assets) - idx + 1} asset(s).")
                 # Now commit this asset with the new category
-                final_rel_path = execute_commit(asset, target_dir, sort_into_folders, exif_session)
+                final_rel_path = execute_commit(asset, target_dir, sort_into_folders, exif_session,
+                                                 skip_rename=metadata_only)
                 if final_rel_path:
                     print(f"  Applied: {final_rel_path}")
                     log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
@@ -509,7 +518,8 @@ def _interactive_commit(staged_assets, target_dir, sort_into_folders, logger,
             clean_override = "".join(safe_chars).strip('_')
             if clean_override:
                 asset['staged_name'] = clean_override
-                final_rel_path = execute_commit(asset, target_dir, sort_into_folders, exif_session)
+                final_rel_path = execute_commit(asset, target_dir, sort_into_folders, exif_session,
+                                                 skip_rename=metadata_only)
                 if final_rel_path:
                     print(f"Applied Custom Override: {final_rel_path}")
                     log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
@@ -601,6 +611,10 @@ if __name__ == "__main__":
         "--dry-run", action="store_true",
         help="Preview commits without modifying any files."
     )
+    parser.add_argument(
+        "--metadata-only", action="store_true",
+        help="Write metadata tags only — keep original filenames, no rename."
+    )
     args = parser.parse_args()
 
     tmpl = args.template
@@ -613,4 +627,5 @@ if __name__ == "__main__":
         case_style=args.case_style, max_chars=args.max_chars,
         force=args.force, export_csv=args.export_csv,
         import_csv=args.import_csv, dry_run=args.dry_run,
+        metadata_only=args.metadata_only,
     )
