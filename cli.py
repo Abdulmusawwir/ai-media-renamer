@@ -11,6 +11,7 @@ from engine import (
     NAMED_TEMPLATES,
     PROMPT_PROFILES,
     VIDEO_EXTENSIONS,
+    CASE_STYLE_OPTIONS,
     ExifToolSession,
     _format_ai_error,
     analyze_asset_with_ai,
@@ -31,7 +32,7 @@ from engine import (
     validate_category,
 )
 
-CASE_STYLE_OPTIONS = ["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase"]
+
 
 # -----------------------------------------------------------------------------
 # Thread-local ExifTool sessions for parallel commit workers

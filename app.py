@@ -15,6 +15,7 @@ from streamlit_autorefresh import st_autorefresh
 
 from engine import (
     ALLOWED_CATEGORIES,
+    CASE_STYLE_OPTIONS,
     DEFAULT_CASE_STYLE,
     DEFAULT_MAX_FILENAME_CHARS,
     DEFAULT_TEMPLATE_STRING,
@@ -779,8 +780,8 @@ with tab_upload:
                 def _on_staging_case():
                     st.session_state.case_style = st.session_state.staging_case_style
                 st.selectbox("Case style",
-                             ["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase"],
-                             index=["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase"]
+                             CASE_STYLE_OPTIONS,
+                             index=CASE_STYLE_OPTIONS
                              .index(st.session_state.case_style),
                              key="staging_case_style", on_change=_on_staging_case)
             with col_chars:

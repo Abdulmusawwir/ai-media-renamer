@@ -347,8 +347,14 @@ def apply_case_style(name, style):
         return "".join(p.capitalize() for p in parts)
     elif style == "lowercase":
         return name.lower().replace("_", "").replace("-", "").replace(" ", "")
+    elif style == "title_case":
+        parts = name.replace("-", "_").replace(" ", "_").split("_")
+        return " ".join(p.capitalize() for p in parts if p)
     else:
         return name
+
+
+CASE_STYLE_OPTIONS = ["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase", "title_case"]
 
 
 def truncate_filename(name, max_chars):

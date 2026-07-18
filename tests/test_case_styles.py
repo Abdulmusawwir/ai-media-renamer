@@ -94,6 +94,20 @@ def test_lowercase():
     print(f"  lowercase: {len(cases)} cases PASS")
 
 
+def test_title_case():
+    cases = [
+        ("golden_hour_aerial_coastline", "Golden Hour Aerial Coastline"),
+        ("golden-hour-aerial-coastline", "Golden Hour Aerial Coastline"),
+        ("golden hour aerial coastline", "Golden Hour Aerial Coastline"),
+        ("Mixed_Case_Example", "Mixed Case Example"),
+        ("a_b_c", "A B C"),
+    ]
+    for inp, expected in cases:
+        result = apply_case_style(inp, "title_case")
+        assert result == expected, f"title_case({inp!r}) = {result!r}, expected {expected!r}"
+    print(f"  title_case: {len(cases)} cases PASS")
+
+
 def test_truncate_filename():
     cases = [
         ("golden_hour_aerial_coastline", 0, "golden_hour_aerial_coastline"),

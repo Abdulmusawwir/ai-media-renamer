@@ -461,11 +461,30 @@ def main():
         sys.exit(1)
 
 
+def _kill_stale_server():
+    """Kill any process still listening on port 8501 from a previous session."""
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            if ":8501" in line and "LISTENING" in line:
+                parts = line.split()
+                pid = int(parts[-1])
+                _log(f"killing stale server PID={pid}")
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                               capture_output=True, timeout=5)
+    except Exception as e:
+        _log(f"_kill_stale_server: {e}")
+
+
 def _launch_app(win):
     win.set_step(6, "\u2713 Starting app...")
     win.set_progress(100)
     win.set_info("Starting Streamlit server...")
     win.update()
+
+    _kill_stale_server()
 
     _log(f"launch_app: spawning subprocess {sys.executable} --streamlit-server")
     log_path = CACHE_DIR / "server.log"
