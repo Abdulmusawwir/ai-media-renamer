@@ -302,10 +302,10 @@
 - [ ] Add `rich` to `requirements.txt`
 
 ### 8.4 Include subdirectories flag
-- [ ] Add `--include-subdirectories` / `-r` flag to `cli.py`
-- [ ] When set, use `target_dir.rglob("*")` instead of `target_dir.iterdir()`
-- [ ] Maintain the same extension filtering
-- [ ] Log scanned subdirectory count in `session_start` event: `"subdirs_scanned": N`
+- [x] Add `--include-subdirectories` / `-r` flag to `cli.py`
+- [x] When set, use `target_dir.rglob("*")` instead of `target_dir.iterdir()`
+- [x] Maintain the same extension filtering
+- [x] Log scanned subdirectory count in `session_start` event: `"subdirs_scanned": N`
 
 ---
 
@@ -383,10 +383,10 @@
 - [ ] Option to disable in sidebar: "🔔 Play sound on commit complete"
 
 ### 10.4 Batch size warning
-- [ ] Before Phase 1 extraction, check `len(uploaded_files)`
-- [ ] If > 50 files: show `st.warning("Large batch detected (N files). Extraction may take several minutes.")` with a "Continue / Cancel" confirmation
-- [ ] If > 200 files: show stronger warning + recommend CLI for better throughput
-- [ ] Thresholds in `config.json`: `batch_warn_threshold: 50`, `batch_recommend_cli: 200`
+- [x] Before Phase 1 extraction, check `len(uploaded_files)`
+- [x] If > 50 files: show `st.warning("Large batch detected (N files). Extraction may take several minutes.")` with a "Continue / Cancel" confirmation
+- [x] If > 200 files: show stronger warning + recommend CLI for better throughput
+- [x] Thresholds in `config.json`: `batch_warn_threshold: 50`, `batch_recommend_cli: 200`
 
 ### 10.5 Footer attribution
 - [ ] Add a `st.markdown()` footer at the bottom of `app.py`:
@@ -413,9 +413,9 @@
 - [ ] Keep the detailed log accessible in the Analytics Dashboard tab
 
 ### 10.8 Advanced Features expander
-- [ ] Add a `st.expander("Advanced Features")` in the Upload & Analyze tab, positioned before the analysis trigger
-- [ ] Group inside: case style selector, max filename chars, custom prompt text area (also linked to profile selection)
-- [ ] Collapsed by default — clean default experience for most users
+- [x] Add a `st.expander("Advanced Features")` in the Upload & Analyze tab, positioned before the analysis trigger
+- [x] Group inside: case style selector, max filename chars, custom prompt text area (also linked to profile selection)
+- [x] Collapsed by default — clean default experience for most users
 
 ---
 

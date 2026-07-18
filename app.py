@@ -764,6 +764,29 @@ with tab_upload:
     # ------------------------------------------------------------------
     if not st.session_state.analysis_in_progress and not st.session_state.analysis_done \
             and st.session_state.get("uploaded_files"):
+        file_count = len(st.session_state.uploaded_files)
+        if file_count >= 200:
+            st.warning(f"Large batch ({file_count} files). Consider using the CLI for better "
+                       "throughput: `python cli.py \"path/to/dir\"`")
+        elif file_count >= 50:
+            st.info(f"Batch size: {file_count} files. Extraction may take a few minutes.")
+
+        with st.expander("Advanced Features", expanded=False):
+            adv_col1, adv_col2 = st.columns(2)
+            with adv_col1:
+                def _on_adv_case():
+                    st.session_state.case_style = st.session_state.adv_case_style
+                st.selectbox("Case style", CASE_STYLE_OPTIONS,
+                             format_func=lambda s: CASE_STYLE_LABELS.get(s, s),
+                             index=CASE_STYLE_OPTIONS.index(st.session_state.case_style),
+                             key="adv_case_style", on_change=_on_adv_case)
+            with adv_col2:
+                def _on_adv_chars():
+                    st.session_state.max_filename_chars = st.session_state.adv_max_chars
+                st.number_input("Max filename chars", min_value=0, max_value=200, step=5,
+                                key="adv_max_chars", on_change=_on_adv_chars,
+                                help="0 = no limit")
+
         col1, col2 = st.columns([1, 3])
         with col1:
             analyze_btn = st.button("Run AI Analysis", type="primary")
@@ -1227,6 +1250,12 @@ st.markdown(
     "Made with love from Tanzania by "
     "<a href='https://github.com/Abdulmusawwir/ai-media-renamer' "
     "   style='color: #60a5fa; text-decoration: none;'>Abdul Musawwir</a>"
+    " &mdash; "
+    "<a href='https://github.com/sponsors/Abdulmusawwir' "
+    "   style='color: #60a5fa; text-decoration: none;'>Sponsor</a>"
+    " &middot; "
+    "<a href='https://buymeacoffee.com/abdulmusawwir' "
+    "   style='color: #60a5fa; text-decoration: none;'>Buy Me a Coffee</a>"
     "</p>",
     unsafe_allow_html=True,
 )

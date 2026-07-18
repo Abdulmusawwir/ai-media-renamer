@@ -79,7 +79,8 @@ def _sanitize_category(raw):
 
 def process_library(directory_path, verbose=False, template_string=None, workers=None,
                     profile=None, case_style="snake_case", max_chars=0, force=False,
-                    export_csv=None, import_csv=None, dry_run=False, metadata_only=False):
+                    export_csv=None, import_csv=None, dry_run=False, metadata_only=False,
+                    recursive=False):
     extraction_workers = workers if workers is not None else EXTRACTION_WORKERS
     if profile:
         set_active_profile(profile)
@@ -141,7 +142,10 @@ def process_library(directory_path, verbose=False, template_string=None, workers
     # ------------------------------------------------------------------
     # Standard path: extraction + analysis
     # ------------------------------------------------------------------
-    asset_files = [f for f in target_dir.iterdir() if f.is_file() and f.suffix.lower() in valid_exts]
+    if recursive:
+        asset_files = [f for f in target_dir.rglob("*") if f.is_file() and f.suffix.lower() in valid_exts]
+    else:
+        asset_files = [f for f in target_dir.iterdir() if f.is_file() and f.suffix.lower() in valid_exts]
     if not asset_files:
         print("Empty queue. No matching video or image wrappers detected.")
         log_event(logger, "INFO", "session_end", details={"reason": "no_matching_files"})
@@ -615,6 +619,10 @@ if __name__ == "__main__":
         "--metadata-only", action="store_true",
         help="Write metadata tags only — keep original filenames, no rename."
     )
+    parser.add_argument(
+        "-r", "--include-subdirectories", action="store_true",
+        help="Scan subdirectories recursively for media files."
+    )
     args = parser.parse_args()
 
     tmpl = args.template
@@ -628,4 +636,5 @@ if __name__ == "__main__":
         force=args.force, export_csv=args.export_csv,
         import_csv=args.import_csv, dry_run=args.dry_run,
         metadata_only=args.metadata_only,
+        recursive=args.include_subdirectories,
     )
