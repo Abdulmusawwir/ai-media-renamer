@@ -337,6 +337,25 @@ with st.sidebar:
 
     st.divider()
 
+    if st.button("⚠️ Reset All",
+                 help="Resets everything: pipeline state, staged files, extracted frames, "
+                      "analysis progress, analytics logs, and output directory setting."):
+        temp_dir = st.session_state.get("temp_dir")
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        reset_keys = ["base64_cache", "staged_assets", "analysis_done", "uploaded_files",
+                      "temp_dir", "output_dir", "logger", "analysis_in_progress",
+                      "analysis_index", "analysis_aborted", "clear_counter",
+                      "analysis_errors"]
+        for key in reset_keys:
+            st.session_state.pop(key, None)
+        for h in logging.getLogger('video_renamer').handlers[:]:
+            h.close()
+            logging.getLogger('video_renamer').removeHandler(h)
+        for log_path in LOG_DIR.glob("renamer_*.jsonl"):
+            log_path.unlink(missing_ok=True)
+        st.rerun()
+
     if new_provider == "ollama" and env and env.get("ollama_running") and not env.get("model_available"):
         if st.button("Download Qwen2.5-VL Model", type="primary"):
             st.session_state.model_downloading = True
@@ -1027,9 +1046,17 @@ with tab_upload:
 # -----------------------------------------------------------------------------
 
 with tab_analytics:
-    col_title, col_reset = st.columns([3, 1])
+    col_title, col_clear_logs, col_reset = st.columns([3, 1, 1])
     with col_title:
         st.subheader("Analytics Dashboard")
+    with col_clear_logs:
+        if st.button("Clear Logs", type="secondary"):
+            for h in logging.getLogger('video_renamer').handlers[:]:
+                h.close()
+                logging.getLogger('video_renamer').removeHandler(h)
+            for log_path in LOG_DIR.glob("renamer_*.jsonl"):
+                log_path.unlink(missing_ok=True)
+            st.rerun()
     with col_reset:
         if st.button("Reset All", type="secondary"):
             temp_dir = st.session_state.get("temp_dir")

@@ -103,7 +103,7 @@ VIDEO_GRID_TILE = config['preview']['video_grid_tile']
 VIDEO_GRID_SCALE = config['preview']['video_grid_scale']
 EXTRACTION_WORKERS = _resolve_workers(config['preview'].get('extraction_workers', 0))
 
-DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'snake_case')
+DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'title_case')
 DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
 
 CLOUD_PROVIDERS = tuple(config.get('cloud', {}).get('providers', ['gemini', 'openai', 'anthropic', 'groq']))
@@ -254,7 +254,7 @@ def get_video_duration(video_path):
     cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
            '-of', 'default=noprint_wrappers=1:nokey=1', str(video_path)]
     try:
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode().strip()
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, creationflags=_NO_WINDOW).decode().strip()
         return float(output)
     except Exception:
         return 10.0
@@ -360,11 +360,11 @@ def apply_case_style(name, style):
 CASE_STYLE_OPTIONS = ["snake_case", "camelCase", "kebab-case", "pascal_case", "lowercase", "title_case"]
 
 CASE_STYLE_LABELS = {
-    "snake_case": "Snake Case",
-    "camelCase": "Camel Case",
-    "kebab-case": "Kebab Case",
-    "pascal_case": "Pascal Case",
-    "lowercase": "Lowercase",
+    "snake_case": "snake_case",
+    "camelCase": "camelCase",
+    "kebab-case": "kebab-case",
+    "pascal_case": "PascalCase",
+    "lowercase": "lowercase",
     "title_case": "Title Case",
 }
 

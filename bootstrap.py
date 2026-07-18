@@ -470,6 +470,7 @@ def _kill_stale_server():
     try:
         result = subprocess.run(
             ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         for line in result.stdout.splitlines():
             if ":8501" in line and "LISTENING" in line:
@@ -477,7 +478,8 @@ def _kill_stale_server():
                 pid = int(parts[-1])
                 _log(f"killing stale server PID={pid}")
                 subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                               capture_output=True, timeout=5)
+                               capture_output=True, timeout=5,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
     except Exception as e:
         _log(f"_kill_stale_server: {e}")
 
