@@ -6,6 +6,13 @@ import threading
 import webbrowser
 from pathlib import Path
 
+if getattr(sys, "frozen", False) and sys.stdin is None:
+    sys.stdin = open(os.devnull, "r")
+if getattr(sys, "frozen", False) and sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if getattr(sys, "frozen", False) and sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
 import requests
 
 from engine import (
@@ -273,13 +280,6 @@ def main():
         stcli_main()
         _log("stcli.main() returned")
         return
-
-    # Hide console window for GUI mode
-    try:
-        import ctypes
-        ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
-    except Exception:
-        pass
 
     if "--no-gui" in sys.argv:
         class _StubWin:
