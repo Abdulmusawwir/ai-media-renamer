@@ -953,6 +953,7 @@ with tab_upload:
                     committed = 0
                     failed = 0
                     progress = st.progress(0, text="Committing...")
+                    exif = ExifToolSession()
 
                     for commit_i in range(len(selected)):
                         row = selected.iloc[commit_i]
@@ -966,9 +967,7 @@ with tab_upload:
                             asset["category"] = safe_cat
                         asset["tags"] = [t.strip() for t in row["tags"].split(",") if t.strip()]
 
-                        exif = ExifToolSession()
                         result = execute_commit(asset, target_dir, sort_folders, exif)
-                        exif.close()
 
                         if result and not (isinstance(result, str) and result.startswith("ERROR:")):
                             committed += 1
@@ -981,6 +980,11 @@ with tab_upload:
                                       details={"error": err})
 
                         progress.progress((commit_i + 1) / len(selected))
+
+                    try:
+                        exif.close()
+                    except Exception:
+                        pass
 
                     log_event(logger, "INFO", "session_end", details={
                         "committed": committed, "failed": failed, "total": len(selected), "mode": "web_batch"
