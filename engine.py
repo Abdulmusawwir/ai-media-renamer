@@ -17,6 +17,8 @@ import requests
 
 VERSION = "v1.2.0"
 
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 # -----------------------------------------------------------------------------
 # 0. HELPER: resolve worker count
 # -----------------------------------------------------------------------------
@@ -191,7 +193,7 @@ class ExifToolSession:
                 ['exiftool', '-stay_open', 'True', '-@', '-'],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding='utf-8', bufsize=1,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+                creationflags=_NO_WINDOW,
             )
         except FileNotFoundError:
             print("Error: ExifTool is not installed or not in system PATH.")
@@ -225,7 +227,7 @@ def detect_hw_accel():
     for hw in ['cuda', 'qsv', 'amf']:
         try:
             cmd = ['ffmpeg', '-hwaccel', hw, '-f', 'lavfi', '-i', 'color=c=black:s=16x16:d=1', '-f', 'null', '-']
-            res = subprocess.run(cmd, capture_output=True)
+            res = subprocess.run(cmd, capture_output=True, creationflags=_NO_WINDOW)
             if res.returncode == 0:
                 return hw
         except Exception:
@@ -277,7 +279,7 @@ def process_video_to_base64(video_path, hw_accel):
     ])
 
     try:
-        process = subprocess.run(cmd, capture_output=True, check=True)
+        process = subprocess.run(cmd, capture_output=True, check=True, creationflags=_NO_WINDOW)
         return base64.b64encode(process.stdout).decode('utf-8')
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
@@ -295,7 +297,7 @@ def process_image_to_base64(image_path, max_edge=IMAGE_PREVIEW_MAX_EDGE):
         '-'
     ]
     try:
-        process = subprocess.run(cmd, capture_output=True, check=True)
+        process = subprocess.run(cmd, capture_output=True, check=True, creationflags=_NO_WINDOW)
         return base64.b64encode(process.stdout).decode('utf-8')
     except subprocess.CalledProcessError:
         return None

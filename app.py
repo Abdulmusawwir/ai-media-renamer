@@ -955,6 +955,7 @@ with tab_upload:
                     progress = st.progress(0, text="Committing...")
                     exif = ExifToolSession()
 
+                    committed_names = set()
                     for commit_i in range(len(selected)):
                         row = selected.iloc[commit_i]
                         asset = staged[selected.index[commit_i]]
@@ -971,6 +972,7 @@ with tab_upload:
 
                         if result and not (isinstance(result, str) and result.startswith("ERROR:")):
                             committed += 1
+                            committed_names.add(asset["original_name"])
                             log_event(logger, "INFO", "file_committed", file_name=asset["original_name"],
                                       details={"new_path": str(result), "category": asset["category"]})
                         else:
@@ -990,21 +992,28 @@ with tab_upload:
                         "committed": committed, "failed": failed, "total": len(selected), "mode": "web_batch"
                     })
 
-                    temp_dir = st.session_state.get("temp_dir")
-                    if temp_dir:
-                        shutil.rmtree(temp_dir, ignore_errors=True)
+                    if committed_names:
+                        st.session_state.staged_assets = [
+                            a for a in st.session_state.staged_assets
+                            if a["original_name"] not in committed_names
+                        ]
+                        for name in committed_names:
+                            st.session_state.base64_cache.pop(name, None)
 
                     if failed:
-                        msg = f"Committed {committed} assets. {failed} failed."
+                        msg = f"Committed {committed} assets. {failed} failed — remaining assets kept for retry."
                         st.toast(msg)
+                        st.rerun()
                     else:
                         msg = f"All {committed} assets committed successfully to {target_dir.resolve()}!"
                         st.toast(msg)
-
-                    for key in ["uploaded_files", "base64_cache", "staged_assets", "temp_dir",
-                                "analysis_done", "analysis_errors"]:
-                        st.session_state.pop(key, None)
-                    st.session_state.clear_counter += 1
+                        temp_dir = st.session_state.get("temp_dir")
+                        if temp_dir:
+                            shutil.rmtree(temp_dir, ignore_errors=True)
+                        for key in ["uploaded_files", "base64_cache", "staged_assets", "temp_dir",
+                                    "analysis_done", "analysis_errors"]:
+                            st.session_state.pop(key, None)
+                        st.session_state.clear_counter += 1
             except Exception as exc:
                 import traceback
                 st.error(f"Commit crashed: {exc}")
