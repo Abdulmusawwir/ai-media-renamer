@@ -63,6 +63,10 @@ class SetupWindow:
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        try:
+            self.root.iconbitmap(str(BASE_DIR / "icon.ico"))
+        except Exception:
+            pass
 
         self._center_window()
 
@@ -552,9 +556,10 @@ def _launch_app(win):
     # Try pywebview native window; fall back to browser
     try:
         import webview
+        _icon = str(BASE_DIR / "icon.ico")
         webview.create_window("AI Media Renamer", "http://localhost:8501",
                               width=1280, height=800, resizable=True)
-        webview.start(private_mode=True, gui="edgechromium")
+        webview.start(private_mode=True, gui="edgechromium", icon=_icon)
     except Exception:
         webbrowser.open("http://localhost:8501")
         proc.terminate()
