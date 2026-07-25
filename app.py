@@ -465,8 +465,8 @@ with st.sidebar:
                 st.caption("\u2713 Key saved in system keychain")
 
 
-    st.divider()
-    st.caption("Environment Status")
+    st.space()
+    st.caption("Environment status")
 
     env = st.session_state.env_check
     if env:
@@ -474,8 +474,8 @@ with st.sidebar:
             for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool"),
                                ("ollama_running", "Ollama Daemon"), ("model_available", "Qwen2.5-VL Model")]:
                 ok = env.get(key, False)
-                icon = "\u2705" if ok else "\u274c"
-                st.markdown(f"{icon} **{label}**")
+                status = "green" if ok else "red"
+                st.badge(label, color=status)
 
             if not env.get("ollama_running"):
                 st.error("Ollama is not running. Start Ollama and click Refresh.")
@@ -484,21 +484,20 @@ with st.sidebar:
         else:
             for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool")]:
                 ok = env.get(key, False)
-                icon = "\u2705" if ok else "\u274c"
-                st.markdown(f"{icon} **{label}**")
+                status = "green" if ok else "red"
+                st.badge(label, color=status)
             has_key = bool(load_api_key(new_provider))
-            key_icon = "\u2705" if has_key else "\u274c"
             pretty_name = new_provider.capitalize()
-            st.markdown(f"{key_icon} **{pretty_name} API Key**")
+            st.badge(f"{pretty_name} API Key", color="green" if has_key else "red")
             if has_key:
-                st.caption("\u2192 Routing execution via " + pretty_name)
+                st.caption(f"Routing execution via {pretty_name}")
 
     if st.button(":material/refresh: Refresh Status", key="refresh_status"):
         st.session_state.env_check = None
         st.session_state.ollama_health = None
         st.rerun()
 
-    st.divider()
+    st.space()
     if st.button(":material/system_update: Check for Updates", key="check_updates"):
         with st.spinner("Checking..."):
             info = check_for_updates()
@@ -510,7 +509,7 @@ with st.sidebar:
         else:
             st.caption(f"Could not check: {info.get('error', 'unknown')}")
 
-    st.divider()
+    st.space()
 
     if st.button(":material/delete_sweep: Reset App and Settings", key="sidebar_reset",
                  help="Resets everything: pipeline state, staged files, extracted frames, "
@@ -919,7 +918,7 @@ with tab_upload:
 
     col_prof_label, col_prof_sel = st.columns([1, 3])
     with col_prof_label:
-        st.caption("AI Prompt Profile")
+        st.caption("AI prompt profile")
     with col_prof_sel:
         st.selectbox("Profile", profile_keys, format_func=lambda k: PROMPT_PROFILES.get(k, k),
                      index=profile_keys.index(current_profile) if current_profile in profile_keys else 0,
@@ -968,7 +967,7 @@ with tab_upload:
         elif file_count >= 50:
             st.info(f"Batch size: {file_count} files. Extraction may take a few minutes.")
 
-        with st.expander("Advanced Features", expanded=False):
+        with st.expander("Advanced features", expanded=False):
             adv_col1, adv_col2, adv_col3 = st.columns(3)
             with adv_col1:
                 def _on_adv_case() -> None:
@@ -1068,8 +1067,8 @@ with tab_upload:
 
     # Inline staging matrix (shown after analysis)
     if st.session_state.analysis_done and st.session_state.staged_assets:
-        st.divider()
-        st.subheader(":material/table_chart: Staging Matrix — Review & Edit Before Committing")
+        st.space()
+        st.subheader(":material/table_chart: Staging matrix — review and edit before committing")
 
         col_filter, _ = st.columns([3, 2])
         with col_filter:
@@ -1091,7 +1090,7 @@ with tab_upload:
             staged = staged_raw
             st.caption(f"{len(staged)} assets ready for review")
 
-        with st.expander("Naming Settings (edits update previews below)", expanded=True):
+        with st.expander("Naming settings (edits update previews below)", expanded=True):
             col_tmpl, col_case, col_chars = st.columns(3)
             with col_tmpl:
                 st.text_input("Pattern", key="template_string",
@@ -1208,39 +1207,35 @@ with tab_upload:
             st.caption("Select assets using the checkbox column above.")
 
         # Re-analyze button for selected rows
-        col_ra, _ = st.columns([1, 4])
-        with col_ra:
-            ra_disabled = sel_count == 0
-            if st.button(":material/refresh: Re-analyze Selected", key="reanalyze_btn", disabled=ra_disabled):
-                selected_names = set()
-                for idx in edited_df[edited_df["select"]].index:
-                    selected_names.add(staged[idx]["original_name"])
+        ra_disabled = sel_count == 0
+        if st.button(":material/refresh: Re-analyze Selected", key="reanalyze_btn", disabled=ra_disabled):
+            selected_names = set()
+            for idx in edited_df[edited_df["select"]].index:
+                selected_names.add(staged[idx]["original_name"])
 
-                st.session_state.staged_assets = [
-                    a for a in st.session_state.staged_assets
-                    if a["original_name"] not in selected_names
-                ]
-                st.session_state.base64_cache = {
-                    k: v for k, v in st.session_state.base64_cache.items()
-                    if k in selected_names
-                }
-                st.session_state.analysis_index = 0
-                st.session_state.analysis_in_progress = True
-                st.session_state.analysis_done = False
-                st.session_state.analysis_errors = []
-                st.rerun()
+            st.session_state.staged_assets = [
+                a for a in st.session_state.staged_assets
+                if a["original_name"] not in selected_names
+            ]
+            st.session_state.base64_cache = {
+                k: v for k, v in st.session_state.base64_cache.items()
+                if k in selected_names
+            }
+            st.session_state.analysis_index = 0
+            st.session_state.analysis_in_progress = True
+            st.session_state.analysis_done = False
+            st.session_state.analysis_errors = []
+            st.rerun()
 
-        # 13.1 Duplicate detection
-        col_dup, _ = st.columns([1, 4])
-        with col_dup:
-            if st.button(":material/content_copy: Detect Duplicates", key="detect_dupes_btn"):
-                with st.spinner("Computing perceptual hashes..."):
-                    duplicates = find_duplicates(staged, threshold=10)
-                    st.session_state.duplicate_pairs = duplicates
-                    if duplicates:
-                        st.warning(f"Found {len(duplicates)} potential duplicate pair(s)")
-                    else:
-                        st.success("No duplicates found")
+        # Duplicate detection
+        if st.button(":material/content_copy: Detect Duplicates", key="detect_dupes_btn"):
+            with st.spinner("Computing perceptual hashes..."):
+                duplicates = find_duplicates(staged, threshold=10)
+                st.session_state.duplicate_pairs = duplicates
+                if duplicates:
+                    st.warning(f"Found {len(duplicates)} potential duplicate pair(s)")
+                else:
+                    st.success("No duplicates found")
 
         if st.session_state.get("duplicate_pairs"):
             with st.expander(f"Duplicates ({len(st.session_state.duplicate_pairs)} pairs)", expanded=True):
@@ -1256,12 +1251,10 @@ with tab_upload:
                     st.rerun()
 
         # Export and import staging
-        col_csv, col_spacer = st.columns([1, 5])
-        with col_csv:
-            csv_data = export_staging_csv(st.session_state.staged_assets)
-            st.download_button(":material/file_download: Export Staged Changes", data=csv_data,
-                               file_name="staging_export.csv", mime="text/csv",
-                               key="export_csv_btn")
+        csv_data = export_staging_csv(st.session_state.staged_assets)
+        st.download_button(":material/file_download: Export Staged Changes", data=csv_data,
+                           file_name="staging_export.csv", mime="text/csv",
+                           key="export_csv_btn")
 
         with st.expander("Import staging CSV (overrides current staging)"):
             imported_file = st.file_uploader("Upload CSV", type="csv", key="staging_import_csv")
@@ -1291,16 +1284,13 @@ with tab_upload:
         metadata_only = st.checkbox("Metadata only — keep original filenames",
                                     help="Write AI-generated tags and summary to files without renaming them.")
 
-        col_preview, col_commit, col_refresh = st.columns([1, 1, 3])
-        with col_preview:
+        with st.container(horizontal=True):
             preview_btn = st.button(":material/preview: Preview Commit", key="preview_commit")
-        with col_commit:
             commit_btn = st.button(":material/send: Commit Selected", type="primary", key="commit_selected")
-        with col_refresh:
-            if metadata_only:
-                st.caption("Selected rows will be tagged in-place. Original filenames preserved.")
-            else:
-                st.caption("Selected rows will be renamed and tagged. Unchecked rows are skipped.")
+        if metadata_only:
+            st.caption("Selected rows will be tagged in-place. Original filenames preserved.")
+        else:
+            st.caption("Selected rows will be renamed and tagged. Unchecked rows are skipped.")
 
         if preview_btn:
             selected = edited_df[edited_df["select"]]
@@ -1440,10 +1430,8 @@ with tab_upload:
 # -----------------------------------------------------------------------------
 
 with tab_analytics:
-    col_title, col_clear_logs, col_reset = st.columns([3, 1, 1])
-    with col_title:
+    with st.container(horizontal=True):
         st.subheader(":material/analytics: Analytics Dashboard")
-    with col_clear_logs:
         if st.button(":material/delete_sweep: Clear Logs", type="secondary", key="clear_logs"):
             for h in logging.getLogger('video_renamer').handlers[:]:
                 h.close()
@@ -1451,7 +1439,6 @@ with tab_analytics:
             for log_path in LOG_DIR.glob("renamer_*.jsonl"):
                 log_path.unlink(missing_ok=True)
             st.rerun()
-    with col_reset:
         if st.button(":material/delete_sweep: Reset App and Settings", type="secondary", key="analytics_reset"):
             temp_dir = st.session_state.get("temp_dir")
             if temp_dir:
@@ -1614,14 +1601,12 @@ with tab_analytics:
 
             st.dataframe(filtered_commits, width='stretch', hide_index=True)
 
-            # 7.2 Export buttons
+            # Export buttons
             csv_data = filtered_commits.to_csv(index=False)
             json_data = filtered_commits.to_json(orient="records", indent=2)
-            dl_col1, dl_col2 = st.columns(2)
-            with dl_col1:
+            with st.container(horizontal=True):
                 st.download_button(":material/file_download: Download CSV", data=csv_data,
                                    file_name="commit_history.csv", mime="text/csv")
-            with dl_col2:
                 st.download_button(":material/data_object: Download JSON", data=json_data,
                                    file_name="commit_history.json", mime="application/json")
 
@@ -1671,8 +1656,10 @@ with tab_config:
         config_valid = True
     except Exception:
         config_valid = False
-    badge = "\u2705 Valid" if config_valid else "\u274c Invalid"
-    st.subheader(f":material/settings: Configuration  {badge}")
+    with st.container(horizontal=True):
+        st.subheader(":material/settings: Configuration")
+        st.badge("Valid" if config_valid else "Invalid",
+                 color="green" if config_valid else "red")
 
     # -- 6.1 / 6.2: Config editor (read-only + editable) --
     config_col_view, config_col_edit = st.columns([3, 1])
@@ -1685,8 +1672,7 @@ with tab_config:
         edited = st.text_area("config.json", value=config_json_str, height=500,
                               key="config_editor_area",
                               help="Edit the configuration JSON directly.")
-        col_save, col_reload = st.columns(2)
-        with col_save:
+        with st.container(horizontal=True):
             if st.button(":material/save: Save Config", type="primary", key="btn_save_config"):
                 try:
                     new_cfg = json.loads(edited)
@@ -1699,7 +1685,6 @@ with tab_config:
                     log_event(logger, "INFO", "config_saved", details={"source": "editor"})
                 except json.JSONDecodeError as e:
                     st.error(f"Invalid JSON: {e}")
-        with col_reload:
             if st.button(":material/refresh: Reload Config", key="btn_reload_config"):
                 reload_config()
                 st.session_state.env_check = None
@@ -1709,7 +1694,7 @@ with tab_config:
         with st.expander("View config.json (read-only)", expanded=False):
             st.json(config)
 
-    st.divider()
+    st.space()
 
     # -- 6.3: Category management --
     st.subheader(":material/label: Categories")
@@ -1742,8 +1727,7 @@ with tab_config:
                         new_cats.pop()
                         continue
 
-    col_cat_save, col_cat_reset = st.columns(2)
-    with col_cat_save:
+    with st.container(horizontal=True):
         if st.button(":material/save: Save Categories", type="primary", key="btn_save_cats"):
             cleaned = [c.strip().lower().replace(" ", "_") for c in new_cats if c.strip()]
             if len(cleaned) != len(set(cleaned)):
@@ -1759,14 +1743,13 @@ with tab_config:
                 log_event(logger, "INFO", "categories_updated",
                           details={"count": len(cleaned)})
                 st.rerun()
-    with col_cat_reset:
         if st.button(":material/restart_alt: Reset", key="btn_reset_cats"):
             st.session_state.pop("edit_categories", None)
             st.rerun()
 
     st.session_state["edit_categories"] = new_cats
 
-    st.divider()
+    st.space()
 
     # -- 6.4: Extension management --
     st.subheader(":material/format_list_bulleted: Supported Extensions")
@@ -1794,13 +1777,13 @@ with tab_config:
         log_event(logger, "INFO", "extensions_updated",
                   details={"video": len(video_exts), "image": len(image_exts)})
 
-    st.divider()
+    st.space()
 
     # -- S.4: Wipe local model cache --
     st.subheader(":material/smart_toy: Model Management")
     st.caption("Manage the local AI model used for analysis")
 
-    with st.expander("Wipe Local Model Cache", expanded=False):
+    with st.expander("Wipe local model cache", expanded=False):
         st.warning("This will permanently delete the local Qwen2.5-VL model (~5GB). "
                    "Re-download will be required to use local mode.")
         confirm_wipe = st.checkbox("I understand this will delete the model", key="confirm_model_wipe")
@@ -1816,10 +1799,10 @@ with tab_config:
             else:
                 st.error(result.get("message", "Failed to wipe model."))
 
-    st.divider()
+    st.space()
 
     # -- Restore default config --
-    with st.expander("Restore Default Configuration", expanded=False):
+    with st.expander("Restore default configuration", expanded=False):
         st.warning("This will replace config.json with the factory default. "
                     "All custom settings, prompts, and categories will be lost.")
         confirm_restore = st.checkbox("I understand — restore factory defaults", key="confirm_restore_cfg")
