@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import datetime
 import json
@@ -8,6 +10,7 @@ import subprocess
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Any, Callable
 
 import anthropic
 import keyring
@@ -15,7 +18,7 @@ import ollama
 import openai
 import requests
 
-VERSION = "v1.3.0"
+VERSION = "v1.4.0"
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -23,7 +26,15 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 # 0. HELPER: resolve worker count
 # -----------------------------------------------------------------------------
 
-def _resolve_workers(cfg_value):
+def _resolve_workers(cfg_value: int | float | None) -> int:
+    """Resolve worker count from config value, falling back to CPU count.
+
+    Args:
+        cfg_value: Configured worker count from config, or None/0 for auto.
+
+    Returns:
+        Positive integer worker count.
+    """
     if isinstance(cfg_value, int) and cfg_value > 0:
         return cfg_value
     return os.cpu_count() or 4
@@ -32,23 +43,50 @@ def _resolve_workers(cfg_value):
 # 1. CONFIGURATION & LOGGING
 # -----------------------------------------------------------------------------
 
-def load_config(config_path="config.json"):
+def load_config(config_path: str = "config.json") -> dict[str, Any]:
+    """Load configuration from JSON file with auto-recovery from default.
+
+    Args:
+        config_path: Relative path to the config file from the script directory.
+
+    Returns:
+        Parsed configuration dictionary with normalized tuple fields.
+    """
     script_dir = Path(__file__).parent
     full_path = script_dir / config_path
+    default_path = full_path.parent / "config.default.json"
     try:
         with open(full_path, encoding='utf-8') as f:
             cfg = json.load(f)
-    except FileNotFoundError:
-        print(f"Error: Configuration file '{full_path}' not found.")
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        print(f"Error: Invalid JSON in config file: {e}")
-        sys.exit(1)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"Warning: config.json issue: {e}. Attempting auto-recovery from config.default.json...")
+        try:
+            import shutil
+            shutil.copy2(default_path, full_path)
+            with open(full_path, encoding='utf-8') as f:
+                cfg = json.load(f)
+            print(f"Auto-recovery successful: restored config.json from config.default.json")
+        except Exception as recovery_err:
+            print(f"Error: Auto-recovery failed: {recovery_err}")
+            print(f"To fix: manually copy config.default.json to config.json, or run with --reset-config")
+            sys.exit(1)
 
     cfg['video_extensions'] = tuple(cfg.get('video_extensions', ['.mp4', '.mov', '.avi', '.mkv', '.webm']))
     cfg['image_extensions'] = tuple(cfg.get('image_extensions', ['.jpg', '.jpeg', '.png', '.webp', '.gif']))
     cfg['allowed_categories'] = tuple(cfg.get('allowed_categories', []))
     return cfg
+
+
+def restore_default_config() -> bool:
+    """Overwrite config.json with config.default.json. Returns True on success."""
+    import shutil
+    script_dir = Path(__file__).parent
+    default_path = script_dir / "config.default.json"
+    target_path = script_dir / "config.json"
+    if not default_path.exists():
+        return False
+    shutil.copy2(default_path, target_path)
+    return True
 
 
 config = load_config()
@@ -58,18 +96,21 @@ ALLOWED_CATEGORIES = config['allowed_categories']
 CATEGORY_LIST_STR = "\n".join(f'   - "{c}"' for c in ALLOWED_CATEGORIES)
 
 
-def get_active_profile():
+def get_active_profile() -> str:
+    """Return the name of the currently active prompt profile."""
     return config.get('prompt_profiles', {}).get('active', 'general_balanced')
 
 
-def get_active_categories():
+def get_active_categories() -> tuple[str, ...]:
+    """Return the allowed categories for the active prompt profile."""
     profile_name = get_active_profile()
     profile = config.get('prompt_profiles', {}).get('profiles', {}).get(profile_name, {})
     cats = profile.get('allowed_categories', [])
     return tuple(cats) if cats else ALLOWED_CATEGORIES
 
 
-def get_active_prompt():
+def get_active_prompt() -> str:
+    """Return the active prompt text with categories expanded into the template."""
     profile_name = get_active_profile()
     profile = config.get('prompt_profiles', {}).get('profiles', {}).get(profile_name, {})
     raw = profile.get('prompt', '')
@@ -78,14 +119,20 @@ def get_active_prompt():
     return raw.replace("the allowed categories list", f"this list:\n{cat_str}")
 
 
-def set_active_profile(name):
+def set_active_profile(name: str) -> None:
+    """Set the active prompt profile by name and persist to config.
+
+    Args:
+        name: Profile key to activate.
+    """
     profiles = config.get('prompt_profiles', {}).get('profiles', {})
     if name in profiles:
         config['prompt_profiles']['active'] = name
         save_config()
 
 
-def get_profile_labels():
+def get_profile_labels() -> dict[str, str]:
+    """Return a mapping of profile keys to their display labels."""
     profiles = config.get('prompt_profiles', {}).get('profiles', {})
     return {k: v.get('label', k) for k, v in profiles.items()}
 
@@ -125,28 +172,83 @@ PROVIDER_REGISTRY = {}
 CURRENT_PROVIDER_INSTANCE = None
 
 
-def save_config():
+def save_config() -> None:
+    """Persist the current in-memory config dict to config.json."""
     global config
     with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2)
 
 
-def save_api_key(provider_name, key):
+def reload_config() -> None:
+    """Reload config from disk and refresh all module-level globals."""
+    global config, ALLOWED_CATEGORIES, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
+    global MODEL_NAME, MODEL_TEMPERATURE, MODEL_NUM_CTX, MODEL_KEEP_ALIVE
+    global EXTRACTION_WORKERS, DEFAULT_CASE_STYLE, DEFAULT_MAX_FILENAME_CHARS
+    global NAMED_TEMPLATES, DEFAULT_TEMPLATE_STRING, PROMPT_PROFILES, CURRENT_PROVIDER
+    config = load_config()
+    ALLOWED_CATEGORIES = config['allowed_categories']
+    VIDEO_EXTENSIONS = config['video_extensions']
+    IMAGE_EXTENSIONS = config['image_extensions']
+    MODEL_NAME = config['model']['name']
+    MODEL_TEMPERATURE = config['model']['temperature']
+    MODEL_NUM_CTX = config['model']['num_ctx']
+    MODEL_KEEP_ALIVE = config['model']['keep_alive']
+    EXTRACTION_WORKERS = _resolve_workers(config['preview'].get('extraction_workers', 0))
+    DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'title_case')
+    DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
+    NAMED_TEMPLATES = config.get('naming_templates', {
+        "default": "{topic}_{description}",
+        "short": "{topic}_{description}",
+        "editorial": "{date}_{topic}"
+    })
+    DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}")
+    PROMPT_PROFILES = get_profile_labels()
+    CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
+
+
+def save_api_key(provider_name: str, key: str) -> None:
+    """Store an API key for a provider in the system keyring.
+
+    Args:
+        provider_name: Provider identifier (e.g. 'gemini', 'openai').
+        key: API key string to store.
+    """
     keyring.set_password(KEYRING_SERVICE, provider_name, key)
 
 
-def load_api_key(provider_name):
+def load_api_key(provider_name: str) -> str:
+    """Retrieve an API key from the system keyring.
+
+    Args:
+        provider_name: Provider identifier to look up.
+
+    Returns:
+        The stored API key, or an empty string if not found.
+    """
     return keyring.get_password(KEYRING_SERVICE, provider_name) or ""
 
 
-def delete_api_key(provider_name):
+def delete_api_key(provider_name: str) -> None:
+    """Delete an API key from the system keyring, ignoring if absent.
+
+    Args:
+        provider_name: Provider identifier whose key to delete.
+    """
     try:
         keyring.delete_password(KEYRING_SERVICE, provider_name)
     except keyring.errors.PasswordDeleteError:
         pass
 
 
-def setup_logging(verbose=False):
+def setup_logging(verbose: bool = False) -> logging.Logger:
+    """Configure and return the application JSONL file logger.
+
+    Args:
+        verbose: If True, set log level to DEBUG; otherwise INFO.
+
+    Returns:
+        Configured logger instance writing to the daily log file.
+    """
     log_dir = LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"renamer_{datetime.datetime.now().astimezone().date().isoformat()}.jsonl"
@@ -162,7 +264,16 @@ def setup_logging(verbose=False):
     return logger
 
 
-def log_event(logger, level, event, file_name=None, details=None):
+def log_event(logger: Any, level: str, event: str, file_name: str | None = None, details: dict[str, Any] | None = None) -> None:
+    """Write a structured JSON log entry.
+
+    Args:
+        logger: Logger instance to write to.
+        level: Log level string ('DEBUG', 'INFO', 'WARNING', 'ERROR').
+        event: Short event description.
+        file_name: Optional name of the file being processed.
+        details: Optional dictionary of additional context.
+    """
     record = {
         "timestamp": datetime.datetime.now().astimezone().isoformat(),
         "level": level,
@@ -187,7 +298,8 @@ def log_event(logger, level, event, file_name=None, details=None):
 # -----------------------------------------------------------------------------
 
 class ExifToolSession:
-    def __init__(self):
+    def __init__(self) -> None:
+        """Start a persistent ExifTool subprocess in stay_open mode."""
         try:
             self.process = subprocess.Popen(
                 ['exiftool', '-stay_open', 'True', '-@', '-'],
@@ -199,7 +311,15 @@ class ExifToolSession:
             print("Error: ExifTool is not installed or not in system PATH.")
             sys.exit(1)
 
-    def execute(self, args):
+    def execute(self, args: list[str]) -> str:
+        """Send arguments to ExifTool and return the output.
+
+        Args:
+            args: List of ExifTool arguments (flags and file paths).
+
+        Returns:
+            Raw text output from ExifTool.
+        """
         for arg in args:
             self.process.stdin.write(f"{arg}\n")
         self.process.stdin.write("-execute\n")
@@ -212,7 +332,8 @@ class ExifToolSession:
             output += line
         return output
 
-    def close(self):
+    def close(self) -> None:
+        """Shut down the persistent ExifTool subprocess."""
         if hasattr(self, 'process'):
             self.process.stdin.write("-stay_open\nFalse\n")
             self.process.stdin.flush()
@@ -223,7 +344,12 @@ class ExifToolSession:
 # 3. HARDWARE & CACHE MANAGERS
 # -----------------------------------------------------------------------------
 
-def detect_hw_accel():
+def detect_hw_accel() -> str | None:
+    """Probe for available hardware-accelerated FFmpeg decoders.
+
+    Returns:
+        Hardware accelerator name ('cuda', 'qsv', 'amf') or None.
+    """
     for hw in ['cuda', 'qsv', 'amf']:
         try:
             cmd = ['ffmpeg', '-hwaccel', hw, '-f', 'lavfi', '-i', 'color=c=black:s=16x16:d=1', '-f', 'null', '-']
@@ -235,7 +361,16 @@ def detect_hw_accel():
     return None
 
 
-def is_already_processed(file_path, exiftool_session):
+def is_already_processed(file_path: str | Path, exiftool_session: Any) -> bool:
+    """Check if a file already has XMP Description metadata written.
+
+    Args:
+        file_path: Path to the media file.
+        exiftool_session: Active ExifToolSession instance.
+
+    Returns:
+        True if the file already has a DC:Description tag.
+    """
     output = exiftool_session.execute(["-XMP-dc:Description", "-json", str(file_path)])
     try:
         data = json.loads(output.strip())
@@ -250,17 +385,41 @@ def is_already_processed(file_path, exiftool_session):
 # 4. ZERO-I/O PIPELINE (MEMORY-BASED ASSET EXTRACTION)
 # -----------------------------------------------------------------------------
 
-def get_video_duration(video_path):
+def get_video_duration(video_path: str | Path) -> float:
+    """Return the duration in seconds of a video file, with internal caching.
+
+    Args:
+        video_path: Path to the video file.
+
+    Returns:
+        Duration in seconds, defaulting to 10.0 on probe failure.
+    """
+    cache_key = str(video_path)
+    if not hasattr(get_video_duration, '_cache'):
+        get_video_duration._cache = {}
+    if cache_key in get_video_duration._cache:
+        return get_video_duration._cache[cache_key]
     cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
            '-of', 'default=noprint_wrappers=1:nokey=1', str(video_path)]
     try:
         output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, creationflags=_NO_WINDOW).decode().strip()
-        return float(output)
+        duration = float(output)
     except Exception:
-        return 10.0
+        duration = 10.0
+    get_video_duration._cache[cache_key] = duration
+    return duration
 
 
-def process_video_to_base64(video_path, hw_accel):
+def process_video_to_base64(video_path: str | Path, hw_accel: str | None) -> str | None:
+    """Extract the midpoint frame of a video and return as base64 JPEG.
+
+    Args:
+        video_path: Path to the video file.
+        hw_accel: Hardware accelerator name or None for software decoding.
+
+    Returns:
+        Base64-encoded JPEG string, or None on failure.
+    """
     duration = get_video_duration(video_path)
     mid_offset = max(1.0, duration * 0.5)
 
@@ -285,7 +444,16 @@ def process_video_to_base64(video_path, hw_accel):
         return None
 
 
-def process_image_to_base64(image_path, max_edge=IMAGE_PREVIEW_MAX_EDGE):
+def process_image_to_base64(image_path: str | Path, max_edge: int = IMAGE_PREVIEW_MAX_EDGE) -> str | None:
+    """Downscale an image and return as base64 JPEG.
+
+    Args:
+        image_path: Path to the image file.
+        max_edge: Maximum pixel dimension for the longest edge.
+
+    Returns:
+        Base64-encoded JPEG string, or None on failure.
+    """
     cmd = [
         'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
         '-i', str(image_path),
@@ -305,7 +473,16 @@ def process_image_to_base64(image_path, max_edge=IMAGE_PREVIEW_MAX_EDGE):
         return None
 
 
-def process_asset_to_base64(file_path, hw_accel):
+def process_asset_to_base64(file_path: Path, hw_accel: str | None) -> str | None:
+    """Route a media file to the appropriate base64 encoder.
+
+    Args:
+        file_path: Path to the video or image file.
+        hw_accel: Hardware accelerator name or None.
+
+    Returns:
+        Base64-encoded JPEG string, or None on failure.
+    """
     if file_path.suffix.lower() in VIDEO_EXTENSIONS:
         return process_video_to_base64(file_path, hw_accel)
     return process_image_to_base64(file_path)
@@ -315,7 +492,16 @@ def process_asset_to_base64(file_path, hw_accel):
 # 5. AI ENGINE & EXECUTION
 # -----------------------------------------------------------------------------
 
-def validate_category(raw_category):
+def validate_category(raw_category: str | None) -> tuple[str, bool]:
+    """Normalize and validate a category name against the allowed list.
+
+    Args:
+        raw_category: User-provided category string (may be None or empty).
+
+    Returns:
+        A tuple of (normalized_category, was_invalid). was_invalid is True
+        if the input fell back to 'uncategorized'.
+    """
     if not raw_category or not str(raw_category).strip():
         return 'uncategorized', True
     normalized = str(raw_category).lower().strip().replace(" ", "_")
@@ -328,7 +514,15 @@ def validate_category(raw_category):
     return 'uncategorized', True
 
 
-def sanitize_name(raw_name):
+def sanitize_name(raw_name: str) -> str:
+    """Convert a raw AI-generated name into a safe snake_case filename stem.
+
+    Args:
+        raw_name: Unprocessed name string from the AI response.
+
+    Returns:
+        Cleaned, lowercase, underscore-separated name.
+    """
     cleaned = raw_name.lower().replace("grid", "").replace("sequence", "")
     cleaned = cleaned.replace(" ", "_")
     safe = "".join([c for c in cleaned if c.isalpha() or c.isdigit() or c in ('_', '-')]).strip('_')
@@ -337,7 +531,17 @@ def sanitize_name(raw_name):
     return safe
 
 
-def apply_case_style(name, style):
+def apply_case_style(name: str, style: str) -> str:
+    """Transform a name string to the specified case style.
+
+    Args:
+        name: Input name to transform.
+        style: One of 'snake_case', 'camelCase', 'kebab-case', 'pascal_case',
+               'lowercase', or 'title_case'.
+
+    Returns:
+        Name formatted in the requested case style.
+    """
     if style == "snake_case":
         return name.lower().replace("-", "_").replace(" ", "_")
     elif style == "camelCase":
@@ -369,23 +573,45 @@ CASE_STYLE_LABELS = {
 }
 
 
-def truncate_filename(name, max_chars):
+def truncate_filename(name: str, max_chars: int) -> str:
+    """Truncate a filename stem to max_chars, stripping trailing separators.
+
+    Args:
+        name: Filename stem to truncate.
+        max_chars: Maximum character count; 0 or negative means no limit.
+
+    Returns:
+        Possibly truncated name with trailing underscores/hyphens removed.
+    """
     if max_chars <= 0 or len(name) <= max_chars:
         return name
     return name[:max_chars].rstrip("_-")
 
 
-def _template_date():
+def _template_date() -> str:
+    """Return today's date in ISO format for use in naming templates."""
     return datetime.date.today().isoformat()
 
 
-def apply_naming_template(template_string, asset_data):
+def apply_naming_template(template_string: str, asset_data: dict[str, Any]) -> str:
+    """Apply a naming template by substituting placeholders from asset data.
+
+    Args:
+        template_string: Template with {category}, {topic}, {description}, {date}.
+        asset_data: Dictionary containing asset metadata keys.
+
+    Returns:
+        Formatted filename stem, or the fallback name if template produces nothing.
+    """
     category = asset_data.get('category', 'uncategorized')
     topic = asset_data.get('topic', '') or ''
     description = asset_data.get('description', '') or ''
     fallback = asset_data.get('new_filename', '')
 
     if not topic and not description:
+        # Strip category prefix from fallback if present
+        if fallback.lower().startswith(category.lower() + "_"):
+            fallback = fallback[len(category) + 1:]
         return fallback
 
     result = template_string
@@ -406,7 +632,16 @@ def apply_naming_template(template_string, asset_data):
     return result
 
 
-def _parse_ai_response(raw_text):
+def _parse_ai_response(raw_text: str) -> tuple[dict[str, Any] | None, str | None, str | None]:
+    """Parse and extract JSON from an AI model's raw text response.
+
+    Args:
+        raw_text: Raw text returned by the AI model.
+
+    Returns:
+        A tuple of (parsed_dict, error_type, error_detail). On success,
+        error_type and error_detail are None. On failure, parsed_dict is None.
+    """
     clean_res = raw_text.strip()
     if not clean_res:
         return None, 'empty_response', 'Model returned an empty response'
@@ -433,7 +668,15 @@ VISION_MODEL_PREFIXES = {
 }
 
 
-def _is_vision_model(name):
+def _is_vision_model(name: str) -> bool:
+    """Check if a model name matches a known vision-capable model prefix.
+
+    Args:
+        name: Model name string to check.
+
+    Returns:
+        True if the name starts with a recognized vision model prefix.
+    """
     name_lower = name.lower().replace(":", "-")
     for prefix in VISION_MODEL_PREFIXES:
         if name_lower.startswith(prefix.lower()):
@@ -442,39 +685,52 @@ def _is_vision_model(name):
 
 
 class AIProvider(ABC):
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize default model and API key slots."""
         self._model = ""
         self._api_key = ""
 
     @abstractmethod
-    def analyze(self, base64_img, verbose=False):
+    def analyze(self, base64_img: str, verbose: bool = False) -> dict[str, Any]:
         ...
 
     @abstractmethod
-    def health_check(self):
+    def health_check(self) -> dict[str, Any]:
         ...
 
     @abstractmethod
-    def available_models(self):
+    def available_models(self) -> list[str]:
         ...
 
     @property
-    def model(self):
+    def model(self) -> str:
+        """Return the current model name."""
         return self._model
 
     @model.setter
-    def model(self, value):
+    def model(self, value: str) -> None:
+        """Set the model name."""
         self._model = value
 
     @property
-    def api_key(self):
+    def api_key(self) -> str:
+        """Return the current API key."""
         return self._api_key
 
     @api_key.setter
-    def api_key(self, value):
+    def api_key(self, value: str) -> None:
+        """Set the API key."""
         self._api_key = value
 
-    def _parse_and_validate(self, raw_text):
+    def _parse_and_validate(self, raw_text: str) -> dict[str, Any]:
+        """Parse raw AI text and validate required response keys.
+
+        Args:
+            raw_text: Raw text response from the AI model.
+
+        Returns:
+            Result dict with keys 'ok', 'data', 'error', 'detail', 'raw_response'.
+        """
         result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': raw_text}
         parsed, error_type, detail = _parse_ai_response(raw_text)
         if error_type:
@@ -491,12 +747,22 @@ class AIProvider(ABC):
 
 
 class OllamaProvider(AIProvider):
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize Ollama provider with the configured model name."""
         super().__init__()
         self._model = MODEL_NAME
         self._retries = 2
 
-    def analyze(self, base64_img, verbose=False):
+    def analyze(self, base64_img: str, verbose: bool = False) -> dict[str, Any]:
+        """Send a base64 image to Ollama for AI analysis with retry logic.
+
+        Args:
+            base64_img: Base64-encoded JPEG image data.
+            verbose: If True, include raw response in error details.
+
+        Returns:
+            Result dict with parsed data or error information.
+        """
         result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
         last_exc = None
         for attempt in range(self._retries):
@@ -529,14 +795,24 @@ class OllamaProvider(AIProvider):
             result['detail'] = f'Ollama request failed after retry: {last_exc}'
         return result
 
-    def health_check(self):
+    def health_check(self) -> dict[str, Any]:
+        """Verify Ollama server is reachable and responsive.
+
+        Returns:
+            Dict with 'ok' boolean and 'message' string.
+        """
         try:
             ollama.list()
             return {"ok": True, "message": "Ollama is running."}
         except Exception as exc:
             return {"ok": False, "message": f"Ollama not reachable: {exc}"}
 
-    def available_models(self):
+    def available_models(self) -> list[str]:
+        """List all models available on the Ollama server.
+
+        Returns:
+            List of model name strings.
+        """
         try:
             tags = ollama.list()
             models = []
@@ -555,7 +831,16 @@ class OllamaProvider(AIProvider):
 
 
 class GeminiProvider(AIProvider):
-    def analyze(self, base64_img, verbose=False):
+    def analyze(self, base64_img: str, verbose: bool = False) -> dict[str, Any]:
+        """Analyze an image using the Google Gemini API.
+
+        Args:
+            base64_img: Base64-encoded JPEG image data.
+            verbose: If True, include raw response in error details.
+
+        Returns:
+            Result dict with parsed data or error information.
+        """
         result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
         if not self._api_key:
             result['error'] = 'api_key_missing'
@@ -593,25 +878,54 @@ class GeminiProvider(AIProvider):
             result['detail'] = f'Unexpected Gemini error: {exc}'
             return result
 
-    def health_check(self):
+    def health_check(self) -> dict[str, Any]:
+        """Check if a Gemini API key is configured.
+
+        Returns:
+            Dict with 'ok' boolean and 'message' string.
+        """
         return {"ok": bool(self._api_key), "message": "API key set" if self._api_key else "No API key configured"}
 
-    def available_models(self):
+    def available_models(self) -> list[str]:
+        """List models available for the Gemini provider.
+
+        Returns:
+            List of model name strings from config.
+        """
         return config.get("model", {}).get("providers", {}).get("gemini", {}).get("models", [])
 
 
 class OpenAIProvider(AIProvider):
-    def __init__(self, base_url=None):
+    def __init__(self, base_url: str | None = None) -> None:
+        """Initialize OpenAI provider with optional base URL override.
+
+        Args:
+            base_url: Custom API base URL, or None for the default OpenAI endpoint.
+        """
         super().__init__()
         self._base_url = base_url
 
-    def _make_client(self):
+    def _make_client(self) -> Any:
+        """Create and return an OpenAI client instance.
+
+        Returns:
+            Configured openai.OpenAI client.
+        """
         kwargs = {"api_key": self._api_key}
         if self._base_url:
             kwargs["base_url"] = self._base_url
         return openai.OpenAI(**kwargs)
 
-    def analyze(self, base64_img, verbose=False):
+    def analyze(self, base64_img: str, verbose: bool = False) -> dict[str, Any]:
+        """Analyze an image using the OpenAI vision API.
+
+        Args:
+            base64_img: Base64-encoded JPEG image data.
+            verbose: If True, include raw response in error details.
+
+        Returns:
+            Result dict with parsed data or error information.
+        """
         result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
         if not self._api_key:
             result['error'] = 'api_key_missing'
@@ -638,15 +952,34 @@ class OpenAIProvider(AIProvider):
             result['detail'] = f'OpenAI API request failed: {exc}'
             return result
 
-    def health_check(self):
+    def health_check(self) -> dict[str, Any]:
+        """Check if an OpenAI API key is configured.
+
+        Returns:
+            Dict with 'ok' boolean and 'message' string.
+        """
         return {"ok": bool(self._api_key), "message": "API key set" if self._api_key else "No API key configured"}
 
-    def available_models(self):
+    def available_models(self) -> list[str]:
+        """List models available for the OpenAI provider.
+
+        Returns:
+            List of model name strings from config.
+        """
         return config.get("model", {}).get("providers", {}).get("openai", {}).get("models", [])
 
 
 class AnthropicProvider(AIProvider):
-    def analyze(self, base64_img, verbose=False):
+    def analyze(self, base64_img: str, verbose: bool = False) -> dict[str, Any]:
+        """Analyze an image using the Anthropic Claude vision API.
+
+        Args:
+            base64_img: Base64-encoded JPEG image data.
+            verbose: If True, include raw response in error details.
+
+        Returns:
+            Result dict with parsed data or error information.
+        """
         result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
         if not self._api_key:
             result['error'] = 'api_key_missing'
@@ -673,36 +1006,75 @@ class AnthropicProvider(AIProvider):
             result['detail'] = f'Anthropic API request failed: {exc}'
             return result
 
-    def health_check(self):
+    def health_check(self) -> dict[str, Any]:
+        """Check if an Anthropic API key is configured.
+
+        Returns:
+            Dict with 'ok' boolean and 'message' string.
+        """
         return {"ok": bool(self._api_key), "message": "API key set" if self._api_key else "No API key configured"}
 
-    def available_models(self):
+    def available_models(self) -> list[str]:
+        """List models available for the Anthropic provider.
+
+        Returns:
+            List of model name strings from config.
+        """
         return config.get("model", {}).get("providers", {}).get("anthropic", {}).get("models", [])
 
 
 class GroqProvider(OpenAIProvider):
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize Groq provider with its configured base URL."""
         base = config.get("model", {}).get("providers", {}).get("groq", {}).get("base_url", "https://api.groq.com/openai/v1")
         super().__init__(base_url=base)
 
-    def available_models(self):
+    def available_models(self) -> list[str]:
+        """List models available for the Groq provider.
+
+        Returns:
+            List of model name strings from config.
+        """
         return config.get("model", {}).get("providers", {}).get("groq", {}).get("models", [])
 
 
 class OpenRouterProvider(OpenAIProvider):
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize OpenRouter provider with its configured base URL."""
         base = config.get("model", {}).get("providers", {}).get("openrouter", {}).get("base_url", "https://openrouter.ai/api/v1")
         super().__init__(base_url=base)
 
-    def available_models(self):
+    def available_models(self) -> list[str]:
+        """List models available for the OpenRouter provider.
+
+        Returns:
+            List of model name strings from config.
+        """
         return config.get("model", {}).get("providers", {}).get("openrouter", {}).get("models", [])
 
 
-def register_provider(name, cls):
+def register_provider(name: str, cls: type[AIProvider]) -> None:
+    """Register a provider class in the global provider registry.
+
+    Args:
+        name: Short identifier for the provider (e.g. 'ollama').
+        cls: Provider class that subclasses AIProvider.
+    """
     PROVIDER_REGISTRY[name] = cls
 
 
-def get_provider(name):
+def get_provider(name: str) -> AIProvider:
+    """Instantiate and configure a registered provider by name.
+
+    Args:
+        name: Provider identifier registered via register_provider.
+
+    Returns:
+        Configured AIProvider instance with API key and model set.
+
+    Raises:
+        ValueError: If name is not in the provider registry.
+    """
     cls = PROVIDER_REGISTRY.get(name)
     if not cls:
         raise ValueError(f"Unknown provider: {name}")
@@ -719,7 +1091,8 @@ def get_provider(name):
     return inst
 
 
-def list_providers():
+def list_providers() -> list[str]:
+    """Return all registered provider names."""
     return list(PROVIDER_REGISTRY.keys())
 
 
@@ -731,19 +1104,47 @@ register_provider("groq", GroqProvider)
 register_provider("openrouter", OpenRouterProvider)
 
 
-def analyze_asset_with_ai(base64_img, verbose=False, retry=True):
+def analyze_asset_with_ai(base64_img: str, verbose: bool = False, retry: bool = True) -> dict[str, Any]:
+    """Analyze an image using the default Ollama provider.
+
+    Args:
+        base64_img: Base64-encoded JPEG image data.
+        verbose: If True, include raw response in error details.
+        retry: Unused, kept for API compatibility.
+
+    Returns:
+        Result dict with parsed data or error information.
+    """
     provider = get_provider("ollama")
     provider.model = config["model"]["name"]
     return provider.analyze(base64_img, verbose=verbose)
 
 
-def analyze_asset_with_gemini(base64_img, verbose=False):
+def analyze_asset_with_gemini(base64_img: str, verbose: bool = False) -> dict[str, Any]:
+    """Analyze an image using the Gemini provider.
+
+    Args:
+        base64_img: Base64-encoded JPEG image data.
+        verbose: If True, include raw response in error details.
+
+    Returns:
+        Result dict with parsed data or error information.
+    """
     provider = get_provider("gemini")
     provider.api_key = CURRENT_API_KEY or load_api_key("gemini")
     return provider.analyze(base64_img, verbose=verbose)
 
 
-def _format_ai_error(ai_result, verbose=False):
+def _format_ai_error(ai_result: dict[str, Any], verbose: bool = False) -> str:
+    """Format an AI result error into a human-readable message string.
+
+    Args:
+        ai_result: Result dict from an AI provider analyze() call.
+        verbose: If True, append a snippet of the raw model response.
+
+    Returns:
+        Formatted error message string.
+    """
     error_type = ai_result.get('error', 'unknown')
     detail = ai_result.get('detail', 'Unknown error')
     messages = {
@@ -764,7 +1165,25 @@ def _format_ai_error(ai_result, verbose=False):
     return msg
 
 
-def execute_commit(asset, target_dir, sort_into_folders, exiftool_session, skip_rename=False):
+def execute_commit(
+    asset: dict[str, Any],
+    target_dir: Path,
+    sort_into_folders: bool,
+    exiftool_session: Any,
+    skip_rename: bool = False,
+) -> str | Path:
+    """Rename/move a staged asset to the target directory and write metadata.
+
+    Args:
+        asset: Staged asset dict with original_path, staged_name, category, tags, summary.
+        target_dir: Destination directory for the file.
+        sort_into_folders: If True, create a subfolder named after the category.
+        exiftool_session: Active ExifToolSession for writing metadata.
+        skip_rename: If True, copy instead of rename (keeps original name).
+
+    Returns:
+        Relative path to the committed file, or 'ERROR:<message>' on failure.
+    """
     old_path = asset['original_path']
     safe_name = asset['staged_name']
     suffix = old_path.suffix.lower()
@@ -783,7 +1202,10 @@ def execute_commit(asset, target_dir, sort_into_folders, exiftool_session, skip_
 
     try:
         if skip_rename:
-            target_file = old_path
+            final_folder.mkdir(parents=True, exist_ok=True)
+            target_file = final_folder / old_path.name
+            if old_path != target_file:
+                shutil.copy2(str(old_path), str(target_file))
         else:
             old_path.rename(new_path)
             target_file = new_path
@@ -798,7 +1220,6 @@ def execute_commit(asset, target_dir, sort_into_folders, exiftool_session, skip_
             f"-XMP-dc:Description={summary}",
             f"-Microsoft:Category={tag_string}"
         ]
-        # Write each tag as an individual XMP array element (Windows reads this)
         for t in asset['tags']:
             args.append(f"-XMP-dc:Subject={t}")
 
@@ -811,7 +1232,6 @@ def execute_commit(asset, target_dir, sort_into_folders, exiftool_session, skip_
                 f"-Keys:Keywords={tag_string}"
             ])
         else:
-            # Windows reads XPKeywords for the "Tags" property in Explorer
             args.append(f"-EXIF:XPKeywords={tag_string}")
             args.extend([
                 f"-Description={summary}",
@@ -835,7 +1255,7 @@ def execute_commit(asset, target_dir, sort_into_folders, exiftool_session, skip_
 SESSION_DIR = Path(os.environ.get('APPDATA', Path.home())) / "ai-media-renamer" / "sessions"
 
 
-def save_session(staged_assets, uploaded_files, settings):
+def save_session(staged_assets: list[dict[str, Any]], uploaded_files: dict[str, Path], settings: dict[str, Any]) -> Path:
     """Save session state to a JSON file for later restoration."""
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -860,7 +1280,7 @@ def save_session(staged_assets, uploaded_files, settings):
     return session_path
 
 
-def list_sessions():
+def list_sessions() -> list[dict[str, Any]]:
     """Return list of saved sessions sorted by date (newest first)."""
     if not SESSION_DIR.exists():
         return []
@@ -877,7 +1297,7 @@ def list_sessions():
     return result
 
 
-def load_session(session_path):
+def load_session(session_path: str | Path) -> dict[str, Any]:
     """Load a saved session, validating that original files still exist on disk."""
     data = json.loads(Path(session_path).read_text(encoding="utf-8"))
 
@@ -906,11 +1326,121 @@ def load_session(session_path):
 
 
 # -----------------------------------------------------------------------------
+# 5c. DUPLICATE DETECTION
+# -----------------------------------------------------------------------------
+
+def compute_asset_hash(file_path: str | Path) -> str | None:
+    """Compute perceptual hash for an asset. For images, hashes directly.
+    For videos, extracts the midpoint frame and hashes that."""
+    try:
+        import imagehash
+        from PIL import Image
+    except ImportError:
+        return None
+
+    path = Path(file_path)
+    suffix = path.suffix.lower()
+
+    if suffix in VIDEO_EXTENSIONS:
+        return _compute_video_hash(path, imagehash)
+    elif suffix in IMAGE_EXTENSIONS:
+        return _compute_image_hash(path, imagehash, Image)
+    return None
+
+
+def _compute_image_hash(path: Path, imagehash: Any, pil_image: Any) -> str | None:
+    """Hash a single image file."""
+    cmd = [
+        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+        '-i', str(path),
+        '-vf', 'scale=256:256:force_original_aspect_ratio=decrease',
+        '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'mjpeg', '-'
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, creationflags=_NO_WINDOW)
+        if proc.returncode != 0 or not proc.stdout:
+            return None
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(proc.stdout))
+        return str(imagehash.phash(img))
+    except Exception:
+        return None
+
+
+def _compute_video_hash(path: Path, imagehash: Any) -> str | None:
+    """Extract midpoint frame from video and compute pHash."""
+    duration = get_video_duration(path)
+    mid = max(1.0, duration * 0.5)
+    cmd = [
+        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+        '-ss', str(mid),
+        '-i', str(path),
+        '-vframes', '1',
+        '-vf', 'scale=256:256:force_original_aspect_ratio=decrease',
+        '-f', 'image2pipe', '-vcodec', 'mjpeg', '-'
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, creationflags=_NO_WINDOW)
+        if proc.returncode != 0 or not proc.stdout:
+            return None
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(proc.stdout))
+        return str(imagehash.phash(img))
+    except Exception:
+        return None
+
+
+def find_duplicates(staged_assets: list[dict[str, Any]], threshold: int = 10) -> list[dict[str, Any]]:
+    """Compare all staged assets pairwise. Returns list of duplicate pairs.
+    threshold: Hamming distance threshold (0-64). Lower = stricter match.
+    Default 10 means ~84% similarity required."""
+    try:
+        import imagehash as _ih
+    except ImportError:
+        return []
+
+    hashes = {}
+    for i, asset in enumerate(staged_assets):
+        h = compute_asset_hash(asset["original_path"])
+        if h:
+            hashes[i] = _ih.hex_to_hash(h)
+
+    duplicates = []
+    indices = sorted(hashes.keys())
+    for i in range(len(indices)):
+        for j in range(i + 1, len(indices)):
+            idx_a, idx_b = indices[i], indices[j]
+            dist = hashes[idx_a] - hashes[idx_b]
+            if dist <= threshold:
+                confidence = max(0, round((1 - dist / 64) * 100))
+                duplicates.append({
+                    "index_a": idx_a,
+                    "index_b": idx_b,
+                    "name_a": staged_assets[idx_a]["original_name"],
+                    "name_b": staged_assets[idx_b]["original_name"],
+                    "distance": dist,
+                    "confidence": confidence,
+                })
+
+    return duplicates
+
+
+# -----------------------------------------------------------------------------
 # 6. BOOTSTRAP & ENVIRONMENT
 # -----------------------------------------------------------------------------
 
 
-def _resolve_binary_path(name):
+def _resolve_binary_path(name: str) -> str | None:
+    """Resolve the filesystem path of a binary, checking PyInstaller bundle first.
+
+    Args:
+        name: Binary name (e.g. 'ffmpeg', 'exiftool').
+
+    Returns:
+        Absolute path to the binary, or None if not found.
+    """
     meipass = getattr(sys, '_MEIPASS', None)
     if meipass:
         candidate = os.path.join(meipass, 'bin', name)
@@ -920,31 +1450,48 @@ def _resolve_binary_path(name):
     return resolved
 
 
-def check_ollama_health():
+def check_ollama_health() -> dict[str, Any]:
+    """Probe the Ollama server for connectivity and list vision-capable models.
+
+    Returns:
+        Dict with 'connected', 'models', 'all_models', counts, and 'error'.
+    """
     try:
         tags = ollama.list()
         models = tags.get('models', [])
-        model_list = []
+        all_names = []
+        vision_names = []
         for m in models:
             name = m.get('name', '') if isinstance(m, dict) else str(m)
-            if _is_vision_model(name):
-                model_list.append(name)
+            if name:
+                all_names.append(name)
+                if _is_vision_model(name):
+                    vision_names.append(name)
         return {
             "connected": True,
-            "models": model_list,
-            "model_count": len(models),
+            "models": vision_names,
+            "all_models": all_names,
+            "model_count": len(all_names),
+            "vision_count": len(vision_names),
             "error": None,
         }
     except Exception as exc:
         return {
             "connected": False,
             "models": [],
+            "all_models": [],
             "model_count": 0,
+            "vision_count": 0,
             "error": str(exc),
         }
 
 
-def check_environment():
+def check_environment() -> dict[str, Any]:
+    """Verify all required tools and services are available.
+
+    Returns:
+        Dict with availability flags for ffmpeg, exiftool, Ollama, and error list.
+    """
     ffmpeg_path = _resolve_binary_path("ffmpeg")
     exiftool_path = _resolve_binary_path("exiftool")
     ollama_running = False
@@ -982,7 +1529,15 @@ def check_environment():
     }
 
 
-def stream_model_download(model_name="qwen2.5vl:7b"):
+def stream_model_download(model_name: str = "qwen2.5vl:7b") -> Any:
+    """Stream download progress for an Ollama model pull.
+
+    Args:
+        model_name: Ollama model tag to download.
+
+    Yields:
+        Dicts with 'status' key and progress/message details.
+    """
     try:
         current_stream = ollama.pull(model_name, stream=True)
         for chunk in current_stream:
@@ -1011,7 +1566,12 @@ def stream_model_download(model_name="qwen2.5vl:7b"):
         yield {"status": "error", "message": str(exc)}
 
 
-def check_for_updates():
+def check_for_updates() -> dict[str, Any]:
+    """Check GitHub releases for a newer version of the application.
+
+    Returns:
+        Dict with 'current', 'latest', 'update_available', 'download_url', 'ok'.
+    """
     try:
         resp = requests.get(
             "https://api.github.com/repos/Abdulmusawwir/ai-media-renamer/releases/latest",
@@ -1031,7 +1591,21 @@ def check_for_updates():
                 "download_url": "", "error": str(exc)}
 
 
-def download_file(url, dest, progress_callback=None, chunk_size=8192):
+def download_file(url: str, dest: Path, progress_callback: Callable[[int, int], None] | None = None, chunk_size: int = 8192) -> bool:
+    """Download a file from a URL with optional progress callback.
+
+    Args:
+        url: HTTP(S) URL to download.
+        dest: Destination file path.
+        progress_callback: Optional function receiving (bytes_downloaded, total_bytes).
+        chunk_size: Read chunk size in bytes.
+
+    Returns:
+        True on successful download.
+
+    Raises:
+        requests exceptions on network failure.
+    """
     tmp = dest.with_suffix(".part")
     try:
         resp = requests.get(url, stream=True, timeout=30)
@@ -1054,7 +1628,15 @@ def download_file(url, dest, progress_callback=None, chunk_size=8192):
         raise
 
 
-def wait_for_ollama_service(timeout=120):
+def wait_for_ollama_service(timeout: int = 120) -> bool:
+    """Poll the Ollama HTTP endpoint until it responds or timeout is reached.
+
+    Args:
+        timeout: Maximum seconds to wait.
+
+    Returns:
+        True if Ollama responded within the timeout.
+    """
     import time
     url = "http://localhost:11434/api/tags"
     deadline = time.time() + timeout
@@ -1069,7 +1651,16 @@ def wait_for_ollama_service(timeout=120):
     return False
 
 
-def switch_ai_provider(new_provider, api_key=None):
+def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[str, Any]:
+    """Switch the active AI provider, release old resources, and persist choice.
+
+    Args:
+        new_provider: Provider name to switch to (e.g. 'ollama', 'gemini').
+        api_key: Optional API key to store for the new provider.
+
+    Returns:
+        Dict with 'ok', 'message', and optionally 'require_download'.
+    """
     global CURRENT_PROVIDER, CURRENT_API_KEY, CURRENT_PROVIDER_INSTANCE
 
     if CURRENT_PROVIDER == "ollama" and new_provider != "ollama":
@@ -1107,12 +1698,25 @@ def switch_ai_provider(new_provider, api_key=None):
     return {"ok": True, "message": "Switched to local Ollama."}
 
 
-def set_api_key(key):
+def set_api_key(key: str) -> None:
+    """Set the global in-memory API key for the current session.
+
+    Args:
+        key: API key string to set.
+    """
     global CURRENT_API_KEY
     CURRENT_API_KEY = key
 
 
-def wipe_local_model(model_name="qwen2.5vl:7b"):
+def wipe_local_model(model_name: str = "qwen2.5vl:7b") -> dict[str, Any]:
+    """Delete a local Ollama model to free disk space.
+
+    Args:
+        model_name: Ollama model tag to remove.
+
+    Returns:
+        Dict with 'ok' and 'message'.
+    """
     try:
         ollama.delete(model_name)
         return {"ok": True, "message": f"Model {model_name} deleted."}
@@ -1124,7 +1728,15 @@ def wipe_local_model(model_name="qwen2.5vl:7b"):
 # 7. STAGING EXPORT / IMPORT
 # -----------------------------------------------------------------------------
 
-def export_staging_csv(staged_assets):
+def export_staging_csv(staged_assets: list[dict[str, Any]]) -> str:
+    """Serialize staged assets to a CSV string for export.
+
+    Args:
+        staged_assets: List of staged asset dicts.
+
+    Returns:
+        CSV-formatted string with all asset fields.
+    """
     import csv
     import io
     output = io.StringIO()
@@ -1141,7 +1753,15 @@ def export_staging_csv(staged_assets):
     return output.getvalue()
 
 
-def export_staging_json(staged_assets):
+def export_staging_json(staged_assets: list[dict[str, Any]]) -> str:
+    """Serialize staged assets to a JSON string for export.
+
+    Args:
+        staged_assets: List of staged asset dicts.
+
+    Returns:
+        Pretty-printed JSON string.
+    """
     clean = []
     for a in staged_assets:
         clean.append({
@@ -1154,7 +1774,17 @@ def export_staging_json(staged_assets):
     return json.dumps(clean, indent=2)
 
 
-def import_staging_csv(csv_string, allowed_categories):
+def import_staging_csv(csv_string: str, allowed_categories: tuple[str, ...] | list[str]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Parse a CSV string into staged asset dicts with category validation.
+
+    Args:
+        csv_string: CSV-formatted string with asset rows.
+        allowed_categories: Valid category names for validation.
+
+    Returns:
+        A tuple of (assets_list, warnings_list) where warnings describe
+        any category mismatches that fell back to 'uncategorized'.
+    """
     import csv
     import io
     assets = []
@@ -1180,3 +1810,137 @@ def import_staging_csv(csv_string, allowed_categories):
             "summary": row.get("summary", ""),
         })
     return assets, warnings
+
+
+# -----------------------------------------------------------------------------
+# 8. TELEMETRY (opt-in, anonymous, privacy-first)
+# -----------------------------------------------------------------------------
+
+POSTHOG_API_KEY = ""  # Set by user in config.json or via env var
+POSTHOG_HOST = "https://us.i.posthog.com"  # PostHog US ingest (2024+ endpoint; older projects use app.posthog.com)
+TELEMETRY_DIR = Path(os.environ.get('APPDATA', Path.home())) / "ai-media-renamer"
+TELEMETRY_FILE = TELEMETRY_DIR / "telemetry.jsonl"
+_install_id = None
+
+
+def _get_install_id() -> str:
+    """Random UUID per install, stored locally. Never tied to identity."""
+    global _install_id
+    if _install_id:
+        return _install_id
+    id_file = TELEMETRY_DIR / ".install_id"
+    if id_file.exists():
+        _install_id = id_file.read_text(encoding="utf-8").strip()
+    else:
+        import uuid
+        _install_id = str(uuid.uuid4())
+        id_file.parent.mkdir(parents=True, exist_ok=True)
+        id_file.write_text(_install_id, encoding="utf-8")
+    return _install_id
+
+
+def _get_session_id() -> str:
+    """Fresh UUID per app launch. Non-persistent."""
+    import uuid
+    return str(uuid.uuid4())[:8]
+
+
+def telemetry_enabled() -> bool:
+    """Check if telemetry is opted-in via config.json."""
+    return config.get("telemetry", {}).get("enabled", False)
+
+
+def set_telemetry_enabled(enabled: bool) -> None:
+    """Update telemetry preference in config.json."""
+    config.setdefault("telemetry", {})["enabled"] = enabled
+    save_config()
+    reload_config()
+
+
+def track_event(event_name: str, properties: dict[str, Any] | None = None) -> None:
+    """Queue a telemetry event. Writes to local JSONL.
+    PostHog flush happens on app exit or batch threshold."""
+    if not telemetry_enabled():
+        return
+
+    entry = {
+        "event": event_name,
+        "timestamp": datetime.datetime.now().astimezone().isoformat(),
+        "install_id": _get_install_id(),
+        "session_id": _get_session_id(),
+        "app_version": VERSION,
+        "os": sys.platform,
+        "arch": "AMD64",
+    }
+    if properties:
+        entry["properties"] = properties
+
+    try:
+        TELEMETRY_DIR.mkdir(parents=True, exist_ok=True)
+        with open(TELEMETRY_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
+def flush_telemetry() -> None:
+    """Send buffered telemetry events to PostHog, then clear local buffer."""
+    if not telemetry_enabled():
+        return
+
+    api_key = POSTHOG_API_KEY or config.get("telemetry", {}).get("api_key", "")
+    if not api_key:
+        return
+
+    if not TELEMETRY_FILE.exists():
+        return
+
+    try:
+        lines = TELEMETRY_FILE.read_text(encoding="utf-8").strip().split("\n")
+        lines = [ln for ln in lines if ln.strip()]
+        if not lines:
+            return
+
+        import posthog
+        posthog.api_key = api_key
+        posthog.host = POSTHOG_HOST
+        posthog.flush_at = 20
+        posthog.flush_interval = 0.5
+
+        for line in lines:
+            try:
+                event = json.loads(line)
+                posthog.capture(
+                    distinct_id=event.get("install_id", "unknown"),
+                    event=event["event"],
+                    properties=event.get("properties", {}),
+                    timestamp=event.get("timestamp"),
+                )
+            except Exception:
+                continue
+
+        posthog.flush()
+        TELEMETRY_FILE.unlink(missing_ok=True)
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+
+def send_opt_out_event() -> None:
+    """Send a final opt-out event before disabling telemetry."""
+    api_key = POSTHOG_API_KEY or config.get("telemetry", {}).get("api_key", "")
+    if not api_key:
+        return
+    try:
+        import posthog
+        posthog.api_key = api_key
+        posthog.host = POSTHOG_HOST
+        posthog.capture(
+            distinct_id=_get_install_id(),
+            event="opt_out",
+            properties={"app_version": VERSION},
+        )
+        posthog.flush()
+    except Exception:
+        pass

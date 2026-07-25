@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 import base64
 import glob
 import json
 import logging
+import os
 import shutil
 import tempfile
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import plotly.express as px
@@ -25,7 +29,6 @@ from engine import (
     MAX_UPLOAD_SIZE,
     NAMED_TEMPLATES,
     PROMPT_PROFILES,
-    VERSION,
     VIDEO_EXTENSIONS,
     ExifToolSession,
     _format_ai_error,
@@ -39,7 +42,8 @@ from engine import (
     detect_hw_accel,
     execute_commit,
     export_staging_csv,
-    export_staging_json,
+    find_duplicates,
+    flush_telemetry,
     get_active_profile,
     get_provider,
     import_staging_csv,
@@ -49,31 +53,79 @@ from engine import (
     load_session,
     log_event,
     process_asset_to_base64,
+    reload_config,
+    restore_default_config,
     sanitize_name,
     save_api_key,
     save_config,
     save_session,
+    send_opt_out_event,
     set_active_profile,
+    set_telemetry_enabled,
     setup_logging,
     stream_model_download,
     switch_ai_provider,
+    track_event,
     truncate_filename,
     validate_category,
     wipe_local_model,
 )
 
-st.set_page_config(page_title="AI Media Renamer", layout="wide")
+st.set_page_config(page_title="AI Media Renamer", layout="wide", initial_sidebar_state="expanded")
+
+# Commit success notification sound (0.3s whoosh, base64-encoded WAV)
+_COMMIT_BEEP = "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KPds9wT4FfiD99H30ffk99z33/fy9/73A/gg+Dn40vfT9+X33PfV9873hfe899n3tffu98X33/fj99P30PfV97/3xvfj9+H3z/fx98z37PfT9/L3rff/98/37vf99/z33ffy99H39ffs9/f3rfcH+Oz38ff09/D34Pf299v3yvfo99D34vfk98b3r/f097r34ffm99n3rPfj98j38vfj98D39Pfz99D3yPfO98z36Pff9+P3yvfO99z35PfS99D3xPfR9+X32/fZ9+j37Pff98z37/fo9+b3vPfp9/334vf898f37Pf09/z3zvf29+T3y/fz99335vfU99X37vfY98z37PfU9/n39Pfe9/j3//fB9/f37/fz9+f37vfz99T33ffo9+j37vfz98b3+ffj9/b30vf09/D3z/fz9/T3y/fz99z3wffm99j34ffr9+z30/fk99v39vfq9/D36/fg9/D37Pfp99/35vfl99j38ffY9+X37/fo98z3zffo99n37vfe98/37fey9/33sff997X3/fe59/33tff99733/fe19/33uff997X3/fe99/33uff99733/fe99/33uff99733/fe99/33uff99733/fe99/33uff99733/fe99/33uff99733/fe99/33uff99733/fe99/33uff99733/fe99/33uff99733/fe99/33uff99733/fe99/33uff99733/fe99/33gA="
+
+# Handle deferred rerun (used by notification sound — plays audio before rerun)
+if st.session_state.pop("_pending_rerun", False):
+    st.rerun()
 
 # Hide Streamlit chrome
 st.markdown("""
 <style>
 #MainMenu {visibility: hidden;}
 .stAppDeployButton {display: none;}
-footer {visibility: hidden;}
+footer {display: none;}
 [data-testid="stStatusWidget"] {visibility: hidden;}
-[data-testid="stToolbar"] {display: none;}
 div[data-testid="stDecoration"] {display: none;}
 </style>
+<script>
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    // Ctrl+Enter: trigger Run AI Analysis
+    if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault();
+        const btns = window.parent.document.querySelectorAll('button');
+        for (const btn of btns) {
+            if (btn.textContent.includes('Run AI Analysis')) {
+                btn.click();
+                break;
+            }
+        }
+    }
+    // Ctrl+Shift+C: trigger Commit Selected
+    if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+        e.preventDefault();
+        const btns = window.parent.document.querySelectorAll('button');
+        for (const btn of btns) {
+            if (btn.textContent.includes('Commit Selected')) {
+                btn.click();
+                break;
+            }
+        }
+    }
+    // Escape: stop analysis
+    if (e.key === 'Escape') {
+        const btns = window.parent.document.querySelectorAll('button');
+        for (const btn of btns) {
+            if (btn.textContent.includes('Stop Analysis')) {
+                btn.click();
+                break;
+            }
+        }
+    }
+});
+</script>
 """, unsafe_allow_html=True)
 
 st.title("AI Media Renamer")
@@ -90,6 +142,16 @@ div[data-testid="stFileUploader"]:hover {
 }
 div[data-testid="stFileUploader"]:has(.uploadedFile) {
     border-color: #2196F3 !important;
+}
+/* Staging table responsive overflow */
+div[data-testid="stDataFrame"] {
+    overflow-x: auto;
+    max-width: 100%;
+}
+/* Column containers prevent page-level horizontal scroll */
+.stColumn {
+    max-width: 100%;
+    overflow: hidden;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -164,6 +226,49 @@ logger = st.session_state.logger
 CATEGORY_LIST = list(ALLOWED_CATEGORIES)
 
 # -----------------------------------------------------------------------------
+# Telemetry opt-in dialog (first launch)
+# -----------------------------------------------------------------------------
+
+if "telemetry_opted" not in st.session_state:
+    st.session_state.telemetry_opted = config.get("telemetry", {}).get("enabled", None)
+
+if st.session_state.telemetry_opted is None:
+    st.subheader("Help improve AI Media Renamer")
+    st.markdown(
+        "Send anonymous usage data so we can fix bugs and prioritize features. "
+        "**No file names, content, or paths are ever sent.**"
+    )
+    col_what, col_whatnot = st.columns(2)
+    with col_what:
+        st.markdown(
+            "**What's collected:**\n"
+            "- Feature usage\n"
+            "- Error types\n"
+            "- Session duration\n"
+            "- Profile preference"
+        )
+    with col_whatnot:
+        st.markdown(
+            "**What's NOT collected:**\n"
+            "- File names or paths\n"
+            "- AI prompts or responses\n"
+            "- Your media content\n"
+            "- IP address or identity"
+        )
+    opt_in = st.checkbox("Send anonymous usage data", value=True, key="telemetry_opt_in")
+    st.caption("You can change this anytime in Settings.")
+    st.link_button("View privacy policy", "https://github.com/Abdulmusawwir/ai-media-renamer/blob/main/PRIVACY.md")
+    if st.button("Save Preference", type="primary", key="telemetry_save_pref"):
+        set_telemetry_enabled(opt_in)
+        st.session_state.telemetry_opted = opt_in
+        if opt_in:
+            track_event("opt_in")
+        else:
+            send_opt_out_event()
+        st.rerun()
+    st.stop()
+
+# -----------------------------------------------------------------------------
 # Environment check (runs once, cached in session state)
 # -----------------------------------------------------------------------------
 
@@ -174,7 +279,12 @@ if st.session_state.env_check is None and not st.session_state.model_downloading
 # Sidebar: AI Provider & Environment
 # -----------------------------------------------------------------------------
 
-def _on_provider_switch(new_provider):
+def _on_provider_switch(new_provider: str) -> None:
+    """Handle AI provider switch from the sidebar radio button.
+
+    Args:
+        new_provider: Identifier for the selected provider (e.g. "ollama", "gemini").
+    """
     if new_provider != "ollama":
         st.warning("Cloud providers are untested (no API keys available for testing). "
                    "Select Local (Ollama) to proceed.")
@@ -196,7 +306,8 @@ def _on_provider_switch(new_provider):
     st.rerun()
 
 
-def _on_api_key_change():
+def _on_api_key_change() -> None:
+    """Save the API key entered in the sidebar text input to the system keychain."""
     provider = st.session_state.provider_info
     key = st.session_state.get(f"api_key_{provider}", "")
     save_api_key(provider, key)
@@ -205,7 +316,8 @@ def _on_api_key_change():
     prov_inst.api_key = key
 
 
-def _on_model_change():
+def _on_model_change() -> None:
+    """Persist the selected model to config when the model dropdown changes."""
     provider = st.session_state.provider_info
     model = st.session_state.get(f"model_{provider}", "")
     config["model"]["providers"].setdefault(provider, {})["selected_model"] = model
@@ -215,6 +327,8 @@ def _on_model_change():
 
 with st.sidebar:
     st.header("AI Provider")
+
+    analysis_active = st.session_state.get("analysis_in_progress", False)
 
     all_providers = list_providers()
     current_prov = st.session_state.provider_info
@@ -236,58 +350,63 @@ with st.sidebar:
     if new_provider != st.session_state.provider_info:
         _on_provider_switch(new_provider)
 
-    # Model dropdown
-    p = get_provider(new_provider)
-    models = p.available_models()
-    model_key = f"model_{new_provider}"
-    if models:
-        cur_val = st.session_state.get(model_key, p.model or models[0])
-        if new_provider == "ollama" and cur_val and not _is_vision_model(cur_val):
-            vl_first = next((m for m in models if _is_vision_model(m)), None)
-            if vl_first:
-                cur_val = vl_first
-                config["model"]["providers"].setdefault("ollama", {})["selected_model"] = vl_first
-                config["model"]["name"] = vl_first
-                save_config()
-        m_idx = models.index(cur_val) if cur_val in models else 0
-        st.selectbox("Model", models, index=m_idx, key=model_key, on_change=_on_model_change)
+    if analysis_active:
+        st.caption("Analysis in progress — settings locked")
+        st.caption(f"Provider: {current_prov.title()}")
+        st.caption(f"Model: {config['model']['name']}")
     else:
-        st.caption("No models available.")
+        # Model dropdown
+        p = get_provider(new_provider)
+        models = p.available_models()
+        model_key = f"model_{new_provider}"
+        if models:
+            cur_val = st.session_state.get(model_key, p.model or models[0])
+            if new_provider == "ollama" and cur_val and not _is_vision_model(cur_val):
+                vl_first = next((m for m in models if _is_vision_model(m)), None)
+                if vl_first:
+                    cur_val = vl_first
+                    config["model"]["providers"].setdefault("ollama", {})["selected_model"] = vl_first
+                    config["model"]["name"] = vl_first
+                    save_config()
+            m_idx = models.index(cur_val) if cur_val in models else 0
+            st.selectbox("Model", models, index=m_idx, key=model_key, on_change=_on_model_change)
+        else:
+            st.caption("No models available.")
 
-    # Warn if selected model is not vision-capable
-    if new_provider == "ollama" and models:
-        cur_val = st.session_state.get(model_key, p.model or models[0])
-        if cur_val and not _is_vision_model(cur_val):
-            st.caption("\u26a0\ufe0f This model may not support vision analysis.")
+        # Warn if selected model is not vision-capable
+        if new_provider == "ollama" and models:
+            cur_val = st.session_state.get(model_key, p.model or models[0])
+            if cur_val and not _is_vision_model(cur_val):
+                st.caption("\u26a0\ufe0f This model may not support vision analysis.")
 
-    # Ollama health status
-    if new_provider == "ollama":
-        health = st.session_state.get("ollama_health")
-        if health is None:
-            health = check_ollama_health()
-            st.session_state.ollama_health = health
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            if health["connected"]:
-                st.markdown(f"\u2705 **Ollama** — {health['model_count']} models")
-            else:
-                st.markdown("\u274c **Ollama** — disconnected")
-        with col2:
-            if st.button("\u21bb", help="Refresh Ollama status"):
-                st.session_state.ollama_health = None
-                st.rerun()
+        # Ollama health status
+        if new_provider == "ollama":
+            health = st.session_state.get("ollama_health")
+            if health is None:
+                health = check_ollama_health()
+                st.session_state.ollama_health = health
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                if health["connected"]:
+                    st.markdown(f"\u2705 **Ollama** — {health['model_count']} models")
+                else:
+                    st.markdown("\u274c **Ollama** — disconnected")
+            with col2:
+                if st.button("\u21bb", help="Refresh Ollama status"):
+                    st.session_state.ollama_health = None
+                    st.rerun()
 
-    # API key (cloud providers only)
-    if new_provider != "ollama":
-        api_key = load_api_key(new_provider)
-        st.text_input(
-            "API Key", type="password", key=f"api_key_{new_provider}",
-            value=api_key,
-            help=f"API key for {new_provider}. Saved to your system keychain.",
-            on_change=_on_api_key_change,
-        )
-        if api_key:
-            st.caption("\u2713 Key saved in system keychain")
+        # API key (cloud providers only)
+        if new_provider != "ollama":
+            api_key = load_api_key(new_provider)
+            st.text_input(
+                "API Key", type="password", key=f"api_key_{new_provider}",
+                value=api_key,
+                help=f"API key for {new_provider}. Saved to your system keychain.",
+                on_change=_on_api_key_change,
+            )
+            if api_key:
+                st.caption("\u2713 Key saved in system keychain")
 
 
     st.divider()
@@ -361,29 +480,6 @@ with st.sidebar:
             st.session_state.model_downloading = True
             st.rerun()
 
-    if new_provider == "ollama" and env and env.get("model_available"):
-        if not st.session_state.get("confirm_wipe"):
-            st.button("\u26a0\ufe0f Delete Qwen2.5-VL Model Permanently",
-                      type="secondary",
-                      on_click=lambda: setattr(st.session_state, "confirm_wipe", True))
-        else:
-            st.error("**Confirm** \u2014 This permanently removes the AI model from your system. "
-                     "You will need to re-download it to analyze files.")
-            col_cancel, col_confirm = st.columns(2)
-            with col_cancel:
-                st.button("Cancel",
-                          on_click=lambda: setattr(st.session_state, "confirm_wipe", False))
-            with col_confirm:
-                if st.button("Yes, delete model", type="primary"):
-                    st.session_state.confirm_wipe = False
-                    result = wipe_local_model()
-                    if result["ok"]:
-                        st.success(result["message"])
-                        st.session_state.env_check = None
-                        st.rerun()
-                    else:
-                        st.error(result["message"])
-
 # -----------------------------------------------------------------------------
 # Bootstrap diagnostics panel (blocks upload if critical dependency missing)
 # -----------------------------------------------------------------------------
@@ -400,12 +496,12 @@ if env and env.get("errors"):
         st.stop()
 
 if st.session_state.model_downloading:
-    with st.container():
-        st.subheader("Downloading Qwen2.5-VL Model")
+    with st.status("Downloading Qwen2.5-VL Model", expanded=True) as download_status:
         progress_bar = st.progress(0)
         status_text = st.empty()
         st.caption("Model is ~5.9 GB. Download progress updates every few seconds.")
-        if st.button("Cancel Download"):
+        if st.button("Cancel Download",
+                     help="Cancels UI polling — Ollama download continues in background"):
             st.session_state.model_downloading = False
             st.session_state.model_download_gen = None
             st.rerun()
@@ -437,6 +533,7 @@ if st.session_state.model_downloading:
         elif update["status"] == "success":
             progress_bar.progress(1.0)
             status_text.success("Download complete! Model installed. Refreshing environment...")
+            download_status.update(label="Download complete", state="complete")
             st.session_state.model_downloading = False
             st.session_state.model_download_gen = None
             st.session_state.env_check = None
@@ -462,7 +559,13 @@ if st.session_state.provider_info != "ollama":
 # Helper: load log data for analytics
 # -----------------------------------------------------------------------------
 
-def load_log_entries():
+@st.cache_data(ttl=10)
+def load_log_entries() -> list[dict[str, Any]]:
+    """Load all JSONL log entries from the log directory.
+
+    Returns:
+        List of parsed log entry dictionaries, sorted by file then line order.
+    """
     log_dir = LOG_DIR
     if not log_dir.exists():
         return []
@@ -482,8 +585,8 @@ def load_log_entries():
 # Tab 1: Upload & Analyze
 # -----------------------------------------------------------------------------
 
-tab_upload, tab_analytics = st.tabs(
-    ["Upload & Analyze", "Analytics Dashboard"]
+tab_upload, tab_analytics, tab_config = st.tabs(
+    ["Upload & Analyze", "Analytics Dashboard", "Configuration"]
 )
 
 with tab_upload:
@@ -620,84 +723,91 @@ with tab_upload:
 
     # ------------------------------------------------------------------
     # Phase 2: Per-asset rerun loop (one AI call per script execution)
+    # Uses st.fragment to isolate reruns — only the analysis area re-renders
     # ------------------------------------------------------------------
     if st.session_state.analysis_in_progress:
-        items = list(st.session_state.get("base64_cache", {}).items())
-        total = len(items)
-        idx = st.session_state.analysis_index
 
-        st.success(f"\u2705 Step 1 complete: {len(st.session_state.get('base64_cache', {}))} files extracted")
+        @st.fragment
+        def _analysis_fragment() -> None:
+            """Run one AI analysis step per script execution within a Streamlit fragment."""
+            items = list(st.session_state.get("base64_cache", {}).items())
+            total = len(items)
+            idx = st.session_state.analysis_index
 
-        if total > 0:
-            st.progress(idx / total, text=f"Analyzed {idx}/{total} assets")
+            st.success(f"\u2705 Step 1 complete: {total} files extracted")
 
-        if 0 <= idx < total:
-            name, b64 = items[idx]
-            st.info(f"**Analyzing:** {name} ({idx+1}/{total})")
+            if total > 0:
+                st.progress(idx / total, text=f"Analyzed {idx}/{total} assets")
 
-            col_stop, _ = st.columns([1, 4])
-            with col_stop:
-                if st.button("Stop Analysis"):
-                    st.session_state.analysis_aborted = True
+            if 0 <= idx < total:
+                name, b64 = items[idx]
+                st.info(f"**Analyzing:** {name} ({idx+1}/{total})")
 
-            if st.session_state.analysis_aborted:
-                st.warning(f"Analysis stopped at {idx}/{total} assets.")
-                st.session_state.analysis_in_progress = False
-                st.session_state.analysis_done = bool(st.session_state.staged_assets)
-            else:
-                prov = get_provider(st.session_state.provider_info)
-                ai_result = prov.analyze(b64, verbose=False)
+                col_stop, _ = st.columns([1, 4])
+                with col_stop:
+                    if st.button("Stop Analysis"):
+                        st.session_state.analysis_aborted = True
 
-                if ai_result['ok']:
-                    ai_data = ai_result['data']
-                    suggested_cat = ai_data.get('suggested_category', '')
-                    staged_category, _ = validate_category(suggested_cat)
-                    ai_topic = ai_data.get('topic', '')
-                    ai_desc = ai_data.get('description', '')
-                    safe_name = sanitize_name(ai_data['new_filename'])
-                    safe_name = apply_naming_template(
-                        st.session_state.template_string,
-                        {"category": staged_category, "topic": ai_topic,
-                         "description": ai_desc, "new_filename": safe_name},
-                    )
-                    safe_name = apply_case_style(safe_name, st.session_state.case_style)
-                    safe_name = truncate_filename(safe_name, st.session_state.max_filename_chars)
-
-                    staged_assets = st.session_state.get("staged_assets", [])
-                    staged_assets.append({
-                        "original_path": st.session_state.uploaded_files[name],
-                        "original_name": name,
-                        "staged_name": safe_name,
-                        "category": staged_category,
-                        "topic": ai_topic,
-                        "description": ai_desc,
-                        "tags": ai_data.get('tags', []),
-                        "summary": ai_data.get('overall_visual_summary', ''),
-                        "suggested_category": suggested_cat,
-                    })
-                    st.session_state.staged_assets = staged_assets
-
-                    log_event(logger, "INFO", "ai_analysis_success", file_name=name, details={
-                        "staged_name": safe_name, "category": staged_category
-                    })
+                if st.session_state.analysis_aborted:
+                    st.warning(f"Analysis stopped at {idx}/{total} assets.")
+                    st.session_state.analysis_in_progress = False
+                    st.session_state.analysis_done = bool(st.session_state.staged_assets)
                 else:
-                    error_msg = _format_ai_error(ai_result)
-                    st.session_state.analysis_errors.append(f"{name}: {error_msg}")
-                    log_event(logger, "ERROR", "ai_analysis_failed", file_name=name, details={"error": error_msg})
+                    prov = get_provider(st.session_state.provider_info)
+                    ai_result = prov.analyze(b64, verbose=False)
 
-                st.session_state.analysis_index = idx + 1
-                st.rerun()
-        else:
-            st.session_state.analysis_in_progress = False
-            st.session_state.analysis_done = True
-            n = len(st.session_state.get("staged_assets", []))
-            if n:
-                st.success(f"Analysis complete: {n} assets staged.")
+                    if ai_result['ok']:
+                        ai_data = ai_result['data']
+                        suggested_cat = ai_data.get('suggested_category', '')
+                        staged_category, _ = validate_category(suggested_cat)
+                        ai_topic = ai_data.get('topic', '')
+                        ai_desc = ai_data.get('description', '')
+                        safe_name = sanitize_name(ai_data['new_filename'])
+                        safe_name = apply_naming_template(
+                            st.session_state.template_string,
+                            {"category": staged_category, "topic": ai_topic,
+                             "description": ai_desc, "new_filename": safe_name},
+                        )
+                        safe_name = apply_case_style(safe_name, st.session_state.case_style)
+                        safe_name = truncate_filename(safe_name, st.session_state.max_filename_chars)
+
+                        staged_assets = st.session_state.get("staged_assets", [])
+                        staged_assets.append({
+                            "original_path": st.session_state.uploaded_files[name],
+                            "original_name": name,
+                            "staged_name": safe_name,
+                            "category": staged_category,
+                            "topic": ai_topic,
+                            "description": ai_desc,
+                            "tags": ai_data.get('tags', []),
+                            "summary": ai_data.get('overall_visual_summary', ''),
+                            "suggested_category": suggested_cat,
+                        })
+                        st.session_state.staged_assets = staged_assets
+
+                        log_event(logger, "INFO", "ai_analysis_success", file_name=name, details={
+                            "staged_name": safe_name, "category": staged_category
+                        })
+                    else:
+                        error_msg = _format_ai_error(ai_result)
+                        st.session_state.analysis_errors.append(f"{name}: {error_msg}")
+                        log_event(logger, "ERROR", "ai_analysis_failed", file_name=name, details={"error": error_msg})
+
+                    st.session_state.analysis_index = idx + 1
+                    st.rerun()
             else:
-                errs = st.session_state.analysis_errors
-                st.warning(f"No assets were staged ({len(errs)} failure(s)).")
-                for e in errs:
-                    st.caption(f"  {e}")
+                st.session_state.analysis_in_progress = False
+                st.session_state.analysis_done = True
+                n = len(st.session_state.get("staged_assets", []))
+                if n:
+                    st.success(f"Analysis complete: {n} assets staged.")
+                else:
+                    errs = st.session_state.analysis_errors
+                    st.warning(f"No assets were staged ({len(errs)} failure(s)).")
+                    for e in errs:
+                        st.caption(f"  {e}")
+
+        _analysis_fragment()
 
     # ------------------------------------------------------------------
     # Persistent status (visible after analysis completes)
@@ -713,18 +823,17 @@ with tab_upload:
     profile_keys = list(PROMPT_PROFILES.keys())
     current_profile = get_active_profile()
 
-    def _on_profile_change():
+    def _on_profile_change() -> None:
+        """Update the active AI prompt profile when the profile selector changes."""
         new_p = st.session_state.profile_selector
         set_active_profile(new_p)
-
-    if "profile_selector" not in st.session_state:
-        st.session_state.profile_selector = current_profile
 
     col_prof_label, col_prof_sel = st.columns([1, 3])
     with col_prof_label:
         st.caption("AI Prompt Profile")
     with col_prof_sel:
         st.selectbox("Profile", profile_keys, format_func=lambda k: PROMPT_PROFILES.get(k, k),
+                     index=profile_keys.index(current_profile) if current_profile in profile_keys else 0,
                      key="profile_selector", on_change=_on_profile_change,
                      label_visibility="collapsed")
 
@@ -734,7 +843,8 @@ with tab_upload:
         profile_data = config.get("prompt_profiles", {}).get("profiles", {}).get("custom", {})
         current_custom = profile_data.get("prompt", "")
 
-        def _on_custom_prompt_change():
+        def _on_custom_prompt_change() -> None:
+            """Save the custom prompt text to config when the text area changes."""
             text = st.session_state.custom_prompt_area
             if "prompt_profiles" not in config:
                 config["prompt_profiles"] = {"active": "custom", "profiles": {}}
@@ -770,20 +880,35 @@ with tab_upload:
             st.info(f"Batch size: {file_count} files. Extraction may take a few minutes.")
 
         with st.expander("Advanced Features", expanded=False):
-            adv_col1, adv_col2 = st.columns(2)
+            adv_col1, adv_col2, adv_col3 = st.columns(3)
             with adv_col1:
-                def _on_adv_case():
+                def _on_adv_case() -> None:
+                    """Sync the advanced case style selection to session state."""
                     st.session_state.case_style = st.session_state.adv_case_style
                 st.selectbox("Case style", CASE_STYLE_OPTIONS,
                              format_func=lambda s: CASE_STYLE_LABELS.get(s, s),
                              index=CASE_STYLE_OPTIONS.index(st.session_state.case_style),
                              key="adv_case_style", on_change=_on_adv_case)
             with adv_col2:
-                def _on_adv_chars():
+                def _on_adv_chars() -> None:
+                    """Sync the max filename characters setting to session state."""
                     st.session_state.max_filename_chars = st.session_state.adv_max_chars
                 st.number_input("Max filename chars", min_value=0, max_value=200, step=5,
                                 key="adv_max_chars", on_change=_on_adv_chars,
                                 help="0 = no limit")
+            with adv_col3:
+                template_names = list(NAMED_TEMPLATES.keys())
+                def _on_adv_template() -> None:
+                    """Sync the naming template selection to session state."""
+                    st.session_state.template_string = NAMED_TEMPLATES.get(
+                        st.session_state.adv_template, DEFAULT_TEMPLATE_STRING)
+                st.selectbox("Naming template", template_names,
+                             index=template_names.index(
+                                 next((k for k, v in NAMED_TEMPLATES.items()
+                                       if v == st.session_state.template_string),
+                                      template_names[0])),
+                             key="adv_template", on_change=_on_adv_template,
+                             help="Template for generated filenames")
 
         col1, col2 = st.columns([1, 3])
         with col1:
@@ -837,7 +962,8 @@ with tab_upload:
                 st.session_state.analysis_in_progress = True
                 st.session_state.analysis_done = False
                 st.session_state.analysis_aborted = False
-                st.rerun()
+                with st.spinner("Starting AI analysis..."):
+                    st.rerun()
             except Exception as exc:
                 import traceback
                 st.error(f"Analysis crashed: {exc}")
@@ -877,7 +1003,8 @@ with tab_upload:
                 st.text_input("Pattern", key="template_string",
                               help="{category}, {topic}, {description}, {date} in any order.")
             with col_case:
-                def _on_staging_case():
+                def _on_staging_case() -> None:
+                    """Sync the staging case style selection to session state."""
                     st.session_state.case_style = st.session_state.staging_case_style
                 st.selectbox("Case style", CASE_STYLE_OPTIONS,
                              format_func=lambda s: CASE_STYLE_LABELS.get(s, s),
@@ -885,7 +1012,8 @@ with tab_upload:
                              .index(st.session_state.case_style),
                              key="staging_case_style", on_change=_on_staging_case)
             with col_chars:
-                def _on_staging_chars():
+                def _on_staging_chars() -> None:
+                    """Sync the max filename characters setting from staging input."""
                     st.session_state.max_filename_chars = st.session_state.staging_max_chars
                 st.number_input("Max chars", min_value=0, max_value=200, step=5,
                                 key="staging_max_chars", on_change=_on_staging_chars)
@@ -898,7 +1026,7 @@ with tab_upload:
         select_all = st.checkbox("Select all", key="staging_select_all")
 
         table_rows = []
-        for asset in staged:
+        for i, asset in enumerate(staged):
             rendered = apply_naming_template(template, {
                 "category": asset.get("category", "uncategorized"),
                 "topic": asset.get("topic", ""),
@@ -907,6 +1035,7 @@ with tab_upload:
             })
             rendered = apply_case_style(rendered, case_style)
             rendered = truncate_filename(rendered, max_chars)
+            existing_rating = asset.get("rating", "")
             table_rows.append({
                 "select": select_all,
                 "original_name": asset["original_name"],
@@ -914,6 +1043,7 @@ with tab_upload:
                 "category": asset["category"] or "uncategorized",
                 "tags": ", ".join(asset["tags"]),
                 "summary": asset["summary"],
+                "rating": existing_rating,
             })
 
         df = pd.DataFrame(table_rows)
@@ -938,6 +1068,12 @@ with tab_upload:
                 ),
                 "tags": st.column_config.TextColumn("Tags (comma-separated)", width="large"),
                 "summary": st.column_config.TextColumn("Summary", disabled=True, width="large"),
+                "rating": st.column_config.SelectboxColumn(
+                    "Rating",
+                    options=["", "\U0001f44d", "\U0001f44e"],
+                    width="small",
+                    help="Rate this AI suggestion",
+                ),
             },
             hide_index=True,
             width='stretch',
@@ -965,8 +1101,14 @@ with tab_upload:
             selected = edited_df[edited_df["select"]]
             for idx in selected.index:
                 staged[idx]["category"] = effective_category
-            st.success(f"Updated {len(selected)} assets to '{effective_category}'")
+            st.toast(f"Applied '{effective_category}' to {len(selected)} assets")
             st.rerun()
+
+        # Sync ratings from data editor back to staged_assets
+        for i, asset in enumerate(staged):
+            new_rating = edited_df.iloc[i]["rating"]
+            if new_rating != asset.get("rating", ""):
+                asset["rating"] = new_rating
 
         if sel_count == 0:
             st.caption("Select assets using the checkbox column above.")
@@ -993,6 +1135,31 @@ with tab_upload:
                 st.session_state.analysis_done = False
                 st.session_state.analysis_errors = []
                 st.rerun()
+
+        # 13.1 Duplicate detection
+        col_dup, _ = st.columns([1, 4])
+        with col_dup:
+            if st.button("Detect Duplicates", key="detect_dupes_btn"):
+                with st.spinner("Computing perceptual hashes..."):
+                    duplicates = find_duplicates(staged, threshold=10)
+                    st.session_state.duplicate_pairs = duplicates
+                    if duplicates:
+                        st.warning(f"Found {len(duplicates)} potential duplicate pair(s)")
+                    else:
+                        st.success("No duplicates found")
+
+        if st.session_state.get("duplicate_pairs"):
+            with st.expander(f"Duplicates ({len(st.session_state.duplicate_pairs)} pairs)", expanded=True):
+                dupe_df = pd.DataFrame(st.session_state.duplicate_pairs)
+                dupe_df = dupe_df.rename(columns={
+                    "name_a": "File A", "name_b": "File B",
+                    "confidence": "Similarity %", "distance": "Distance"
+                })
+                st.dataframe(dupe_df[["File A", "File B", "Similarity %", "Distance"]],
+                             hide_index=True, width="stretch")
+                if st.button("Clear Duplicates", key="clear_dupes"):
+                    st.session_state.pop("duplicate_pairs", None)
+                    st.rerun()
 
         # Export and import staging
         col_csv, col_spacer = st.columns([1, 5])
@@ -1030,7 +1197,9 @@ with tab_upload:
         metadata_only = st.checkbox("Metadata only — keep original filenames",
                                     help="Write AI-generated tags and summary to files without renaming them.")
 
-        col_commit, col_refresh = st.columns([1, 3])
+        col_preview, col_commit, col_refresh = st.columns([1, 1, 3])
+        with col_preview:
+            preview_btn = st.button("Preview Commit")
         with col_commit:
             commit_btn = st.button("Commit Selected", type="primary")
         with col_refresh:
@@ -1038,6 +1207,35 @@ with tab_upload:
                 st.caption("Selected rows will be tagged in-place. Original filenames preserved.")
             else:
                 st.caption("Selected rows will be renamed and tagged. Unchecked rows are skipped.")
+
+        if preview_btn:
+            selected = edited_df[edited_df["select"]]
+            if selected.empty:
+                st.info("No assets selected for preview.")
+            else:
+                target_dir = Path(st.session_state.output_dir)
+                preview_rows = []
+                for commit_i in range(len(selected)):
+                    row = selected.iloc[commit_i]
+                    asset = staged[selected.index[commit_i]]
+                    suffix = Path(asset["original_name"]).suffix
+                    new_name = f"{row['proposed_filename']}{suffix}"
+                    if sort_folders:
+                        cat = row["category"].strip().lower().replace(" ", "_") or "uncategorized"
+                        new_path = str(target_dir / cat / new_name)
+                    else:
+                        new_path = str(target_dir / new_name)
+                    tags = row["tags"]
+                    preview_rows.append({
+                        "Original": asset["original_name"],
+                        "New Path": new_path,
+                        "Category": row["category"],
+                        "Tags": tags,
+                        "Metadata": "Yes" if tags else "No",
+                    })
+                preview_df = pd.DataFrame(preview_rows)
+                st.dataframe(preview_df, use_container_width=True, hide_index=True)
+                st.caption("Preview only — no files modified.")
 
         if commit_btn:
             try:
@@ -1071,8 +1269,10 @@ with tab_upload:
                         if result and not (isinstance(result, str) and result.startswith("ERROR:")):
                             committed += 1
                             committed_names.add(asset["original_name"])
+                            rating = asset.get("rating", "")
                             log_event(logger, "INFO", "file_committed", file_name=asset["original_name"],
-                                      details={"new_path": str(result), "category": asset["category"]})
+                                      details={"new_path": str(result), "category": asset["category"],
+                                               "rating": rating if rating else None})
                         else:
                             failed += 1
                             err = result[6:] if isinstance(result, str) and result.startswith("ERROR:") else "unknown"
@@ -1090,6 +1290,26 @@ with tab_upload:
                         "committed": committed, "failed": failed, "total": len(selected), "mode": "web_batch"
                     })
 
+                    # Track ratings to telemetry
+                    for asset in staged:
+                        rating = asset.get("rating", "")
+                        if rating:
+                            track_event("ai_rating", {
+                                "outcome": "thumbs_up" if rating == "\U0001f44d" else "thumbs_down",
+                                "profile": get_active_profile(),
+                                "model": config.get("model", {}).get("name", "unknown"),
+                                "provider": config.get("model", {}).get("last_provider", "ollama"),
+                            })
+
+                    # Track session completion
+                    track_event("session_complete", {
+                        "files_analyzed": len(staged),
+                        "files_committed": committed,
+                        "files_failed": failed,
+                        "profile": get_active_profile(),
+                        "case_style": st.session_state.case_style,
+                    })
+
                     if committed_names:
                         st.session_state.staged_assets = [
                             a for a in st.session_state.staged_assets
@@ -1105,7 +1325,14 @@ with tab_upload:
                     else:
                         msg = f"All {committed} assets committed successfully to {target_dir.resolve()}!"
                         st.toast(msg)
-                        st.rerun()
+                        st.markdown(
+                            f'<div style="position:absolute;width:0;height:0;overflow:hidden">'
+                            f'<audio id="commit-beep" autoplay>'
+                            f'<source src="data:audio/wav;base64,{_COMMIT_BEEP}" type="audio/wav">'
+                            f'</audio></div>',
+                            unsafe_allow_html=True,
+                        )
+                        st.session_state._pending_rerun = True
             except Exception as exc:
                 import traceback
                 st.error(f"Commit crashed: {exc}")
@@ -1151,92 +1378,390 @@ with tab_analytics:
     entries = load_log_entries()
     if not entries:
         st.info("No log entries found yet. Process some files to see analytics here.")
-        st.stop()
-
-    # Stats cards
-    total = len(entries)
-    committed = sum(1 for e in entries if e.get("event") == "file_committed")
-    errors = sum(1 for e in entries if e.get("level") == "ERROR")
-    skipped = sum(1 for e in entries if e.get("event") == "file_skipped")
-
-    sc1, sc2, sc3, sc4 = st.columns(4)
-    sc1.metric("Total Events", total)
-    sc2.metric("Committed", committed)
-    sc3.metric("Errors", errors)
-    sc4.metric("Skipped", skipped)
-
-    # Category distribution
-    cat_counter = Counter()
-    for e in entries:
-        if e.get("event") == "file_committed":
-            details = e.get("details", {}) or {}
-            cat = details.get("category", "unknown")
-            cat_counter[cat] += 1
-
-    if cat_counter:
-        cat_df = pd.DataFrame(
-            cat_counter.most_common(),
-            columns=["Category", "Count"]
-        )
-        fig_pie = px.pie(cat_df, names="Category", values="Count",
-                         title="Category Distribution",
-                         color_discrete_sequence=px.colors.qualitative.Pastel)
-        fig_pie.update_layout(height=350)
-        st.plotly_chart(fig_pie, width='stretch')
-
-    # Daily activity
-    day_counter = Counter()
-    for e in entries:
-        ts = e.get("timestamp", "")
-        day = ts[:10] if ts else ""
-        if day:
-            day_counter[day] += 1
-
-    if day_counter:
-        day_df = pd.DataFrame(
-            sorted(day_counter.items()),
-            columns=["Date", "Events"]
-        )
-        fig_bar = px.bar(day_df, x="Date", y="Events",
-                         title="Daily Activity",
-                         color_discrete_sequence=["#3b82f6"])
-        fig_bar.update_layout(height=350)
-        st.plotly_chart(fig_bar, width='stretch')
-
-    # Filterable timeline
-    st.subheader("Event Timeline")
-
-    levels = ["all"] + sorted(set(e.get("level", "INFO") for e in entries))
-    events = ["all"] + sorted(set(e.get("event", "") for e in entries))
-
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        filter_level = st.selectbox("Filter by level", levels, key="ana_level")
-    with col_f2:
-        filter_event = st.selectbox("Filter by event", events, key="ana_event")
-
-    filtered = entries
-    if filter_level != "all":
-        filtered = [e for e in filtered if e.get("level") == filter_level]
-    if filter_event != "all":
-        filtered = [e for e in filtered if e.get("event") == filter_event]
-
-    if filtered:
-        rows = []
-        for e in filtered:
-            details = e.get("details", {}) or {}
-            rows.append({
-                "Timestamp": e.get("timestamp", ""),
-                "Level": e.get("level", ""),
-                "Event": e.get("event", ""),
-                "File": e.get("file", "-"),
-                "Details": json.dumps(details)[:120],
-            })
-        timeline_df = pd.DataFrame(rows)
-        timeline_df = timeline_df.sort_values("Timestamp", ascending=False)
-        st.dataframe(timeline_df, width='stretch', hide_index=True)
     else:
-        st.info("No matching entries.")
+        # Stats cards
+        total = len(entries)
+        committed = sum(1 for e in entries if e.get("event") == "file_committed")
+        errors = sum(1 for e in entries if e.get("level") == "ERROR")
+        skipped = sum(1 for e in entries if e.get("event") == "file_skipped")
+
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        sc1.metric("Total Events", total)
+        sc2.metric("Committed", committed)
+        sc3.metric("Errors", errors)
+        sc4.metric("Skipped", skipped)
+
+        # Category distribution
+        cat_counter = Counter()
+        for e in entries:
+            if e.get("event") == "file_committed":
+                details = e.get("details", {}) or {}
+                cat = details.get("category", "unknown")
+                cat_counter[cat] += 1
+
+        if cat_counter:
+            cat_df = pd.DataFrame(
+                cat_counter.most_common(),
+                columns=["Category", "Count"]
+            )
+            fig_pie = px.pie(cat_df, names="Category", values="Count",
+                             title="Category Distribution",
+                             color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig_pie.update_layout(height=350)
+            st.plotly_chart(fig_pie, width='stretch')
+
+        # Daily activity
+        day_counter = Counter()
+        for e in entries:
+            ts = e.get("timestamp", "")
+            day = ts[:10] if ts else ""
+            if day:
+                day_counter[day] += 1
+
+        if day_counter:
+            day_df = pd.DataFrame(
+                sorted(day_counter.items()),
+                columns=["Date", "Events"]
+            )
+            fig_bar = px.bar(day_df, x="Date", y="Events",
+                             title="Daily Activity",
+                             color_discrete_sequence=["#3b82f6"])
+            fig_bar.update_layout(height=350)
+            st.plotly_chart(fig_bar, width='stretch')
+
+        # 7.4 Error rate chart
+        error_by_day = Counter()
+        total_by_day = Counter()
+        for e in entries:
+            ts = e.get("timestamp", "")
+            day = ts[:10] if ts else ""
+            if day:
+                total_by_day[day] += 1
+                if e.get("level") == "ERROR":
+                    error_by_day[day] += 1
+
+        if total_by_day:
+            all_days = sorted(set(total_by_day.keys()) | set(error_by_day.keys()))
+            err_df = pd.DataFrame({
+                "Date": all_days,
+                "Errors": [error_by_day.get(d, 0) for d in all_days],
+                "Total": [total_by_day.get(d, 0) for d in all_days],
+            })
+            err_df["Error Rate %"] = (err_df["Errors"] / err_df["Total"].clip(lower=1) * 100).round(1)
+            fig_err = px.line(err_df, x="Date", y="Error Rate %",
+                              title="Error Rate Over Time",
+                              color_discrete_sequence=["#ef4444"])
+            fig_err.update_layout(height=300)
+            st.plotly_chart(fig_err, width='stretch')
+
+        # 7.3 Storage usage metric
+        committed_entries = [e for e in entries if e.get("event") == "file_committed"]
+        if committed_entries:
+            total_size = 0
+            for e in committed_entries:
+                details = e.get("details", {}) or {}
+                file_path = details.get("new_path") or details.get("original_path", "")
+                if file_path and os.path.isfile(file_path):
+                    try:
+                        total_size += os.path.getsize(file_path)
+                    except OSError:
+                        pass
+            if total_size > 0:
+                if total_size >= 1 << 30:
+                    size_str = f"{total_size / (1 << 30):.1f} GB"
+                elif total_size >= 1 << 20:
+                    size_str = f"{total_size / (1 << 20):.1f} MB"
+                else:
+                    size_str = f"{total_size / (1 << 10):.1f} KB"
+                st.metric("Total Committed Storage", size_str)
+
+        # 7.1 Commit history timeline
+        if committed_entries:
+            st.subheader("Commit History")
+            commit_rows = []
+            for e in committed_entries:
+                details = e.get("details", {}) or {}
+                commit_rows.append({
+                    "Time": e.get("timestamp", ""),
+                    "Original": e.get("file", "-"),
+                    "New Path": details.get("new_path", "-"),
+                    "Category": details.get("category", "-"),
+                    "Tags": ", ".join(details.get("tags", [])) if isinstance(details.get("tags"), list) else "-",
+                })
+            commit_df = pd.DataFrame(commit_rows).sort_values("Time", ascending=False)
+
+            ch_col1, ch_col2 = st.columns(2)
+            with ch_col1:
+                ch_categories = ["all"] + sorted(commit_df["Category"].unique().tolist())
+                ch_cat_filter = st.selectbox("Filter by category", ch_categories,
+                                              key="ch_cat_filter")
+            with ch_col2:
+                if "Time" in commit_df.columns and not commit_df["Time"].empty:
+                    try:
+                        commit_df["_date"] = commit_df["Time"].str[:10]
+                        dates = sorted(commit_df["_date"].dropna().unique().tolist())
+                        if len(dates) > 1:
+                            ch_date_range = st.selectbox("Filter by date", ["all"] + dates,
+                                                          key="ch_date_filter")
+                        else:
+                            ch_date_range = "all"
+                        commit_df.drop(columns=["_date"], inplace=True, errors="ignore")
+                    except Exception:
+                        ch_date_range = "all"
+                else:
+                    ch_date_range = "all"
+
+            filtered_commits = commit_df
+            if ch_cat_filter != "all":
+                filtered_commits = filtered_commits[filtered_commits["Category"] == ch_cat_filter]
+            if ch_date_range != "all":
+                filtered_commits = filtered_commits[
+                    filtered_commits["Time"].str.startswith(ch_date_range)]
+
+            st.dataframe(filtered_commits, width='stretch', hide_index=True)
+
+            # 7.2 Export buttons
+            csv_data = filtered_commits.to_csv(index=False)
+            json_data = filtered_commits.to_json(orient="records", indent=2)
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                st.download_button("Download CSV", data=csv_data,
+                                   file_name="commit_history.csv", mime="text/csv")
+            with dl_col2:
+                st.download_button("Download JSON", data=json_data,
+                                   file_name="commit_history.json", mime="application/json")
+
+        # Filterable timeline
+        st.subheader("Event Timeline")
+
+        levels = ["all"] + sorted(set(e.get("level", "INFO") for e in entries))
+        events = ["all"] + sorted(set(e.get("event", "") for e in entries))
+
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            filter_level = st.selectbox("Filter by level", levels, key="ana_level")
+        with col_f2:
+            filter_event = st.selectbox("Filter by event", events, key="ana_event")
+
+        filtered = entries
+        if filter_level != "all":
+            filtered = [e for e in filtered if e.get("level") == filter_level]
+        if filter_event != "all":
+            filtered = [e for e in filtered if e.get("event") == filter_event]
+
+        if filtered:
+            rows = []
+            for e in filtered:
+                details = e.get("details", {}) or {}
+                rows.append({
+                    "Timestamp": e.get("timestamp", ""),
+                    "Level": e.get("level", ""),
+                    "Event": e.get("event", ""),
+                    "File": e.get("file", "-"),
+                    "Details": json.dumps(details)[:120],
+                })
+            timeline_df = pd.DataFrame(rows)
+            timeline_df = timeline_df.sort_values("Timestamp", ascending=False)
+            st.dataframe(timeline_df, width='stretch', hide_index=True)
+        else:
+            st.info("No matching entries.")
+
+# -----------------------------------------------------------------------------
+# Tab 3: Configuration
+# -----------------------------------------------------------------------------
+
+with tab_config:
+    # Config health badge
+    try:
+        json.dumps(config)
+        config_valid = True
+    except Exception:
+        config_valid = False
+    badge = "\u2705 Valid" if config_valid else "\u274c Invalid"
+    st.subheader(f"Configuration  {badge}")
+
+    # -- 6.1 / 6.2: Config editor (read-only + editable) --
+    config_col_view, config_col_edit = st.columns([3, 1])
+    with config_col_edit:
+        config_edit_mode = st.toggle("Edit mode", key="config_edit_toggle",
+                                     help="Toggle to edit config.json directly")
+
+    if config_edit_mode:
+        config_json_str = json.dumps(config, indent=2)
+        edited = st.text_area("config.json", value=config_json_str, height=500,
+                              key="config_editor_area",
+                              help="Edit the configuration JSON directly.")
+        col_save, col_reload = st.columns(2)
+        with col_save:
+            if st.button("Save Config", type="primary", key="btn_save_config"):
+                try:
+                    new_cfg = json.loads(edited)
+                    config.clear()
+                    config.update(new_cfg)
+                    save_config()
+                    reload_config()
+                    st.session_state.env_check = None
+                    st.toast("Config saved and reloaded.")
+                    log_event(logger, "INFO", "config_saved", details={"source": "editor"})
+                except json.JSONDecodeError as e:
+                    st.error(f"Invalid JSON: {e}")
+        with col_reload:
+            if st.button("Reload Config", key="btn_reload_config"):
+                reload_config()
+                st.session_state.env_check = None
+                st.toast("Config reloaded from disk.")
+        st.warning("Some changes (model, categories) require re-running analysis to take effect.")
+    else:
+        with st.expander("View config.json (read-only)", expanded=False):
+            st.json(config)
+
+    st.divider()
+
+    # -- 6.3: Category management --
+    st.subheader("Categories")
+    st.caption(f"{len(ALLOWED_CATEGORIES)} categories configured")
+
+    cat_cols = st.columns([4, 1])
+    with cat_cols[1]:
+        if st.button("Add Category", key="btn_add_category"):
+            st.session_state.setdefault("edit_categories", list(ALLOWED_CATEGORIES))
+            st.session_state.edit_categories.append("")
+            st.rerun()
+
+    edit_cats = st.session_state.get("edit_categories", list(ALLOWED_CATEGORIES))
+    new_cats = []
+    cols_per_row = 4
+    for i in range(0, len(edit_cats), cols_per_row):
+        row = st.columns(cols_per_row)
+        for j, col in enumerate(row):
+            idx = i + j
+            if idx >= len(edit_cats):
+                break
+            with col:
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    new_val = st.text_input(f"Cat {idx+1}", value=edit_cats[idx],
+                                            key=f"cat_{idx}", label_visibility="collapsed")
+                    new_cats.append(new_val)
+                with c2:
+                    if st.button("x", key=f"cat_del_{idx}"):
+                        new_cats.pop()
+                        continue
+
+    col_cat_save, col_cat_reset = st.columns(2)
+    with col_cat_save:
+        if st.button("Save Categories", type="primary", key="btn_save_cats"):
+            cleaned = [c.strip().lower().replace(" ", "_") for c in new_cats if c.strip()]
+            if len(cleaned) != len(set(cleaned)):
+                st.error("Duplicate categories found. Please remove duplicates.")
+            elif any(not c for c in cleaned):
+                st.error("Empty category names are not allowed.")
+            else:
+                config["allowed_categories"] = cleaned
+                save_config()
+                reload_config()
+                st.session_state.pop("edit_categories", None)
+                st.success(f"Saved {len(cleaned)} categories.")
+                log_event(logger, "INFO", "categories_updated",
+                          details={"count": len(cleaned)})
+                st.rerun()
+    with col_cat_reset:
+        if st.button("Reset", key="btn_reset_cats"):
+            st.session_state.pop("edit_categories", None)
+            st.rerun()
+
+    st.session_state["edit_categories"] = new_cats
+
+    st.divider()
+
+    # -- 6.4: Extension management --
+    st.subheader("Supported Extensions")
+
+    ext_col1, ext_col2 = st.columns(2)
+    with ext_col1:
+        video_exts = st.multiselect("Video Extensions",
+                                     options=[".mp4", ".mov", ".avi", ".mkv", ".webm",
+                                              ".flv", ".wmv", ".m4v", ".ts", ".mts"],
+                                     default=list(config.get("video_extensions", [])),
+                                     key="cfg_video_exts")
+    with ext_col2:
+        image_exts = st.multiselect("Image Extensions",
+                                     options=[".jpg", ".jpeg", ".png", ".webp", ".gif",
+                                              ".bmp", ".tiff", ".tif", ".heic", ".raw"],
+                                     default=list(config.get("image_extensions", [])),
+                                     key="cfg_image_exts")
+
+    if st.button("Save Extensions", type="primary", key="btn_save_exts"):
+        config["video_extensions"] = sorted(set(video_exts))
+        config["image_extensions"] = sorted(set(image_exts))
+        save_config()
+        reload_config()
+        st.success(f"Saved {len(video_exts)} video + {len(image_exts)} image extensions.")
+        log_event(logger, "INFO", "extensions_updated",
+                  details={"video": len(video_exts), "image": len(image_exts)})
+
+    st.divider()
+
+    # -- S.4: Wipe local model cache --
+    st.subheader("Model Management")
+    st.caption("Manage the local AI model used for analysis")
+
+    with st.expander("Wipe Local Model Cache", expanded=False):
+        st.warning("This will permanently delete the local Qwen2.5-VL model (~5GB). "
+                   "Re-download will be required to use local mode.")
+        confirm_wipe = st.checkbox("I understand this will delete the model", key="confirm_model_wipe")
+        if st.button("Wipe Local Model", type="secondary", disabled=not confirm_wipe,
+                     key="btn_wipe_model"):
+            result = wipe_local_model()
+            if result.get("ok"):
+                st.success(result.get("message", "Model wiped successfully."))
+                st.session_state.env_check = None
+                log_event(logger, "INFO", "model_wipe",
+                          details={"message": result.get("message", "")})
+                st.rerun()
+            else:
+                st.error(result.get("message", "Failed to wipe model."))
+
+    st.divider()
+
+    # -- Restore default config --
+    with st.expander("Restore Default Configuration", expanded=False):
+        st.warning("This will replace config.json with the factory default. "
+                    "All custom settings, prompts, and categories will be lost.")
+        confirm_restore = st.checkbox("I understand — restore factory defaults", key="confirm_restore_cfg")
+        if st.button("Restore Default Config", type="primary",
+                      disabled=not confirm_restore, key="btn_restore_config"):
+            if restore_default_config():
+                reload_config()
+                st.session_state.env_check = None
+                st.toast("Config restored to factory defaults.")
+                st.rerun()
+            else:
+                st.error("config.default.json not found — cannot restore.")
+
+    # -- Telemetry settings --
+    st.subheader("Telemetry")
+    st.caption("Anonymous usage data to help improve the app")
+
+    current_telemetry = config.get("telemetry", {}).get("enabled", False)
+    new_telemetry = st.toggle("Send anonymous usage data", value=current_telemetry,
+                              key="telemetry_toggle",
+                              help="No file names, content, or paths are ever sent. "
+                                   "See PRIVACY.md for details.")
+    if new_telemetry != current_telemetry:
+        set_telemetry_enabled(new_telemetry)
+        if new_telemetry:
+            track_event("opt_in")
+        else:
+            send_opt_out_event()
+            track_event("opt_out")
+        st.toast(f"Telemetry {'enabled' if new_telemetry else 'disabled'}")
+
+# Flush telemetry on session end
+try:
+    flush_telemetry()
+except Exception:
+    pass
 
 # -----------------------------------------------------------------------------
 # Footer — always renders at the bottom

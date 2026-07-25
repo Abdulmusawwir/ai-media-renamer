@@ -111,9 +111,9 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] Single `config.json` as source of truth for all tunable parameters
 - [x] Configurable: 6 AI prompt profiles, 40 categories, model/ provider settings, extensions, preview params, naming templates, logging limits
 - [x] No hardcoded constants in Python code
-- [ ] Config editor tab (read-only + editable modes) in web UI
-- [ ] In-app category management (add/delete/rename categories via UI)
-- [ ] In-app extension management (video/image extension lists via UI)
+- [x] Config editor tab (read-only + editable modes) in web UI
+- [x] In-app category management (add/delete/rename categories via UI)
+- [x] In-app extension management (video/image extension lists via UI)
 
 ## Out of Scope (v1)
 

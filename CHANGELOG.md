@@ -1,5 +1,42 @@
 # Changelog
 
+## [v1.4.0] — 2026-07-25
+
+### New Features
+- **Duplicate detection (13.1):** `compute_asset_hash()` uses FFmpeg + imagehash to generate perceptual hashes. `find_duplicates()` compares all staged assets with configurable threshold. UI button flags near-identical assets before commit.
+- **User ratings (13.2):** Thumbs up/down column in staging table. Ratings sync to session state, logged to JSONL, and tracked in PostHog (if opted in).
+- **Session persistence:** `save_session()`, `load_session()`, `list_sessions()` in engine.py. Sessions saved to `%APPDATA%/ai-media-renamer/sessions/`. Resume analysis across app restarts.
+- **Config reset mechanism (3 levels):** Auto-recovery from `config.default.json` on corruption. `--reset-config` CLI flag. "Restore Default Configuration" button in Configuration tab.
+- **Config editor tab:** Edit AI models, categories, extensions, and prompt profiles directly in the web UI.
+- **Category management:** Add, remove, and rename categories in-app. Changes persist to config.json.
+- **Extension management:** Add custom video/image file extensions in the Configuration tab.
+- **Telemetry system (opt-in):** PostHog integration for anonymous usage analytics. First-launch opt-in dialog. Toggle in Configuration tab. Privacy policy in PRIVACY.md.
+
+### Improvements
+- **Commit beep:** Whoosh WAV sound replaces sine tone. Plays via hidden `<audio>` element (no visible player UI).
+- **Sidebar cleanup:** Redundant delete button removed. Model wipe consolidated in Configuration tab.
+- **CLI batch size warnings:** Warns when processing very large directories.
+- **CLI advanced features expander:** Donation links and advanced options in CLI mode.
+- **PRD checkbox sync:** Lines 114-116 marked complete (config editor, category mgmt, extension mgmt).
+- **PostHog host comment:** Clarifying comment added to `POSTHOG_HOST` constant.
+
+### Code Quality
+- **Type hints:** All 118 functions across engine.py, app.py, and cli.py annotated with return types and parameter types.
+- **Docstrings:** Google-style docstrings added to ~84 functions that lacked them.
+- **mypy configuration:** `pyproject.toml` updated with `[tool.mypy]` section and third-party overrides.
+- **Test infrastructure:** pytest-cov added, `tests/conftest.py` with shared fixtures.
+- **New test files:** test_config_extended.py (12), test_session.py (7), test_duplicate_detection.py (5), test_telemetry.py (10), test_cli_helpers.py (8) — 42 new tests.
+- **Total test count:** 158 tests passing (up from 116).
+- **Coverage baseline:** 60% on engine.py.
+
+### Bug Fixes
+- **F821 Image import:** Added missing `from PIL import Image` in `_compute_image_hash()`.
+- **CLI return in main:** Fixed bare `return` → `sys.exit(0)` in `if __name__ == "__main__"` block.
+- **config.default.json:** Created factory-default config bundled in EXE for auto-recovery.
+- **load_config default path:** `default_path` now derived from `full_path.parent` (not `script_dir`), preventing accidental config file discovery.
+
+---
+
 ## [EXE Delivery] — 2026-07-12
 - **PyInstaller build pipeline:** `build.spec` with `console=False`, `hooks/hook-ollama.py`, bundles app + deps into `AIMediaRenamer.exe`
 - **Bootstrap launcher (`bootstrap.py`):** Dark tkinter GUI with 6-step setup — checks for ExifTool, FFmpeg, Ollama, and the AI vision model; auto-downloads and installs any missing dependencies silently. Progress bars with download speed/ETA. Runs Streamlit as a hidden background process (`DETACHED_PROCESS | CREATE_NO_WINDOW`). Exits completely on launch — no tray icon, no lingering process.

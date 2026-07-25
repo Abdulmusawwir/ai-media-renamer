@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import argparse
 import os
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any
 
 from engine import (
     EXTRACTION_WORKERS,
@@ -29,8 +32,17 @@ from engine import (
     set_active_profile,
     setup_logging,
     truncate_filename,
+    restore_default_config,
     validate_category,
 )
+
+try:
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+    _HAS_RICH = True
+except ImportError:
+    _HAS_RICH = False
+
+_show_progress = True
 
 
 
@@ -43,21 +55,31 @@ _worker_sessions = []
 _worker_sessions_lock = threading.Lock()
 
 
-def _init_commit_worker():
+def _init_commit_worker() -> None:
+    """Initialize an ExifTool session for the current commit worker thread."""
     session = ExifToolSession()
     _commit_thread_local.exif_session = session
     with _worker_sessions_lock:
         _worker_sessions.append(session)
 
 
-def _parallel_execute_commit(args):
+def _parallel_execute_commit(args: tuple[dict[str, Any], Path, bool, bool]) -> tuple[dict[str, Any], Any]:
+    """Execute a commit for a single asset using the thread-local ExifTool session.
+
+    Args:
+        args: Tuple of (asset dict, target directory, sort_into_folders flag, skip_rename flag).
+
+    Returns:
+        Tuple of (asset dict, commit result path or None).
+    """
     asset, target_dir, sort_into_folders, skip_rename = args
     session = _commit_thread_local.exif_session
     result = execute_commit(asset, target_dir, sort_into_folders, session, skip_rename=skip_rename)
     return asset, result
 
 
-def _close_all_worker_sessions():
+def _close_all_worker_sessions() -> None:
+    """Close all ExifTool sessions created by commit worker threads."""
     with _worker_sessions_lock:
         for session in _worker_sessions:
             session.close()
@@ -68,7 +90,15 @@ def _close_all_worker_sessions():
 # Helper: sanitize category input
 # -----------------------------------------------------------------------------
 
-def _sanitize_category(raw):
+def _sanitize_category(raw: str) -> str | None:
+    """Sanitize a raw category string to contain only alphanumeric chars, underscores, or hyphens.
+
+    Args:
+        raw: The raw category string input by the user.
+
+    Returns:
+        The sanitized category string, or None if the result is empty.
+    """
     safe = "".join([c for c in raw.lower() if c.isalpha() or c.isdigit() or c in ("_", "-")]).strip("_")
     return safe if safe else None
 
@@ -77,10 +107,51 @@ def _sanitize_category(raw):
 # MAIN CLI PIPELINE
 # -----------------------------------------------------------------------------
 
-def process_library(directory_path, verbose=False, template_string=None, workers=None,
-                    profile=None, case_style="snake_case", max_chars=0, force=False,
-                    export_csv=None, import_csv=None, dry_run=False, metadata_only=False,
-                    recursive=False):
+def process_library(
+    directory_path: str,
+    verbose: bool = False,
+    template_string: str | None = None,
+    workers: int | None = None,
+    profile: str | None = None,
+    case_style: str = "snake_case",
+    max_chars: int = 0,
+    force: bool = False,
+    export_csv: str | None = None,
+    import_csv: str | None = None,
+    dry_run: bool = False,
+    metadata_only: bool = False,
+    recursive: bool = False,
+    non_interactive: bool = False,
+    categories_override: dict[str, str] | None = None,
+    output_file: str | None = None,
+    show_progress: bool = True,
+) -> None:
+    """Run the full AI media renaming pipeline on a directory.
+
+    Orchestrates extraction, AI analysis, staging, and commit phases
+    for all supported media files in the target directory.
+
+    Args:
+        directory_path: Path to the target media directory.
+        verbose: Enable debug-level logging output.
+        template_string: Naming template preset or raw pattern string.
+        workers: Number of parallel extraction workers (None uses default).
+        profile: AI prompt profile name to use for analysis.
+        case_style: Filename case style (e.g. snake_case, kebab-case).
+        max_chars: Maximum filename character length (0 = no limit).
+        force: Re-analyze all files, including previously processed ones.
+        export_csv: Path to export staging data as CSV after analysis.
+        import_csv: Path to import staging data from CSV, skipping AI analysis.
+        dry_run: Preview commits without modifying any files.
+        metadata_only: Write metadata tags only, keep original filenames.
+        recursive: Scan subdirectories recursively for media files.
+        non_interactive: Skip all prompts, apply suggestions as-is.
+        categories_override: Mapping of filenames to forced category strings.
+        output_file: Path to write a JSON commit summary.
+        show_progress: Show rich progress bars during execution.
+    """
+    global _show_progress
+    _show_progress = show_progress and _HAS_RICH
     extraction_workers = workers if workers is not None else EXTRACTION_WORKERS
     if profile:
         set_active_profile(profile)
@@ -166,29 +237,41 @@ def process_library(directory_path, verbose=False, template_string=None, workers
 
     # Phase 1: Parallel frame extraction
     pending_assets = []
-    print("Phase 1: Extracting preview frames...")
 
-    with ThreadPoolExecutor(max_workers=extraction_workers) as executor:
-        future_to_file = {}
-        for file in asset_files:
-            if force or not is_already_processed(file, exif_session):
-                if file.suffix.lower() in VIDEO_EXTENSIONS:
-                    future = executor.submit(process_video_to_base64, file, hw_accel)
+    def _extract() -> None:
+        nonlocal pending_assets
+        with ThreadPoolExecutor(max_workers=extraction_workers) as executor:
+            future_to_file = {}
+            for file in asset_files:
+                if force or not is_already_processed(file, exif_session):
+                    if file.suffix.lower() in VIDEO_EXTENSIONS:
+                        future = executor.submit(process_video_to_base64, file, hw_accel)
+                    else:
+                        future = executor.submit(process_image_to_base64, file)
+                    future_to_file[future] = file
                 else:
-                    future = executor.submit(process_image_to_base64, file)
-                future_to_file[future] = file
-            else:
-                print(f"Skipped (Already Processed): {file.name}")
-                log_event(logger, "INFO", "file_skipped", file_name=file.name, details={"reason": "already_processed"})
+                    print(f"Skipped (Already Processed): {file.name}")
+                    log_event(logger, "INFO", "file_skipped", file_name=file.name, details={"reason": "already_processed"})
 
-        for future in as_completed(future_to_file):
-            file = future_to_file[future]
-            base64_data = future.result()
-            if base64_data:
-                pending_assets.append((file, base64_data))
-            else:
-                print(f"Failed to extract preview: {file.name}")
-                log_event(logger, "ERROR", "extraction_failed", file_name=file.name)
+            for future in as_completed(future_to_file):
+                file = future_to_file[future]
+                base64_data = future.result()
+                if base64_data:
+                    pending_assets.append((file, base64_data))
+                else:
+                    print(f"Failed to extract preview: {file.name}")
+                    log_event(logger, "ERROR", "extraction_failed", file_name=file.name)
+
+    if _show_progress:
+        total_to_process = sum(1 for f in asset_files if force or not is_already_processed(f, exif_session))
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+                      BarColumn(), TaskProgressColumn()) as progress:
+            task = progress.add_task("Phase 1: Extracting previews...", total=total_to_process)
+            _extract()
+            progress.update(task, completed=total_to_process)
+    else:
+        print("Phase 1: Extracting preview frames...")
+        _extract()
 
     if not pending_assets:
         print("\nAll assets in directory are already tagged and processed. Exiting.")
@@ -198,64 +281,85 @@ def process_library(directory_path, verbose=False, template_string=None, workers
 
     # Phase 2: Sequential AI Processing
     staged_assets = []
-    print("\nPhase 2: Analyzing content with AI model...")
 
-    for idx, (file_path, base64_img) in enumerate(pending_assets, 1):
-        print(f"[{idx}/{len(pending_assets)}] AI analyzing: {file_path.name}...", end="", flush=True)
-
-        ai_result = analyze_asset_with_ai(base64_img, verbose=verbose)
-
-        if not ai_result['ok']:
-            error_msg = _format_ai_error(ai_result, verbose=verbose)
-            print(f" [{error_msg}]")
-            log_event(logger, "ERROR", "ai_analysis_failed", file_name=file_path.name, details={"error": error_msg})
-            continue
-
-        ai_data = ai_result['data']
-        safe_name = sanitize_name(ai_data['new_filename'])
-
-        staged_category, category_fallback = validate_category(ai_data.get('suggested_category'))
-        if category_fallback:
-            original = ai_data.get('suggested_category', '(missing)')
-            if verbose:
-                print(f" [category fallback: {original!r} -> uncategorized]", end="")
+    def _analyze() -> None:
+        nonlocal staged_assets
+        for idx, (file_path, base64_img) in enumerate(pending_assets, 1):
+            if _show_progress:
+                progress.update(task, advance=0, description=f"Phase 2: Analyzing {file_path.name}...")
             else:
-                print(" [category: uncategorized]", end="")
+                print(f"[{idx}/{len(pending_assets)}] AI analyzing: {file_path.name}...", end="", flush=True)
 
-        topic = ai_data.get('topic', '')
-        description = ai_data.get('description', '')
+            ai_result = analyze_asset_with_ai(base64_img, verbose=verbose)
 
-        staged_assets.append({
-            "original_path": file_path,
-            "original_name": file_path.name,
-            "staged_name": safe_name,
-            "category": staged_category,
-            "tags": ai_data.get('tags', []),
-            "summary": ai_data.get('overall_visual_summary', ''),
-            "topic": topic,
-            "description": description,
-            "base64_data": base64_img,
-        })
+            if not ai_result['ok']:
+                error_msg = _format_ai_error(ai_result, verbose=verbose)
+                if not _show_progress:
+                    print(f" [{error_msg}]")
+                log_event(logger, "ERROR", "ai_analysis_failed", file_name=file_path.name, details={"error": error_msg})
+                if _show_progress:
+                    progress.update(task, advance=1)
+                continue
 
-        if template_string:
-            rendered = apply_naming_template(template_string, {
+            ai_data = ai_result['data']
+            safe_name = sanitize_name(ai_data['new_filename'])
+
+            staged_category, category_fallback = validate_category(ai_data.get('suggested_category'))
+            if category_fallback and not _show_progress:
+                original = ai_data.get('suggested_category', '(missing)')
+                if verbose:
+                    print(f" [category fallback: {original!r} -> uncategorized]", end="")
+                else:
+                    print(" [category: uncategorized]", end="")
+
+            topic = ai_data.get('topic', '')
+            description = ai_data.get('description', '')
+
+            staged_assets.append({
+                "original_path": file_path,
+                "original_name": file_path.name,
+                "staged_name": safe_name,
                 "category": staged_category,
+                "tags": ai_data.get('tags', []),
+                "summary": ai_data.get('overall_visual_summary', ''),
                 "topic": topic,
                 "description": description,
-                "new_filename": safe_name,
+                "base64_data": base64_img,
             })
-            rendered = apply_case_style(rendered, case_style)
-            rendered = truncate_filename(rendered, max_chars)
-            staged_assets[-1]["staged_name"] = rendered
-            safe_name = rendered
 
-        print(f"  Staged as: {safe_name}")
-        log_event(logger, "INFO", "ai_analysis_success", file_name=file_path.name, details={
-            "staged_name": safe_name,
-            "category": staged_category,
-            "category_fallback": category_fallback,
-            "tags_count": len(ai_data.get('tags', []))
-        })
+            if template_string:
+                rendered = apply_naming_template(template_string, {
+                    "category": staged_category,
+                    "topic": topic,
+                    "description": description,
+                    "new_filename": safe_name,
+                })
+                rendered = apply_case_style(rendered, case_style)
+                rendered = truncate_filename(rendered, max_chars)
+                staged_assets[-1]["staged_name"] = rendered
+                safe_name = rendered
+
+            if not _show_progress:
+                print(f"  Staged as: {safe_name}")
+            log_event(logger, "INFO", "ai_analysis_success", file_name=file_path.name, details={
+                "staged_name": safe_name,
+                "category": staged_category,
+                "category_fallback": category_fallback,
+                "tags_count": len(ai_data.get('tags', []))
+            })
+            if _show_progress:
+                progress.update(task, advance=1)
+
+    task = None
+    if _show_progress:
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+                      BarColumn(), TaskProgressColumn()) as progress:
+            task = progress.add_task("Phase 2: Analyzing with AI...", total=len(pending_assets))
+            _analyze()
+            progress.update(task, completed=len(pending_assets))
+    else:
+        print("\nPhase 2: Analyzing content with AI model...")
+        _analyze()
 
     if not staged_assets:
         print("\nNo assets were successfully staged. Exiting.")
@@ -272,17 +376,61 @@ def process_library(directory_path, verbose=False, template_string=None, workers
     # Phase 3: Summary & interactive staging
     _run_staging_phase(staged_assets, target_dir, logger, exif_session,
                        template_string, case_style, max_chars, dry_run,
-                       metadata_only=metadata_only)
+                       metadata_only=metadata_only,
+                       non_interactive=non_interactive,
+                       categories_override=categories_override)
     exif_session.close()
+
+    # Output summary file
+    if output_file:
+        import json as _json
+        summary = {
+            "total": len(staged_assets),
+            "committed": sum(1 for a in staged_assets if a.get("commit_status") == "committed"),
+            "failed": sum(1 for a in staged_assets if a.get("commit_status") == "failed"),
+            "assets": [
+                {"original": a["original_name"], "staged": a.get("staged_name", ""),
+                 "category": a.get("category", ""), "status": a.get("commit_status", "pending")}
+                for a in staged_assets
+            ]
+        }
+        out_path = Path(output_file)
+        out_path.write_text(_json.dumps(summary, indent=2), encoding="utf-8")
+        print(f"\nCommit summary written to '{output_file}'.")
 
 
 # -----------------------------------------------------------------------------
 # Staging phase: summary, override, commit
 # -----------------------------------------------------------------------------
 
-def _run_staging_phase(staged_assets, target_dir, logger, exif_session,
-                       template_string, case_style, max_chars, dry_run,
-                       metadata_only=False):
+def _run_staging_phase(
+    staged_assets: list[dict[str, Any]],
+    target_dir: Path,
+    logger: Any,
+    exif_session: Any,
+    template_string: str | None,
+    case_style: str,
+    max_chars: int,
+    dry_run: bool,
+    metadata_only: bool = False,
+    non_interactive: bool = False,
+    categories_override: dict[str, str] | None = None,
+) -> None:
+    """Display the staging matrix and handle category overrides and commit execution.
+
+    Args:
+        staged_assets: List of staged asset dictionaries.
+        target_dir: Target directory for file operations.
+        logger: Logger instance for event logging.
+        exif_session: ExifTool session for metadata writing.
+        template_string: Naming template string for filename rendering.
+        case_style: Filename case style for formatting.
+        max_chars: Maximum filename character length.
+        dry_run: Preview mode — do not modify files.
+        metadata_only: Write metadata only, skip file renaming.
+        non_interactive: Skip user prompts, apply defaults.
+        categories_override: Mapping of filenames to forced categories.
+    """
     print("\n" + "=" * 85)
     print("AI STAGING MATRIX SUMMARY VIEW")
     print("=" * 85)
@@ -292,6 +440,20 @@ def _run_staging_phase(staged_assets, target_dir, logger, exif_session,
         print(f"    [PROPOSED] : {asset['staged_name']}{suffix}")
         print(f"    [CATEGORY] : {asset['category']}")
     print("=" * 85)
+
+    if non_interactive:
+        sort_into_folders = False
+        if categories_override:
+            for asset in staged_assets:
+                override = categories_override.get(asset["original_name"])
+                if override:
+                    safe_cat = _sanitize_category(override)
+                    if safe_cat:
+                        asset["category"] = safe_cat
+                        print(f"  Override: {asset['original_name']} -> {safe_cat}")
+        _commit_all(staged_assets, target_dir, sort_into_folders, logger, dry_run,
+                    metadata_only=metadata_only)
+        return
 
     sort_folders_input = input(
         "\nWould you like to sort these assets into categorized subfolders? [Y]es / [N]o: "
@@ -359,28 +521,59 @@ def _run_staging_phase(staged_assets, target_dir, logger, exif_session,
 # Apply All (batch commit)
 # -----------------------------------------------------------------------------
 
-def _commit_all(staged_assets, target_dir, sort_into_folders, logger, dry_run,
-                metadata_only=False):
+def _commit_all(
+    staged_assets: list[dict[str, Any]],
+    target_dir: Path,
+    sort_into_folders: bool,
+    logger: Any,
+    dry_run: bool,
+    metadata_only: bool = False,
+) -> None:
+    """Batch-commit all staged assets in parallel using worker threads.
+
+    Args:
+        staged_assets: List of staged asset dictionaries to commit.
+        target_dir: Target directory for file operations.
+        sort_into_folders: Whether to sort committed files into category subfolders.
+        logger: Logger instance for event logging.
+        dry_run: Preview mode — do not modify files.
+        metadata_only: Write metadata only, skip file renaming.
+    """
     if dry_run:
         print("\n[DRY RUN] Previewing batch commit...")
         _preview_dry_run(staged_assets, target_dir, sort_into_folders)
         return
 
-    print("\nWriting metadata tags to files (parallel)...")
-    commit_args = [(asset, target_dir, sort_into_folders, metadata_only) for asset in staged_assets]
-    max_workers = min(len(commit_args), os.cpu_count() or 4)
+    def _do_commit() -> None:
+        nonlocal committed_count
+        commit_args = [(asset, target_dir, sort_into_folders, metadata_only) for asset in staged_assets]
+        max_workers = min(len(commit_args), os.cpu_count() or 4)
+        with ThreadPoolExecutor(max_workers=max_workers, initializer=_init_commit_worker) as executor:
+            futures = {executor.submit(_parallel_execute_commit, args): args[0] for args in commit_args}
+            for future in as_completed(futures):
+                asset, final_rel_path = future.result()
+                if final_rel_path:
+                    if not _show_progress:
+                        print(f"Committed: {asset['original_name']} -> {final_rel_path}")
+                    log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
+                              details={"new_path": str(final_rel_path), "category": asset['category']})
+                    committed_count += 1
+                else:
+                    log_event(logger, "ERROR", "file_commit_failed", file_name=asset['original_name'])
+                if _show_progress:
+                    progress.update(task, advance=1, description=f"Committing {asset['original_name']}...")
+
     committed_count = 0
-    with ThreadPoolExecutor(max_workers=max_workers, initializer=_init_commit_worker) as executor:
-        futures = {executor.submit(_parallel_execute_commit, args): args[0] for args in commit_args}
-        for future in as_completed(futures):
-            asset, final_rel_path = future.result()
-            if final_rel_path:
-                print(f"Committed: {asset['original_name']} -> {final_rel_path}")
-                log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
-                          details={"new_path": str(final_rel_path), "category": asset['category']})
-                committed_count += 1
-            else:
-                log_event(logger, "ERROR", "file_commit_failed", file_name=asset['original_name'])
+    if _show_progress:
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+                      BarColumn(), TaskProgressColumn()) as progress:
+            task = progress.add_task("Phase 3: Committing...", total=len(staged_assets))
+            _do_commit()
+            progress.update(task, completed=len(staged_assets))
+    else:
+        print("\nWriting metadata tags to files (parallel)...")
+        _do_commit()
+
     _close_all_worker_sessions()
     log_event(logger, "INFO", "session_end", details={
         "committed": committed_count, "total": len(staged_assets), "mode": "batch"
@@ -392,9 +585,32 @@ def _commit_all(staged_assets, target_dir, sort_into_folders, logger, dry_run,
 # Interactive mode with per-asset review, re-analyze, bulk category
 # -----------------------------------------------------------------------------
 
-def _interactive_commit(staged_assets, target_dir, sort_into_folders, logger,
-                        exif_session, template_string, case_style, max_chars, dry_run,
-                        metadata_only=False):
+def _interactive_commit(
+    staged_assets: list[dict[str, Any]],
+    target_dir: Path,
+    sort_into_folders: bool,
+    logger: Any,
+    exif_session: Any,
+    template_string: str | None,
+    case_style: str,
+    max_chars: int,
+    dry_run: bool,
+    metadata_only: bool = False,
+) -> None:
+    """Run interactive per-asset review with accept, skip, re-analyze, edit, and bulk-apply options.
+
+    Args:
+        staged_assets: List of staged asset dictionaries to review.
+        target_dir: Target directory for file operations.
+        sort_into_folders: Whether to sort committed files into category subfolders.
+        logger: Logger instance for event logging.
+        exif_session: ExifTool session for metadata writing.
+        template_string: Naming template string for filename rendering.
+        case_style: Filename case style for formatting.
+        max_chars: Maximum filename character length.
+        dry_run: Preview mode — do not modify files.
+        metadata_only: Write metadata only, skip file renaming.
+    """
     print("\nInteractive Mode. Review individual assets:")
     committed_count = 0
     skipped_count = 0
@@ -547,7 +763,18 @@ def _interactive_commit(staged_assets, target_dir, sort_into_folders, logger,
 # Dry-run preview
 # -----------------------------------------------------------------------------
 
-def _preview_dry_run(staged_assets, target_dir, sort_into_folders):
+def _preview_dry_run(
+    staged_assets: list[dict[str, Any]],
+    target_dir: Path,
+    sort_into_folders: bool,
+) -> None:
+    """Print a dry-run preview showing what changes would be made without modifying files.
+
+    Args:
+        staged_assets: List of staged asset dictionaries to preview.
+        target_dir: Target directory for resolving proposed paths.
+        sort_into_folders: Whether to show category subfolder paths.
+    """
     print("\n" + "=" * 85)
     print("DRY-RUN PREVIEW — No files will be modified")
     print("=" * 85)
@@ -623,11 +850,47 @@ if __name__ == "__main__":
         "-r", "--include-subdirectories", action="store_true",
         help="Scan subdirectories recursively for media files."
     )
+    parser.add_argument(
+        "-y", "--non-interactive", action="store_true",
+        help="Non-interactive mode: skip all prompts, apply all suggestions as-is."
+    )
+    parser.add_argument(
+        "--categories-override", type=str, default=None, metavar="FILE",
+        help="JSON file mapping filenames to forced categories (used with -y)."
+    )
+    parser.add_argument(
+        "--output", type=str, default=None, metavar="FILE",
+        help="Write commit summary to a JSON file."
+    )
+    parser.add_argument(
+        "--no-progress", action="store_true",
+        help="Disable progress bars (for pipe-friendly output)."
+    )
+    parser.add_argument(
+        "--reset-config", action="store_true",
+        help="Reset config.json to factory defaults and exit."
+    )
     args = parser.parse_args()
+
+    if args.reset_config:
+        if restore_default_config():
+            print("config.json has been restored to factory defaults.")
+        else:
+            print("Error: config.default.json not found. Cannot restore.")
+        sys.exit(0)
 
     tmpl = args.template
     if tmpl and tmpl in NAMED_TEMPLATES:
         tmpl = NAMED_TEMPLATES[tmpl]
+
+    categories_override = None
+    if args.categories_override:
+        import json as _json
+        override_path = Path(args.categories_override)
+        if not override_path.exists():
+            print(f"Error: Categories override file '{args.categories_override}' not found.")
+            sys.exit(1)
+        categories_override = _json.loads(override_path.read_text(encoding="utf-8"))
 
     process_library(
         args.dir, verbose=args.verbose, template_string=tmpl,
@@ -637,4 +900,8 @@ if __name__ == "__main__":
         import_csv=args.import_csv, dry_run=args.dry_run,
         metadata_only=args.metadata_only,
         recursive=args.include_subdirectories,
+        non_interactive=args.non_interactive,
+        categories_override=categories_override,
+        output_file=args.output,
+        show_progress=not args.no_progress,
     )

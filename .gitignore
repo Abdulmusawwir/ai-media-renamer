@@ -6,3 +6,31 @@ build/
 dist/
 task.md
 .streamlit/secrets.toml
+
+# Python caches
+.pytest_cache/
+.ruff_cache/
+*.egg-info
+
+# Coverage
+.coverage
+htmlcov/
+
+# Telemetry
+telemetry.jsonl
+
+# Cache
+cache/
+*.log
+
+# Environment
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

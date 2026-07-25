@@ -26,6 +26,7 @@ a = Analysis(
         ('app.py', '.'),
         ('engine.py', '.'),
         ('config.json', '.'),
+        ('config.default.json', '.'),
         ('icon.ico', '.'),
     ],
     hiddenimports=[
@@ -41,6 +42,10 @@ a = Analysis(
         'openai',
         'anthropic',
         'keyring',
+        'rich',
+        'rich.progress',
+        'imagehash',
+        'posthog',
     ] + _streamlit_submodules,
     hookspath=['hooks'],
     runtime_hooks=[],
