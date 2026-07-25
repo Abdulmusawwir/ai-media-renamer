@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import base64
 import datetime
 import json
@@ -1820,8 +1821,8 @@ def import_staging_csv(csv_string: str, allowed_categories: tuple[str, ...] | li
 # 8. TELEMETRY (opt-in, anonymous, privacy-first)
 # -----------------------------------------------------------------------------
 
-POSTHOG_API_KEY = ""  # Set by user in config.json or via env var
-POSTHOG_HOST = "https://us.i.posthog.com"  # PostHog US ingest (2024+ endpoint; older projects use app.posthog.com)
+POSTHOG_API_KEY = os.environ.get('POSTHOG_PROJECT_TOKEN', "")
+POSTHOG_HOST = os.environ.get('POSTHOG_HOST', "https://us.i.posthog.com")
 TELEMETRY_DIR = Path(os.environ.get('APPDATA', Path.home())) / "ai-media-renamer"
 TELEMETRY_FILE = TELEMETRY_DIR / "telemetry.jsonl"
 _install_id = None
@@ -1905,26 +1906,28 @@ def flush_telemetry() -> None:
         if not lines:
             return
 
-        import posthog
-        posthog.api_key = api_key
-        posthog.host = POSTHOG_HOST
-        posthog.flush_at = 20
-        posthog.flush_interval = 0.5
-
-        for line in lines:
-            try:
-                event = json.loads(line)
-                posthog.capture(
-                    distinct_id=event.get("install_id", "unknown"),
-                    event=event["event"],
-                    properties=event.get("properties", {}),
-                    timestamp=event.get("timestamp"),
-                )
-            except Exception:
-                continue
-
-        posthog.flush()
-        TELEMETRY_FILE.unlink(missing_ok=True)
+        from posthog import Posthog as _Posthog
+        posthog_client = _Posthog(
+            api_key,
+            host=POSTHOG_HOST,
+            enable_exception_autocapture=True,
+        )
+        try:
+            for line in lines:
+                try:
+                    event = json.loads(line)
+                    posthog_client.capture(
+                        distinct_id=event.get("install_id", "unknown"),
+                        event=event["event"],
+                        properties=event.get("properties", {}),
+                        timestamp=event.get("timestamp"),
+                    )
+                except Exception:
+                    continue
+            posthog_client.flush()
+            TELEMETRY_FILE.unlink(missing_ok=True)
+        finally:
+            posthog_client.shutdown()
     except ImportError:
         pass
     except Exception:
@@ -1937,14 +1940,30 @@ def send_opt_out_event() -> None:
     if not api_key:
         return
     try:
-        import posthog
-        posthog.api_key = api_key
-        posthog.host = POSTHOG_HOST
-        posthog.capture(
-            distinct_id=_get_install_id(),
-            event="opt_out",
-            properties={"app_version": VERSION},
+        from posthog import Posthog as _Posthog
+        posthog_client = _Posthog(
+            api_key,
+            host=POSTHOG_HOST,
+            enable_exception_autocapture=True,
         )
-        posthog.flush()
+        try:
+            posthog_client.capture(
+                distinct_id=_get_install_id(),
+                event="opt_out",
+                properties={"app_version": VERSION},
+            )
+            posthog_client.flush()
+        finally:
+            posthog_client.shutdown()
     except Exception:
         pass
+
+
+if os.environ.get('POSTHOG_DEBUG', '').lower() == 'true' and not POSTHOG_API_KEY:
+    print(
+        "WARNING: POSTHOG_PROJECT_TOKEN variable required by PostHog is missing or "
+        "un-configured, this causes events to be silently missed. "
+        "This error stops appearing once POSTHOG_PROJECT_TOKEN is configured"
+    )
+
+atexit.register(flush_telemetry)
