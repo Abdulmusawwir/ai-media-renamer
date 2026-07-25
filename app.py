@@ -296,6 +296,7 @@ def _on_provider_switch(new_provider: str) -> None:
     api_key = load_api_key(new_provider) if new_provider != "ollama" else ""
     result = switch_ai_provider(new_provider, api_key)
     st.session_state.provider_info = new_provider
+    track_event("provider_switched", {"provider": new_provider})
     if not result["ok"]:
         if result.get("require_download"):
             st.warning("Model not found locally. Use the download button below.")
@@ -657,6 +658,11 @@ with tab_upload:
             st.session_state.analysis_aborted = False
             st.session_state.staged_assets = []
             st.session_state.base64_cache = {}
+            track_event("files_uploaded", {
+                "file_count": len(saved),
+                "video_count": sum(1 for n in saved if Path(n).suffix.lower() in VIDEO_EXTENSIONS),
+                "image_count": sum(1 for n in saved if Path(n).suffix.lower() in IMAGE_EXTENSIONS),
+            })
 
     # Clear All button — always visible when files or staged assets exist
     if st.session_state.get("uploaded_files") or st.session_state.staged_assets:
@@ -796,13 +802,20 @@ with tab_upload:
                     st.session_state.analysis_index = idx + 1
                     st.rerun()
             else:
+                n = len(st.session_state.get("staged_assets", []))
+                errs = st.session_state.analysis_errors
+                track_event("analysis_completed", {
+                    "total_files": total,
+                    "staged_count": n,
+                    "error_count": len(errs),
+                    "provider": st.session_state.get("provider_info", "unknown"),
+                    "profile": get_active_profile(),
+                })
                 st.session_state.analysis_in_progress = False
                 st.session_state.analysis_done = True
-                n = len(st.session_state.get("staged_assets", []))
                 if n:
                     st.success(f"Analysis complete: {n} assets staged.")
                 else:
-                    errs = st.session_state.analysis_errors
                     st.warning(f"No assets were staged ({len(errs)} failure(s)).")
                     for e in errs:
                         st.caption(f"  {e}")
@@ -917,6 +930,11 @@ with tab_upload:
             st.caption("Upload media files above, then click 'Run AI Analysis' to begin.")
 
         if analyze_btn:
+            track_event("analysis_started", {
+                "file_count": len(st.session_state.get("uploaded_files", {})),
+                "provider": st.session_state.provider_info,
+                "profile": get_active_profile(),
+            })
             try:
                 hw_accel = detect_hw_accel()
                 st.session_state.hw_accel = hw_accel

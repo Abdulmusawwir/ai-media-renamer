@@ -23,6 +23,7 @@ from engine import (
     detect_hw_accel,
     execute_commit,
     export_staging_csv,
+    flush_telemetry,
     import_staging_csv,
     is_already_processed,
     log_event,
@@ -31,6 +32,7 @@ from engine import (
     sanitize_name,
     set_active_profile,
     setup_logging,
+    track_event,
     truncate_filename,
     restore_default_config,
     validate_category,
@@ -165,6 +167,13 @@ def process_library(
         "directory": directory_path, "verbose": verbose,
         "case_style": case_style, "max_chars": max_chars,
         "force": force, "dry_run": dry_run,
+    })
+    track_event("cli_session_started", {
+        "case_style": case_style,
+        "dry_run": dry_run,
+        "force": force,
+        "recursive": recursive,
+        "has_profile": bool(profile),
     })
 
     valid_exts = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS
@@ -578,6 +587,12 @@ def _commit_all(
     log_event(logger, "INFO", "session_end", details={
         "committed": committed_count, "total": len(staged_assets), "mode": "batch"
     })
+    track_event("cli_session_completed", {
+        "committed": committed_count,
+        "total": len(staged_assets),
+        "mode": "batch",
+    })
+    flush_telemetry()
     print("\nHigh-Performance Run Complete!")
 
 
@@ -755,6 +770,14 @@ def _interactive_commit(
         "committed": committed_count, "skipped": skipped_count,
         "reanalyzed": reanalyzed_count, "total": len(staged_assets), "mode": "interactive"
     })
+    track_event("cli_session_completed", {
+        "committed": committed_count,
+        "skipped": skipped_count,
+        "reanalyzed": reanalyzed_count,
+        "total": len(staged_assets),
+        "mode": "interactive",
+    })
+    flush_telemetry()
     print(f"\nInteractive processing complete! {committed_count} committed, "
           f"{skipped_count} skipped, {reanalyzed_count} re-analyzed.")
 
