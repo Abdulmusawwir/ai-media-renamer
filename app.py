@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 import tempfile
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
