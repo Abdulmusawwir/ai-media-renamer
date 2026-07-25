@@ -80,14 +80,36 @@ _COMMIT_BEEP = "UklGRtIzAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0Ya4zAAAAAAEA
 if st.session_state.pop("_pending_rerun", False):
     st.rerun()
 
-# Hide Streamlit chrome
+# Hide Streamlit chrome + dark theme global styles
 st.markdown("""
 <style>
 #MainMenu {visibility: hidden;}
 .stAppDeployButton {display: none;}
-footer {display: none;}
+footer {visibility: hidden;}
 [data-testid="stStatusWidget"] {visibility: hidden;}
 div[data-testid="stDecoration"] {display: none;}
+
+/* Global dark theme refinements */
+[data-testid="stSidebar"] > div:first-child {
+    background-color: #09090B;
+}
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h1,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3 {
+    color: #FAFAFA;
+}
+
+/* Streamlit toast dark theme fix */
+div[data-testid="stToast"] {
+    background-color: #27272A;
+    color: #FAFAFA;
+    border: 1px solid #3F3F46;
+}
+
+/* Status badges */
+div[data-testid="stStatus"] {
+    border: 1px solid #27272A;
+}
 </style>
 <script>
 // Keyboard shortcuts
@@ -95,7 +117,7 @@ document.addEventListener('keydown', function(e) {
     // Ctrl+Enter: trigger Run AI Analysis
     if (e.ctrlKey && e.key === 'Enter') {
         e.preventDefault();
-        const btns = window.parent.document.querySelectorAll('button');
+        const btns = window.parent.document.querySelectorAll('[data-testid="stButton"] button');
         for (const btn of btns) {
             if (btn.textContent.includes('Run AI Analysis')) {
                 btn.click();
@@ -106,7 +128,7 @@ document.addEventListener('keydown', function(e) {
     // Ctrl+Shift+C: trigger Commit Selected
     if (e.ctrlKey && e.shiftKey && e.key === 'C') {
         e.preventDefault();
-        const btns = window.parent.document.querySelectorAll('button');
+        const btns = window.parent.document.querySelectorAll('[data-testid="stButton"] button');
         for (const btn of btns) {
             if (btn.textContent.includes('Commit Selected')) {
                 btn.click();
@@ -116,7 +138,7 @@ document.addEventListener('keydown', function(e) {
     }
     // Escape: stop analysis
     if (e.key === 'Escape') {
-        const btns = window.parent.document.querySelectorAll('button');
+        const btns = window.parent.document.querySelectorAll('[data-testid="stButton"] button');
         for (const btn of btns) {
             if (btn.textContent.includes('Stop Analysis')) {
                 btn.click();
@@ -128,30 +150,55 @@ document.addEventListener('keydown', function(e) {
 </script>
 """, unsafe_allow_html=True)
 
-st.title("AI Media Renamer")
+st.title(":material/movie_edit: AI Media Renamer")
 
-# Drag-and-drop visual feedback CSS
+# Global UI refinements for dark theme
 st.markdown("""
 <style>
-div[data-testid="stFileUploader"] {
+/* File uploader hover feedback */
+[data-testid="stFileUploader"] {
     transition: border-color 0.2s, background-color 0.2s;
+    border-radius: 8px;
 }
-div[data-testid="stFileUploader"]:hover {
-    border-color: #4CAF50 !important;
-    background-color: rgba(76, 175, 80, 0.05);
+[data-testid="stFileUploader"]:hover {
+    border-color: #3B82F6 !important;
+    background-color: rgba(59, 130, 246, 0.05);
 }
-div[data-testid="stFileUploader"]:has(.uploadedFile) {
-    border-color: #2196F3 !important;
+[data-testid="stFileUploader"]:has(.uploadedFile) {
+    border-color: #22C55E !important;
 }
-/* Staging table responsive overflow */
-div[data-testid="stDataFrame"] {
+
+/* Dataframe responsive overflow */
+[data-testid="stDataFrame"] {
     overflow-x: auto;
     max-width: 100%;
+    border-radius: 8px;
 }
+[data-testid="stDataFrameHeader"] {
+    background-color: #18181B;
+}
+
 /* Column containers prevent page-level horizontal scroll */
 .stColumn {
     max-width: 100%;
     overflow: hidden;
+}
+
+/* Expander styling */
+[data-testid="stExpander"] {
+    border: 1px solid #27272A;
+    border-radius: 8px;
+}
+
+/* Tab styling */
+[data-testid="stTabs"] [data-testid="stTab"] {
+    border-radius: 8px 8px 0 0;
+}
+
+/* Download button subtle style */
+.st-key-export_csv_btn button,
+[data-testid="stDownloadButton"] button {
+    width: 100%;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -233,7 +280,7 @@ if "telemetry_opted" not in st.session_state:
     st.session_state.telemetry_opted = config.get("telemetry", {}).get("enabled", None)
 
 if st.session_state.telemetry_opted is None:
-    st.subheader("Help improve AI Media Renamer")
+    st.subheader(":material/feedback: Help improve AI Media Renamer")
     st.markdown(
         "Send anonymous usage data so we can fix bugs and prioritize features. "
         "**No file names, content, or paths are ever sent.**"
@@ -258,7 +305,7 @@ if st.session_state.telemetry_opted is None:
     opt_in = st.checkbox("Send anonymous usage data", value=True, key="telemetry_opt_in")
     st.caption("You can change this anytime in Settings.")
     st.link_button("View privacy policy", "https://github.com/Abdulmusawwir/ai-media-renamer/blob/main/PRIVACY.md")
-    if st.button("Save Preference", type="primary", key="telemetry_save_pref"):
+    if st.button(":material/save: Save Preference", type="primary", key="telemetry_save_pref"):
         set_telemetry_enabled(opt_in)
         st.session_state.telemetry_opted = opt_in
         if opt_in:
@@ -326,7 +373,7 @@ def _on_model_change() -> None:
 
 
 with st.sidebar:
-    st.header("AI Provider")
+    st.header(":material/smart_toy: AI Provider")
 
     analysis_active = st.session_state.get("analysis_in_progress", False)
 
@@ -392,7 +439,7 @@ with st.sidebar:
                 else:
                     st.markdown("\u274c **Ollama** — disconnected")
             with col2:
-                if st.button("\u21bb", help="Refresh Ollama status"):
+                if st.button(":material/refresh: Refresh Ollama status", key="refresh_ollama"):
                     st.session_state.ollama_health = None
                     st.rerun()
 
@@ -437,13 +484,13 @@ with st.sidebar:
             if has_key:
                 st.caption("\u2192 Routing execution via " + pretty_name)
 
-    if st.button("Refresh Status"):
+    if st.button(":material/refresh: Refresh Status", key="refresh_status"):
         st.session_state.env_check = None
         st.session_state.ollama_health = None
         st.rerun()
 
     st.divider()
-    if st.button("🔍 Check for Updates"):
+    if st.button(":material/system_update: Check for Updates", key="check_updates"):
         with st.spinner("Checking..."):
             info = check_for_updates()
         if info.get("update_available"):
@@ -456,7 +503,7 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button("⚠️ Reset App and Settings",
+    if st.button(":material/delete_sweep: Reset App and Settings", key="sidebar_reset",
                  help="Resets everything: pipeline state, staged files, extracted frames, "
                       "analysis progress, analytics logs, and output directory setting."):
         temp_dir = st.session_state.get("temp_dir")
@@ -476,7 +523,7 @@ with st.sidebar:
         st.rerun()
 
     if new_provider == "ollama" and env and env.get("ollama_running") and not env.get("model_available"):
-        if st.button("Download Qwen2.5-VL Model", type="primary"):
+        if st.button(":material/download: Download Qwen2.5-VL Model", type="primary", key="download_model"):
             st.session_state.model_downloading = True
             st.rerun()
 
@@ -500,7 +547,7 @@ if st.session_state.model_downloading:
         progress_bar = st.progress(0)
         status_text = st.empty()
         st.caption("Model is ~5.9 GB. Download progress updates every few seconds.")
-        if st.button("Cancel Download",
+        if st.button(":material/cancel: Cancel Download", key="cancel_download",
                      help="Cancels UI polling — Ollama download continues in background"):
             st.session_state.model_downloading = False
             st.session_state.model_download_gen = None
@@ -585,12 +632,14 @@ def load_log_entries() -> list[dict[str, Any]]:
 # Tab 1: Upload & Analyze
 # -----------------------------------------------------------------------------
 
-tab_upload, tab_analytics, tab_config = st.tabs(
-    ["Upload & Analyze", "Analytics Dashboard", "Configuration"]
-)
+tab_upload, tab_analytics, tab_config = st.tabs([
+    ":material/upload: Upload & Analyze",
+    ":material/analytics: Analytics Dashboard",
+    ":material/settings: Configuration",
+])
 
 with tab_upload:
-    st.subheader("Upload Media Files")
+    st.subheader(":material/upload: Upload Media Files")
 
     if st.session_state.provider_info == "ollama" and env and not env.get("model_available"):
         st.info("Qwen2.5-VL model is not installed. "
@@ -660,7 +709,7 @@ with tab_upload:
 
     # Clear All button — always visible when files or staged assets exist
     if st.session_state.get("uploaded_files") or st.session_state.staged_assets:
-        if st.button("Clear All Files", type="secondary"):
+        if st.button(":material/delete: Clear All Files", type="secondary", key="clear_files"):
             temp_dir = st.session_state.get("temp_dir")
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
@@ -678,7 +727,7 @@ with tab_upload:
         with st.expander("Session", expanded=False):
             col_save, col_restore = st.columns(2)
             with col_save:
-                if st.button("Save Session", disabled=not has_work):
+                if st.button(":material/save: Save Session", disabled=not has_work, key="save_session"):
                     settings = {
                         "output_dir": st.session_state.get("output_dir", ""),
                         "case_style": st.session_state.get("case_style", "title_case"),
@@ -695,7 +744,7 @@ with tab_upload:
                 if saved:
                     options = [f"{s['created']}  ({s['asset_count']} assets)" for s in saved]
                     chosen = st.selectbox("Saved sessions", options, key="session_picker")
-                    if st.button("Restore Session"):
+                    if st.button(":material/history: Restore Session", key="restore_session"):
                         idx = options.index(chosen)
                         result = load_session(saved[idx]["path"])
                         st.session_state.staged_assets = result["staged_assets"]
@@ -745,7 +794,7 @@ with tab_upload:
 
                 col_stop, _ = st.columns([1, 4])
                 with col_stop:
-                    if st.button("Stop Analysis"):
+                    if st.button(":material/stop: Stop Analysis", key="stop_analysis"):
                         st.session_state.analysis_aborted = True
 
                 if st.session_state.analysis_aborted:
@@ -860,7 +909,7 @@ with tab_upload:
                      help="This prompt is auto-saved to config.json.")
 
         st.download_button(
-            "Export Custom Prompt",
+            ":material/file_download: Export Custom Prompt",
             data=current_custom,
             file_name="custom_ai_prompt.txt",
             mime="text/plain",
@@ -912,7 +961,7 @@ with tab_upload:
 
         col1, col2 = st.columns([1, 3])
         with col1:
-            analyze_btn = st.button("Run AI Analysis", type="primary")
+            analyze_btn = st.button(":material/play_arrow: Run AI Analysis", type="primary", key="run_analysis")
         with col2:
             st.caption("Upload media files above, then click 'Run AI Analysis' to begin.")
 
@@ -975,7 +1024,7 @@ with tab_upload:
     # Inline staging matrix (shown after analysis)
     if st.session_state.analysis_done and st.session_state.staged_assets:
         st.divider()
-        st.subheader("Staging Matrix \u2014 Review & Edit Before Committing")
+        st.subheader(":material/table_chart: Staging Matrix — Review & Edit Before Committing")
 
         col_filter, _ = st.columns([3, 2])
         with col_filter:
@@ -1095,7 +1144,7 @@ with tab_upload:
             effective_category = bulk_category
 
         disabled = sel_count == 0 or not effective_category
-        st.button("Apply", key="bulk_apply_btn", disabled=disabled)
+        st.button(":material/check: Apply", key="bulk_apply_btn", disabled=disabled)
 
         if st.session_state.get("bulk_apply_btn") and effective_category:
             selected = edited_df[edited_df["select"]]
@@ -1117,7 +1166,7 @@ with tab_upload:
         col_ra, _ = st.columns([1, 4])
         with col_ra:
             ra_disabled = sel_count == 0
-            if st.button("Re-analyze Selected", key="reanalyze_btn", disabled=ra_disabled):
+            if st.button(":material/refresh: Re-analyze Selected", key="reanalyze_btn", disabled=ra_disabled):
                 selected_names = set()
                 for idx in edited_df[edited_df["select"]].index:
                     selected_names.add(staged[idx]["original_name"])
@@ -1139,7 +1188,7 @@ with tab_upload:
         # 13.1 Duplicate detection
         col_dup, _ = st.columns([1, 4])
         with col_dup:
-            if st.button("Detect Duplicates", key="detect_dupes_btn"):
+            if st.button(":material/content_copy: Detect Duplicates", key="detect_dupes_btn"):
                 with st.spinner("Computing perceptual hashes..."):
                     duplicates = find_duplicates(staged, threshold=10)
                     st.session_state.duplicate_pairs = duplicates
@@ -1157,7 +1206,7 @@ with tab_upload:
                 })
                 st.dataframe(dupe_df[["File A", "File B", "Similarity %", "Distance"]],
                              hide_index=True, width="stretch")
-                if st.button("Clear Duplicates", key="clear_dupes"):
+                if st.button(":material/clear_all: Clear Duplicates", key="clear_dupes"):
                     st.session_state.pop("duplicate_pairs", None)
                     st.rerun()
 
@@ -1165,7 +1214,7 @@ with tab_upload:
         col_csv, col_spacer = st.columns([1, 5])
         with col_csv:
             csv_data = export_staging_csv(st.session_state.staged_assets)
-            st.download_button("Export Staged Changes", data=csv_data,
+            st.download_button(":material/file_download: Export Staged Changes", data=csv_data,
                                file_name="staging_export.csv", mime="text/csv",
                                key="export_csv_btn")
 
@@ -1199,9 +1248,9 @@ with tab_upload:
 
         col_preview, col_commit, col_refresh = st.columns([1, 1, 3])
         with col_preview:
-            preview_btn = st.button("Preview Commit")
+            preview_btn = st.button(":material/preview: Preview Commit", key="preview_commit")
         with col_commit:
-            commit_btn = st.button("Commit Selected", type="primary")
+            commit_btn = st.button(":material/send: Commit Selected", type="primary", key="commit_selected")
         with col_refresh:
             if metadata_only:
                 st.caption("Selected rows will be tagged in-place. Original filenames preserved.")
@@ -1348,9 +1397,9 @@ with tab_upload:
 with tab_analytics:
     col_title, col_clear_logs, col_reset = st.columns([3, 1, 1])
     with col_title:
-        st.subheader("Analytics Dashboard")
+        st.subheader(":material/analytics: Analytics Dashboard")
     with col_clear_logs:
-        if st.button("Clear Logs", type="secondary"):
+        if st.button(":material/delete_sweep: Clear Logs", type="secondary", key="clear_logs"):
             for h in logging.getLogger('video_renamer').handlers[:]:
                 h.close()
                 logging.getLogger('video_renamer').removeHandler(h)
@@ -1358,7 +1407,7 @@ with tab_analytics:
                 log_path.unlink(missing_ok=True)
             st.rerun()
     with col_reset:
-        if st.button("Reset App and Settings", type="secondary"):
+        if st.button(":material/delete_sweep: Reset App and Settings", type="secondary", key="analytics_reset"):
             temp_dir = st.session_state.get("temp_dir")
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1477,7 +1526,7 @@ with tab_analytics:
 
         # 7.1 Commit history timeline
         if committed_entries:
-            st.subheader("Commit History")
+            st.subheader(":material/history: Commit History")
             commit_rows = []
             for e in committed_entries:
                 details = e.get("details", {}) or {}
@@ -1525,14 +1574,14 @@ with tab_analytics:
             json_data = filtered_commits.to_json(orient="records", indent=2)
             dl_col1, dl_col2 = st.columns(2)
             with dl_col1:
-                st.download_button("Download CSV", data=csv_data,
+                st.download_button(":material/file_download: Download CSV", data=csv_data,
                                    file_name="commit_history.csv", mime="text/csv")
             with dl_col2:
-                st.download_button("Download JSON", data=json_data,
+                st.download_button(":material/data_object: Download JSON", data=json_data,
                                    file_name="commit_history.json", mime="application/json")
 
         # Filterable timeline
-        st.subheader("Event Timeline")
+        st.subheader(":material/timeline: Event Timeline")
 
         levels = ["all"] + sorted(set(e.get("level", "INFO") for e in entries))
         events = ["all"] + sorted(set(e.get("event", "") for e in entries))
@@ -1578,7 +1627,7 @@ with tab_config:
     except Exception:
         config_valid = False
     badge = "\u2705 Valid" if config_valid else "\u274c Invalid"
-    st.subheader(f"Configuration  {badge}")
+    st.subheader(f":material/settings: Configuration  {badge}")
 
     # -- 6.1 / 6.2: Config editor (read-only + editable) --
     config_col_view, config_col_edit = st.columns([3, 1])
@@ -1593,7 +1642,7 @@ with tab_config:
                               help="Edit the configuration JSON directly.")
         col_save, col_reload = st.columns(2)
         with col_save:
-            if st.button("Save Config", type="primary", key="btn_save_config"):
+            if st.button(":material/save: Save Config", type="primary", key="btn_save_config"):
                 try:
                     new_cfg = json.loads(edited)
                     config.clear()
@@ -1606,7 +1655,7 @@ with tab_config:
                 except json.JSONDecodeError as e:
                     st.error(f"Invalid JSON: {e}")
         with col_reload:
-            if st.button("Reload Config", key="btn_reload_config"):
+            if st.button(":material/refresh: Reload Config", key="btn_reload_config"):
                 reload_config()
                 st.session_state.env_check = None
                 st.toast("Config reloaded from disk.")
@@ -1618,12 +1667,12 @@ with tab_config:
     st.divider()
 
     # -- 6.3: Category management --
-    st.subheader("Categories")
+    st.subheader(":material/label: Categories")
     st.caption(f"{len(ALLOWED_CATEGORIES)} categories configured")
 
     cat_cols = st.columns([4, 1])
     with cat_cols[1]:
-        if st.button("Add Category", key="btn_add_category"):
+        if st.button(":material/add: Add Category", key="btn_add_category"):
             st.session_state.setdefault("edit_categories", list(ALLOWED_CATEGORIES))
             st.session_state.edit_categories.append("")
             st.rerun()
@@ -1644,13 +1693,13 @@ with tab_config:
                                             key=f"cat_{idx}", label_visibility="collapsed")
                     new_cats.append(new_val)
                 with c2:
-                    if st.button("x", key=f"cat_del_{idx}"):
+                    if st.button(":material/close: Remove", key=f"cat_del_{idx}"):
                         new_cats.pop()
                         continue
 
     col_cat_save, col_cat_reset = st.columns(2)
     with col_cat_save:
-        if st.button("Save Categories", type="primary", key="btn_save_cats"):
+        if st.button(":material/save: Save Categories", type="primary", key="btn_save_cats"):
             cleaned = [c.strip().lower().replace(" ", "_") for c in new_cats if c.strip()]
             if len(cleaned) != len(set(cleaned)):
                 st.error("Duplicate categories found. Please remove duplicates.")
@@ -1666,7 +1715,7 @@ with tab_config:
                           details={"count": len(cleaned)})
                 st.rerun()
     with col_cat_reset:
-        if st.button("Reset", key="btn_reset_cats"):
+        if st.button(":material/restart_alt: Reset", key="btn_reset_cats"):
             st.session_state.pop("edit_categories", None)
             st.rerun()
 
@@ -1675,7 +1724,7 @@ with tab_config:
     st.divider()
 
     # -- 6.4: Extension management --
-    st.subheader("Supported Extensions")
+    st.subheader(":material/format_list_bulleted: Supported Extensions")
 
     ext_col1, ext_col2 = st.columns(2)
     with ext_col1:
@@ -1691,7 +1740,7 @@ with tab_config:
                                      default=list(config.get("image_extensions", [])),
                                      key="cfg_image_exts")
 
-    if st.button("Save Extensions", type="primary", key="btn_save_exts"):
+    if st.button(":material/save: Save Extensions", type="primary", key="btn_save_exts"):
         config["video_extensions"] = sorted(set(video_exts))
         config["image_extensions"] = sorted(set(image_exts))
         save_config()
@@ -1703,14 +1752,14 @@ with tab_config:
     st.divider()
 
     # -- S.4: Wipe local model cache --
-    st.subheader("Model Management")
+    st.subheader(":material/smart_toy: Model Management")
     st.caption("Manage the local AI model used for analysis")
 
     with st.expander("Wipe Local Model Cache", expanded=False):
         st.warning("This will permanently delete the local Qwen2.5-VL model (~5GB). "
                    "Re-download will be required to use local mode.")
         confirm_wipe = st.checkbox("I understand this will delete the model", key="confirm_model_wipe")
-        if st.button("Wipe Local Model", type="secondary", disabled=not confirm_wipe,
+        if st.button(":material/delete_forever: Wipe Local Model", type="secondary", disabled=not confirm_wipe,
                      key="btn_wipe_model"):
             result = wipe_local_model()
             if result.get("ok"):
@@ -1729,7 +1778,7 @@ with tab_config:
         st.warning("This will replace config.json with the factory default. "
                     "All custom settings, prompts, and categories will be lost.")
         confirm_restore = st.checkbox("I understand — restore factory defaults", key="confirm_restore_cfg")
-        if st.button("Restore Default Config", type="primary",
+        if st.button(":material/restore: Restore Default Config", type="primary",
                       disabled=not confirm_restore, key="btn_restore_config"):
             if restore_default_config():
                 reload_config()
@@ -1740,7 +1789,7 @@ with tab_config:
                 st.error("config.default.json not found — cannot restore.")
 
     # -- Telemetry settings --
-    st.subheader("Telemetry")
+    st.subheader(":material/monitoring: Telemetry")
     st.caption("Anonymous usage data to help improve the app")
 
     current_telemetry = config.get("telemetry", {}).get("enabled", False)
@@ -1768,17 +1817,17 @@ except Exception:
 # -----------------------------------------------------------------------------
 
 st.markdown(
-    "<hr style='margin-top: 3rem; margin-bottom: 0.5rem; border-color: #334155;'>"
-    "<p style='text-align: center; color: #94a3b8; font-size: 0.8rem;'>"
+    "<hr style='margin-top: 3rem; margin-bottom: 0.5rem; border-color: #27272A;'>"
+    "<p style='text-align: center; color: #71717A; font-size: 0.8rem;'>"
     "Made with love from Tanzania by "
     "<a href='https://github.com/Abdulmusawwir/ai-media-renamer' "
-    "   style='color: #60a5fa; text-decoration: none;'>Abdul Musawwir</a>"
+    "   style='color: #A1A1AA; text-decoration: none;'>Abdul Musawwir</a>"
     " &mdash; "
     "<a href='https://github.com/sponsors/Abdulmusawwir' "
-    "   style='color: #60a5fa; text-decoration: none;'>Sponsor</a>"
+    "   style='color: #A1A1AA; text-decoration: none;'>Sponsor</a>"
     " &middot; "
     "<a href='https://buymeacoffee.com/abdulmusawwir' "
-    "   style='color: #60a5fa; text-decoration: none;'>Buy Me a Coffee</a>"
+    "   style='color: #A1A1AA; text-decoration: none;'>Buy Me a Coffee</a>"
     "</p>",
     unsafe_allow_html=True,
 )
