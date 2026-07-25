@@ -1,4 +1,4 @@
-"""Session persistence tests: save, load, list."""
+"""Session persistence tests: save, load, list, delete."""
 
 import json
 from pathlib import Path
@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from engine import SESSION_DIR, load_session, list_sessions, save_session
+from engine import SESSION_DIR, delete_session, load_session, list_sessions, save_session
 
 
 class TestSaveSession:
@@ -98,3 +98,20 @@ class TestListSessions:
             )
             result = list_sessions()
             assert len(result) == 1
+
+
+class TestDeleteSession:
+    def test_delete_session_removes_file(self, tmp_dir, sample_staged_assets):
+        """delete_session removes the session file from disk."""
+        with patch("engine.SESSION_DIR", tmp_dir):
+            path = save_session(sample_staged_assets, {}, {"case_style": "title_case"})
+            assert path.exists()
+            result = delete_session(path)
+            assert result is True
+            assert not path.exists()
+
+    def test_delete_session_missing_file(self, tmp_dir):
+        """delete_session returns True for a non-existent file (no error)."""
+        with patch("engine.SESSION_DIR", tmp_dir):
+            result = delete_session(tmp_dir / "session_nonexistent.json")
+            assert result is True

@@ -48,6 +48,7 @@ from engine import (
     get_provider,
     import_staging_csv,
     list_providers,
+    delete_session,
     list_sessions,
     load_api_key,
     load_session,
@@ -731,7 +732,7 @@ with tab_upload:
     saved = list_sessions()
     if has_work or saved:
         with st.expander("Session", expanded=False):
-            col_save, col_restore = st.columns(2)
+            col_save, col_restore, col_delete = st.columns(3)
             with col_save:
                 if st.button(":material/save: Save Session", disabled=not has_work, key="save_session"):
                     settings = {
@@ -764,17 +765,34 @@ with tab_upload:
                             st.session_state.max_filename_chars = s["max_filename_chars"]
                         if s.get("template_string"):
                             st.session_state.template_string = s["template_string"]
-                        st.session_state.analysis_done = True
+                        if result["staged_assets"]:
+                            st.session_state.analysis_done = True
+                        else:
+                            st.session_state.analysis_done = False
                         st.session_state.analysis_in_progress = False
                         st.session_state.analysis_index = 0
                         st.session_state.base64_cache = {}
-                        msg = f"Session restored ({len(result['staged_assets'])} assets)"
-                        if result["missing_files"]:
-                            msg += f". {len(result['missing_files'])} file(s) missing from disk."
-                        st.toast(msg)
+                        if not result["staged_assets"] and result["missing_files"]:
+                            st.warning(f"All {len(result['missing_files'])} file(s) missing from disk. "
+                                       "Session restored with no assets. Re-upload files and re-analyze.",
+                                       icon=":material/warning:")
+                        else:
+                            msg = f"Session restored ({len(result['staged_assets'])} assets)"
+                            if result["missing_files"]:
+                                msg += f". {len(result['missing_files'])} file(s) missing from disk."
+                            st.toast(msg)
+                        st.rerun()
+            with col_delete:
+                if saved:
+                    del_options = [f"{s['created']}  ({s['asset_count']} assets)" for s in saved]
+                    del_chosen = st.selectbox("Delete session", del_options, key="session_delete_picker")
+                    if st.button(":material/delete: Delete", key="delete_session", type="secondary"):
+                        idx = del_options.index(del_chosen)
+                        delete_session(saved[idx]["path"])
+                        st.toast("Session deleted.")
                         st.rerun()
                 else:
-                    st.caption("No saved sessions yet.")
+                    st.caption("")
 
     # ------------------------------------------------------------------
     # Phase 2: Per-asset rerun loop (one AI call per script execution)
@@ -1301,7 +1319,7 @@ with tab_upload:
                         "Metadata": "Yes" if tags else "No",
                     })
                 preview_df = pd.DataFrame(preview_rows)
-                st.dataframe(preview_df, use_container_width=True, hide_index=True)
+                st.dataframe(preview_df, width="stretch", hide_index=True)
                 st.caption("Preview only — no files modified.")
 
         if commit_btn:

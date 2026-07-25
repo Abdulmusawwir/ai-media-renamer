@@ -1302,6 +1302,15 @@ def list_sessions() -> list[dict[str, Any]]:
     return result
 
 
+def delete_session(session_path: str | Path) -> bool:
+    """Delete a saved session file. Returns True on success."""
+    try:
+        Path(session_path).unlink(missing_ok=True)
+        return True
+    except Exception:
+        return False
+
+
 def load_session(session_path: str | Path) -> dict[str, Any]:
     """Load a saved session, validating that original files still exist on disk."""
     data = json.loads(Path(session_path).read_text(encoding="utf-8"))
