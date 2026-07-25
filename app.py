@@ -899,7 +899,7 @@ with tab_upload:
                      key="profile_selector", on_change=_on_profile_change,
                      label_visibility="collapsed")
 
-    current_profile = st.session_state.profile_selector
+    current_profile = st.session_state.get("profile_selector", current_profile)
 
     if current_profile == "custom":
         profile_data = config.get("prompt_profiles", {}).get("profiles", {}).get("custom", {})
