@@ -19,7 +19,7 @@ import ollama
 import openai
 import requests
 
-VERSION = "v1.4.2"
+VERSION = "v1.4.3"
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -490,6 +490,184 @@ def process_asset_to_base64(file_path: Path, hw_accel: str | None) -> str | None
 
 
 # -----------------------------------------------------------------------------
+# 4b. DOCUMENT TEXT EXTRACTION
+# -----------------------------------------------------------------------------
+
+DOCUMENT_EXTENSIONS = config.get('document_extensions', [
+    '.pdf', '.docx', '.doc', '.txt', '.md', '.rtf',
+    '.xlsx', '.csv', '.pptx',
+])
+
+SPREADSHEET_EXTENSIONS = {'.xlsx', '.csv'}
+PRESENTATION_EXTENSIONS = {'.pptx'}
+
+
+def extract_text_pdf(path: Path) -> str | None:
+    """Extract text from a PDF file using pdfplumber.
+
+    Args:
+        path: Path to the PDF file.
+
+    Returns:
+        Extracted text, or None on failure.
+    """
+    try:
+        import pdfplumber
+        text_parts: list[str] = []
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text_parts.append(page_text)
+        return "\n\n".join(text_parts).strip() or None
+    except Exception:
+        return None
+
+
+def extract_text_docx(path: Path) -> str | None:
+    """Extract text from a DOCX file using python-docx.
+
+    Args:
+        path: Path to the DOCX file.
+
+    Returns:
+        Extracted text, or None on failure.
+    """
+    try:
+        from docx import Document
+        doc = Document(str(path))
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        return "\n".join(paragraphs).strip() or None
+    except Exception:
+        return None
+
+
+def extract_text_xlsx(path: Path) -> str | None:
+    """Extract text from an XLSX file using openpyxl.
+
+    Args:
+        path: Path to the XLSX file.
+
+    Returns:
+        Extracted text with sheet names as headers, or None on failure.
+    """
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(str(path), read_only=True, data_only=True)
+        parts: list[str] = []
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows: list[str] = []
+            for row in ws.iter_rows(values_only=True):
+                cells = [str(c) for c in row if c is not None]
+                if cells:
+                    rows.append(" | ".join(cells))
+            if rows:
+                parts.append(f"[{sheet_name}]\n" + "\n".join(rows))
+        wb.close()
+        return "\n\n".join(parts).strip() or None
+    except Exception:
+        return None
+
+
+def extract_text_csv(path: Path) -> str | None:
+    """Extract text from a CSV file.
+
+    Args:
+        path: Path to the CSV file.
+
+    Returns:
+        CSV content as text, or None on failure.
+    """
+    try:
+        import csv
+        text_parts: list[str] = []
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if any(cell.strip() for cell in row):
+                    text_parts.append(" | ".join(cell.strip() for cell in row))
+        return "\n".join(text_parts).strip() or None
+    except Exception:
+        return None
+
+
+def extract_text_pptx(path: Path) -> str | None:
+    """Extract text from a PPTX file using python-pptx.
+
+    Args:
+        path: Path to the PPTX file.
+
+    Returns:
+        Extracted text with slide numbers as headers, or None on failure.
+    """
+    try:
+        from pptx import Presentation
+        prs = Presentation(str(path))
+        parts: list[str] = []
+        for i, slide in enumerate(prs.slides, 1):
+            slide_texts: list[str] = []
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        text = paragraph.text.strip()
+                        if text:
+                            slide_texts.append(text)
+            if slide_texts:
+                parts.append(f"[Slide {i}]\n" + "\n".join(slide_texts))
+        return "\n\n".join(parts).strip() or None
+    except Exception:
+        return None
+
+
+def extract_text_plain(path: Path) -> str | None:
+    """Extract text from a plain text file (TXT, MD, RTF).
+
+    Args:
+        path: Path to the text file.
+
+    Returns:
+        File content as text, or None on failure.
+    """
+    try:
+        content = path.read_text(encoding='utf-8', errors='replace')
+        return content.strip() or None
+    except Exception:
+        return None
+
+
+_TEXT_EXTRACTORS: dict[str, callable] = {
+    '.pdf': extract_text_pdf,
+    '.docx': extract_text_docx,
+    '.doc': extract_text_docx,
+    '.xlsx': extract_text_xlsx,
+    '.csv': extract_text_csv,
+    '.pptx': extract_text_pptx,
+    '.txt': extract_text_plain,
+    '.md': extract_text_plain,
+    '.rtf': extract_text_plain,
+}
+
+
+def extract_text_from_file(file_path: Path) -> str | None:
+    """Extract text content from a document file.
+
+    Routes to the appropriate extractor based on file extension.
+
+    Args:
+        file_path: Path to the document file.
+
+    Returns:
+        Extracted text, or None if unsupported or extraction failed.
+    """
+    ext = file_path.suffix.lower()
+    extractor = _TEXT_EXTRACTORS.get(ext)
+    if extractor:
+        return extractor(file_path)
+    return None
+
+
+# -----------------------------------------------------------------------------
 # 5. AI ENGINE & EXECUTION
 # -----------------------------------------------------------------------------
 
@@ -695,6 +873,38 @@ class AIProvider(ABC):
     def analyze(self, base64_img: str, verbose: bool = False) -> dict[str, Any]:
         ...
 
+    def analyze_text(self, text_content: str, verbose: bool = False) -> dict[str, Any]:
+        """Analyze text content from a document file.
+
+        Default implementation sends the text as a prompt without images.
+        Subclasses may override for provider-specific text handling.
+
+        Args:
+            text_content: Extracted text from the document.
+            verbose: If True, include raw response in error details.
+
+        Returns:
+            Result dict with parsed data or error information.
+        """
+        prompt = f"Document content:\n\n{text_content[:8000]}\n\n---\n\n{get_active_prompt()}"
+        return self._analyze_prompt_only(prompt, verbose)
+
+    def _analyze_prompt_only(self, prompt: str, verbose: bool = False) -> dict[str, Any]:
+        """Send a text-only prompt to the model (no images).
+
+        Subclasses should override this for provider-specific API calls.
+
+        Args:
+            prompt: Full prompt text to send.
+            verbose: If True, include raw response in error details.
+
+        Returns:
+            Result dict with parsed data or error information.
+        """
+        result: dict[str, Any] = {'ok': False, 'data': None, 'error': 'unsupported',
+                                  'detail': 'Text analysis not supported by this provider', 'raw_response': None}
+        return result
+
     @abstractmethod
     def health_check(self) -> dict[str, Any]:
         ...
@@ -772,6 +982,47 @@ class OllamaProvider(AIProvider):
                     model=self._model,
                     prompt=get_active_prompt(),
                     images=[base64_img],
+                    keep_alive=MODEL_KEEP_ALIVE,
+                    options={"temperature": MODEL_TEMPERATURE, "num_ctx": MODEL_NUM_CTX}
+                )
+                raw_text = response.get('response', '')
+                parsed = self._parse_and_validate(raw_text)
+                if parsed['ok'] or attempt == self._retries - 1:
+                    return parsed
+                last_exc = parsed.get('detail')
+            except (ollama.ResponseError, ConnectionError, TimeoutError, OSError) as exc:
+                last_exc = exc
+                if attempt < self._retries - 1:
+                    continue
+                result['error'] = 'ollama_error'
+                result['detail'] = f'Ollama request failed: {exc}'
+                return result
+            except Exception as exc:
+                result['error'] = 'ollama_error'
+                result['detail'] = f'Unexpected AI error: {exc}'
+                return result
+        if last_exc:
+            result['error'] = 'ollama_error'
+            result['detail'] = f'Ollama request failed after retry: {last_exc}'
+        return result
+
+    def _analyze_prompt_only(self, prompt: str, verbose: bool = False) -> dict[str, Any]:
+        """Send a text-only prompt to Ollama (no images) for document analysis.
+
+        Args:
+            prompt: Full prompt text to send.
+            verbose: If True, include raw response in error details.
+
+        Returns:
+            Result dict with parsed data or error information.
+        """
+        result: dict[str, Any] = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
+        last_exc = None
+        for attempt in range(self._retries):
+            try:
+                response = ollama.generate(
+                    model=self._model,
+                    prompt=prompt,
                     keep_alive=MODEL_KEEP_ALIVE,
                     options={"temperature": MODEL_TEMPERATURE, "num_ctx": MODEL_NUM_CTX}
                 )
@@ -1119,6 +1370,21 @@ def analyze_asset_with_ai(base64_img: str, verbose: bool = False, retry: bool = 
     provider = get_provider("ollama")
     provider.model = config["model"]["name"]
     return provider.analyze(base64_img, verbose=verbose)
+
+
+def analyze_document_with_ai(text_content: str, verbose: bool = False) -> dict[str, Any]:
+    """Analyze document text using the default Ollama provider.
+
+    Args:
+        text_content: Extracted text from the document.
+        verbose: If True, include raw response in error details.
+
+    Returns:
+        Result dict with parsed data or error information.
+    """
+    provider = get_provider("ollama")
+    provider.model = config["model"]["name"]
+    return provider.analyze_text(text_content, verbose=verbose)
 
 
 def analyze_asset_with_gemini(base64_img: str, verbose: bool = False) -> dict[str, Any]:

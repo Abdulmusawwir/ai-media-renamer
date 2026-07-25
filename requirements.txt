@@ -15,3 +15,7 @@ imagehash>=4.3.0
 posthog>=3.0.0
 pytest-cov>=4.0
 mypy>=1.0
+pdfplumber>=0.11.0
+python-docx>=1.0.0
+openpyxl>=3.1.0
+python-pptx>=1.0.0

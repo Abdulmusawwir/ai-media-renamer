@@ -24,6 +24,7 @@ from engine import (
     DEFAULT_CASE_STYLE,
     DEFAULT_MAX_FILENAME_CHARS,
     DEFAULT_TEMPLATE_STRING,
+    DOCUMENT_EXTENSIONS,
     EXTRACTION_WORKERS,
     IMAGE_EXTENSIONS,
     LOG_DIR,
@@ -34,6 +35,7 @@ from engine import (
     ExifToolSession,
     _format_ai_error,
     _is_vision_model,
+    analyze_document_with_ai,
     apply_case_style,
     apply_naming_template,
     check_environment,
@@ -43,6 +45,7 @@ from engine import (
     detect_hw_accel,
     execute_commit,
     export_staging_csv,
+    extract_text_from_file,
     find_duplicates,
     flush_telemetry,
     get_active_profile,
@@ -226,6 +229,9 @@ if "analysis_done" not in st.session_state:
 
 if "base64_cache" not in st.session_state:
     st.session_state.base64_cache = {}
+
+if "text_cache" not in st.session_state:
+    st.session_state.text_cache = {}
 
 if "hw_accel" not in st.session_state:
     st.session_state.hw_accel = None
@@ -517,7 +523,7 @@ with st.sidebar:
         temp_dir = st.session_state.get("temp_dir")
         if temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)
-        reset_keys = ["base64_cache", "staged_assets", "analysis_done", "uploaded_files",
+        reset_keys = ["base64_cache", "text_cache", "staged_assets", "analysis_done", "uploaded_files",
                       "temp_dir", "output_dir", "logger", "analysis_in_progress",
                       "analysis_index", "analysis_aborted", "clear_counter",
                       "analysis_errors"]
@@ -647,7 +653,7 @@ tab_upload, tab_analytics, tab_config = st.tabs([
 ])
 
 with tab_upload:
-    st.subheader(":material/upload: Upload Media Files")
+    st.subheader(":material/upload: Upload files")
 
     if st.session_state.provider_info == "ollama" and env and not env.get("model_available"):
         st.info("Qwen2.5-VL model is not installed. "
@@ -656,8 +662,11 @@ with tab_upload:
         uploaded_files = None
     else:
         uploaded_files = st.file_uploader(
-            "Choose video or image files",
-            type=["mp4", "mov", "avi", "mkv", "webm", "jpg", "jpeg", "png", "webp", "gif"],
+            "Choose video, image, or document files",
+            type=["mp4", "mov", "avi", "mkv", "webm",
+                  "jpg", "jpeg", "png", "webp", "gif",
+                  "pdf", "docx", "doc", "txt", "md", "rtf",
+                  "xlsx", "csv", "pptx"],
             accept_multiple_files=True,
             key=f"fu_{st.session_state.clear_counter}",
         )
@@ -670,7 +679,7 @@ with tab_upload:
             saved = {}
             skipped_size = []
             skipped_ext = []
-            valid_exts = set(VIDEO_EXTENSIONS) | set(IMAGE_EXTENSIONS)
+            valid_exts = set(VIDEO_EXTENSIONS) | set(IMAGE_EXTENSIONS) | set(DOCUMENT_EXTENSIONS)
             all_bytes = sum(uf.size for uf in uploaded_files)
             copied_bytes = 0
             total_files = len(uploaded_files)
@@ -714,6 +723,7 @@ with tab_upload:
             st.session_state.analysis_aborted = False
             st.session_state.staged_assets = []
             st.session_state.base64_cache = {}
+            st.session_state.text_cache = {}
             track_event("files_uploaded", {
                 "file_count": len(saved),
                 "video_count": sum(1 for n in saved if Path(n).suffix.lower() in VIDEO_EXTENSIONS),
@@ -728,7 +738,7 @@ with tab_upload:
                 shutil.rmtree(temp_dir, ignore_errors=True)
             for s in list_sessions():
                 delete_session(s["path"])
-            for key in ["uploaded_files", "base64_cache", "staged_assets", "temp_dir", "analysis_errors"]:
+            for key in ["uploaded_files", "base64_cache", "text_cache", "staged_assets", "temp_dir", "analysis_errors"]:
                 st.session_state.pop(key, None)
             st.session_state.analysis_done = False
             st.session_state.analysis_in_progress = False
@@ -780,6 +790,7 @@ with tab_upload:
                         st.session_state.analysis_in_progress = False
                         st.session_state.analysis_index = 0
                         st.session_state.base64_cache = {}
+                        st.session_state.text_cache = {}
                         if not result["staged_assets"] and result["missing_files"]:
                             st.warning(f"All {len(result['missing_files'])} file(s) missing from disk. "
                                        "Session restored with no assets. Re-upload files and re-analyze.",
@@ -811,17 +822,19 @@ with tab_upload:
         @st.fragment
         def _analysis_fragment() -> None:
             """Run one AI analysis step per script execution within a Streamlit fragment."""
-            items = list(st.session_state.get("base64_cache", {}).items())
-            total = len(items)
+            b64_items = list(st.session_state.get("base64_cache", {}).items())
+            text_items = list(st.session_state.get("text_cache", {}).items())
+            all_items = [(n, "image", d) for n, d in b64_items] + [(n, "text", d) for n, d in text_items]
+            total = len(all_items)
             idx = st.session_state.analysis_index
 
-            st.success(f"\u2705 Step 1 complete: {total} files extracted")
+            st.success(f"Step 1 complete: {len(b64_items)} media + {len(text_items)} documents extracted")
 
             if total > 0:
-                st.progress(idx / total, text=f"Analyzed {idx}/{total} assets")
+                st.progress(idx / total, text=f"Analyzed {idx}/{total} files")
 
             if 0 <= idx < total:
-                name, b64 = items[idx]
+                name, file_type, data = all_items[idx]
                 st.info(f"**Analyzing:** {name} ({idx+1}/{total})")
 
                 col_stop, _ = st.columns([1, 4])
@@ -830,12 +843,15 @@ with tab_upload:
                         st.session_state.analysis_aborted = True
 
                 if st.session_state.analysis_aborted:
-                    st.warning(f"Analysis stopped at {idx}/{total} assets.")
+                    st.warning(f"Analysis stopped at {idx}/{total} files.")
                     st.session_state.analysis_in_progress = False
                     st.session_state.analysis_done = bool(st.session_state.staged_assets)
                 else:
                     prov = get_provider(st.session_state.provider_info)
-                    ai_result = prov.analyze(b64, verbose=False)
+                    if file_type == "text":
+                        ai_result = prov.analyze_text(data, verbose=False)
+                    else:
+                        ai_result = prov.analyze(data, verbose=False)
 
                     if ai_result['ok']:
                         ai_data = ai_result['data']
@@ -1019,22 +1035,29 @@ with tab_upload:
                     st.info("No hardware acceleration detected, using CPU fallback.")
 
                 # Phase 1: Parallel extraction
-                st.write("**Step 1:** Preparing preview frames...")
-                progress_bar = st.progress(0, text="Extracting frames...")
+                st.write("**Step 1:** Preparing content for analysis...")
+                progress_bar = st.progress(0, text="Extracting content...")
                 base64_results = {}
+                text_results = {}
 
+                doc_exts = set(DOCUMENT_EXTENSIONS)
                 files_list = list(st.session_state.uploaded_files.values())
                 with ThreadPoolExecutor(max_workers=EXTRACTION_WORKERS) as executor:
-                    future_map = {
-                        executor.submit(process_asset_to_base64, fp, hw_accel): fp
-                        for fp in files_list
-                    }
+                    future_map = {}
+                    for fp in files_list:
+                        if fp.suffix.lower() in doc_exts:
+                            future_map[executor.submit(extract_text_from_file, fp)] = fp
+                        else:
+                            future_map[executor.submit(process_asset_to_base64, fp, hw_accel)] = fp
                     done_count = 0
                     for future in as_completed(future_map):
                         fp = future_map[future]
-                        b64 = future.result()
-                        if b64:
-                            base64_results[fp.name] = b64
+                        result = future.result()
+                        if result:
+                            if fp.suffix.lower() in doc_exts:
+                                text_results[fp.name] = result
+                            else:
+                                base64_results[fp.name] = result
                         else:
                             st.warning(f"Extraction failed: {fp.name}")
                             log_event(logger, "ERROR", "extraction_failed", file_name=fp.name)
@@ -1044,11 +1067,12 @@ with tab_upload:
                             text=f"Extracted {done_count}/{len(files_list)}"
                         )
 
-                if not base64_results:
+                if not base64_results and not text_results:
                     st.error("No files could be extracted. Aborting.")
                     st.stop()
 
                 st.session_state.base64_cache = base64_results
+                st.session_state.text_cache = text_results
                 st.session_state.staged_assets = []
                 st.session_state.analysis_errors = []
                 st.session_state.analysis_index = 0
@@ -1221,6 +1245,10 @@ with tab_upload:
                 k: v for k, v in st.session_state.base64_cache.items()
                 if k in selected_names
             }
+            st.session_state.text_cache = {
+                k: v for k, v in st.session_state.text_cache.items()
+                if k in selected_names
+            }
             st.session_state.analysis_index = 0
             st.session_state.analysis_in_progress = True
             st.session_state.analysis_done = False
@@ -1275,8 +1303,12 @@ with tab_upload:
                 col_idx = i % 5
                 with cols[col_idx]:
                     b64 = st.session_state.base64_cache.get(asset["original_name"])
+                    txt = st.session_state.text_cache.get(asset["original_name"])
                     if b64:
                         st.image(base64.b64decode(b64), caption=asset["original_name"], width=150)
+                    elif txt:
+                        preview = txt[:150] + ("..." if len(txt) > 150 else "")
+                        st.caption(f"{asset['original_name']}\n{preview}")
                     else:
                         st.caption(f"No preview: {asset['original_name']}")
 
@@ -1401,6 +1433,7 @@ with tab_upload:
                         ]
                         for name in committed_names:
                             st.session_state.base64_cache.pop(name, None)
+                            st.session_state.text_cache.pop(name, None)
 
                     if failed:
                         msg = f"Committed {committed} assets. {failed} failed — remaining assets kept for retry."
@@ -1754,7 +1787,7 @@ with tab_config:
     # -- 6.4: Extension management --
     st.subheader(":material/format_list_bulleted: Supported Extensions")
 
-    ext_col1, ext_col2 = st.columns(2)
+    ext_col1, ext_col2, ext_col3 = st.columns(3)
     with ext_col1:
         video_exts = st.multiselect("Video Extensions",
                                      options=[".mp4", ".mov", ".avi", ".mkv", ".webm",
@@ -1767,15 +1800,22 @@ with tab_config:
                                               ".bmp", ".tiff", ".tif", ".heic", ".raw"],
                                      default=list(config.get("image_extensions", [])),
                                      key="cfg_image_exts")
+    with ext_col3:
+        doc_exts = st.multiselect("Document Extensions",
+                                   options=[".pdf", ".docx", ".doc", ".txt", ".md", ".rtf",
+                                            ".xlsx", ".csv", ".pptx"],
+                                   default=list(config.get("document_extensions", [])),
+                                   key="cfg_doc_exts")
 
     if st.button(":material/save: Save Extensions", type="primary", key="btn_save_exts"):
         config["video_extensions"] = sorted(set(video_exts))
         config["image_extensions"] = sorted(set(image_exts))
+        config["document_extensions"] = sorted(set(doc_exts))
         save_config()
         reload_config()
-        st.success(f"Saved {len(video_exts)} video + {len(image_exts)} image extensions.")
+        st.success(f"Saved {len(video_exts)} video + {len(image_exts)} image + {len(doc_exts)} document extensions.")
         log_event(logger, "INFO", "extensions_updated",
-                  details={"video": len(video_exts), "image": len(image_exts)})
+                  details={"video": len(video_exts), "image": len(image_exts), "document": len(doc_exts)})
 
     st.space()
 
