@@ -162,7 +162,9 @@ class SetupWindow:
         self._continue_event.set()
 
     def wait_for_user(self):
-        self._continue_event.wait()
+        while not self._continue_event.is_set():
+            self.root.update()
+            self.root.after(50)
 
     def close(self):
         if self.root:
