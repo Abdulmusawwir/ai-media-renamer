@@ -720,6 +720,8 @@ with tab_upload:
             temp_dir = st.session_state.get("temp_dir")
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
+            for s in list_sessions():
+                delete_session(s["path"])
             for key in ["uploaded_files", "base64_cache", "staged_assets", "temp_dir", "analysis_errors"]:
                 st.session_state.pop(key, None)
             st.session_state.analysis_done = False
