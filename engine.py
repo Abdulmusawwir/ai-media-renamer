@@ -1212,11 +1212,13 @@ def execute_commit(
 
         tag_string = ", ".join(asset['tags'])
         summary = asset['summary']
+        title = asset['staged_name'].replace("_", " ").replace("-", " ").title()
         is_video = suffix in VIDEO_EXTENSIONS
 
         args = [
             "-overwrite_original",
             "-api", "LargeFileSupport=1",
+            f"-XMP-dc:Title={title}",
             f"-XMP-dc:Description={summary}",
             f"-Microsoft:Category={tag_string}"
         ]
@@ -1225,6 +1227,7 @@ def execute_commit(
 
         if is_video:
             args.extend([
+                f"-QuickTime:Title={title}",
                 f"-QuickTime:Description={summary}",
                 f"-QuickTime:Comment={summary}",
                 f"-QuickTime:Keywords={tag_string}",
@@ -1232,8 +1235,9 @@ def execute_commit(
                 f"-Keys:Keywords={tag_string}"
             ])
         else:
-            args.append(f"-EXIF:XPKeywords={tag_string}")
             args.extend([
+                f"-EXIF:XPTitle={title}",
+                f"-EXIF:XPKeywords={tag_string}",
                 f"-Description={summary}",
                 f"-Comment={summary}",
             ] + [f"-Keywords={t}" for t in asset['tags']])
