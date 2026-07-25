@@ -1,16 +1,48 @@
-[global]
-developmentMode = false
-
-[server]
-maxUploadSize = 10240
-headless = true
-port = 8501
+# shadcn/ui-inspired dark theme for AI Media Renamer
+# Zinc palette with Inter font
 
 [theme]
 base = "dark"
-primaryColor = "#3b82f6"
+primaryColor = "#A1A1AA"
+backgroundColor = "#09090B"
+secondaryBackgroundColor = "#18181B"
+codeBackgroundColor = "#18181B"
+textColor = "#FAFAFA"
+linkColor = "#A1A1AA"
+borderColor = "#27272A"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "8px"
+buttonRadius = "8px"
+font = "'Inter':https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+codeFontSize = "0.875rem"
+codeTextColor = "#D4D4D8"
+baseFontSize = 14
+baseFontWeight = 400
+headingFontSizes = ["36px", "30px", "24px", "20px", "16px", "14px"]
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+linkUnderline = false
+chartCategoricalColors = ["#3B82F6", "#22C55E", "#EAB308", "#EF4444", "#8B5CF6", "#F97316", "#06B6D4"]
 
-[browser]
-serverAddress = ""
-gatherUsageStats = false
+# Zinc palette
+grayColor = "#71717A"
+blueColor = "#3B82F6"
+greenColor = "#22C55E"
+redColor = "#EF4444"
+yellowColor = "#EAB308"
+orangeColor = "#F97316"
+violetColor = "#8B5CF6"
 
+dataframeBorderColor = "#27272A"
+dataframeHeaderBackgroundColor = "#18181B"
+
+[theme.sidebar]
+backgroundColor = "#09090B"
+secondaryBackgroundColor = "#18181B"
+codeBackgroundColor = "#18181B"
+textColor = "#FAFAFA"
+borderColor = "#27272A"
+primaryColor = "#A1A1AA"
+dataframeHeaderBackgroundColor = "#18181B"
+dataframeBorderColor = "#27272A"
