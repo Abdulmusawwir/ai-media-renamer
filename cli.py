@@ -27,6 +27,7 @@ from engine import (
     import_staging_csv,
     is_already_processed,
     log_event,
+    normalize_category,
     process_image_to_base64,
     process_video_to_base64,
     sanitize_name,
@@ -93,7 +94,7 @@ def _close_all_worker_sessions() -> None:
 # -----------------------------------------------------------------------------
 
 def _sanitize_category(raw: str) -> str | None:
-    """Sanitize a raw category string to contain only alphanumeric chars, underscores, or hyphens.
+    """Sanitize a raw category string via shared normalize_category().
 
     Args:
         raw: The raw category string input by the user.
@@ -101,7 +102,7 @@ def _sanitize_category(raw: str) -> str | None:
     Returns:
         The sanitized category string, or None if the result is empty.
     """
-    safe = "".join([c for c in raw.lower() if c.isalpha() or c.isdigit() or c in ("_", "-")]).strip("_")
+    safe = normalize_category(raw)
     return safe if safe else None
 
 

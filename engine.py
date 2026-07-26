@@ -19,7 +19,7 @@ import ollama
 import openai
 import requests
 
-VERSION = "v1.4.4"
+VERSION = "v1.4.5"
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -94,8 +94,6 @@ config = load_config()
 
 ALLOWED_CATEGORIES = config['allowed_categories']
 
-CATEGORY_LIST_STR = "\n".join(f'   - "{c}"' for c in ALLOWED_CATEGORIES)
-
 
 def get_active_profile() -> str:
     """Return the name of the currently active prompt profile."""
@@ -147,14 +145,12 @@ MODEL_TEMPERATURE = config['model']['temperature']
 MODEL_NUM_CTX = config['model']['num_ctx']
 MODEL_KEEP_ALIVE = config['model']['keep_alive']
 IMAGE_PREVIEW_MAX_EDGE = config['preview']['image_max_edge']
-VIDEO_GRID_TILE = config['preview']['video_grid_tile']
 VIDEO_GRID_SCALE = config['preview']['video_grid_scale']
 EXTRACTION_WORKERS = _resolve_workers(config['preview'].get('extraction_workers', 0))
 
 DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'title_case')
 DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
 
-CLOUD_PROVIDERS = tuple(config.get('cloud', {}).get('providers', ['gemini', 'openai', 'anthropic', 'groq']))
 CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
 CURRENT_API_KEY = ""
 
@@ -170,7 +166,6 @@ MAX_UPLOAD_SIZE = int(config['logging'].get('max_upload_size', 10737418240))
 CONFIG_PATH = Path(__file__).parent / "config.json"
 KEYRING_SERVICE = "ai-media-renamer"
 PROVIDER_REGISTRY = {}
-CURRENT_PROVIDER_INSTANCE = None
 
 
 def save_config() -> None:
@@ -671,6 +666,20 @@ def extract_text_from_file(file_path: Path) -> str | None:
 # 5. AI ENGINE & EXECUTION
 # -----------------------------------------------------------------------------
 
+def normalize_category(raw: str) -> str:
+    """Normalize a raw category string: lowercase, replace spaces with underscores, strip unsafe chars.
+
+    Args:
+        raw: Raw category string from user input.
+
+    Returns:
+        Normalized string (may be empty if input was all special chars).
+    """
+    normalized = raw.lower().strip().replace(" ", "_")
+    safe_chars = [c for c in normalized if c.isalpha() or c.isdigit() or c in ('_', '-')]
+    return "".join(safe_chars).strip('_')
+
+
 def validate_category(raw_category: str | None) -> tuple[str, bool]:
     """Normalize and validate a category name against the allowed list.
 
@@ -683,9 +692,7 @@ def validate_category(raw_category: str | None) -> tuple[str, bool]:
     """
     if not raw_category or not str(raw_category).strip():
         return 'uncategorized', True
-    normalized = str(raw_category).lower().strip().replace(" ", "_")
-    safe_chars = [c for c in normalized if c.isalpha() or c.isdigit() or c in ('_', '-')]
-    normalized = "".join(safe_chars).strip('_')
+    normalized = normalize_category(str(raw_category))
     if not normalized:
         return 'uncategorized', True
     if normalized in ALLOWED_CATEGORIES:
@@ -1387,21 +1394,6 @@ def analyze_document_with_ai(text_content: str, verbose: bool = False) -> dict[s
     return provider.analyze_text(text_content, verbose=verbose)
 
 
-def analyze_asset_with_gemini(base64_img: str, verbose: bool = False) -> dict[str, Any]:
-    """Analyze an image using the Gemini provider.
-
-    Args:
-        base64_img: Base64-encoded JPEG image data.
-        verbose: If True, include raw response in error details.
-
-    Returns:
-        Result dict with parsed data or error information.
-    """
-    provider = get_provider("gemini")
-    provider.api_key = CURRENT_API_KEY or load_api_key("gemini")
-    return provider.analyze(base64_img, verbose=verbose)
-
-
 def _format_ai_error(ai_result: dict[str, Any], verbose: bool = False) -> str:
     """Format an AI result error into a human-readable message string.
 
@@ -1941,7 +1933,7 @@ def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[st
     Returns:
         Dict with 'ok', 'message', and optionally 'require_download'.
     """
-    global CURRENT_PROVIDER, CURRENT_API_KEY, CURRENT_PROVIDER_INSTANCE
+    global CURRENT_PROVIDER, CURRENT_API_KEY
 
     if CURRENT_PROVIDER == "ollama" and new_provider != "ollama":
         try:
@@ -1963,7 +1955,6 @@ def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[st
     pconf = config.get("model", {}).get("providers", {}).get(new_provider, {})
     provider.model = pconf.get("selected_model", "") or (pconf.get("models") or [None])[0] or config["model"]["name"]
 
-    CURRENT_PROVIDER_INSTANCE = provider
     config["model"]["last_provider"] = new_provider
     save_config()
 
@@ -1976,16 +1967,6 @@ def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[st
     if not env["model_available"]:
         return {"ok": False, "require_download": True, "message": "Model qwen2.5vl:7b not found. Download required."}
     return {"ok": True, "message": "Switched to local Ollama."}
-
-
-def set_api_key(key: str) -> None:
-    """Set the global in-memory API key for the current session.
-
-    Args:
-        key: API key string to set.
-    """
-    global CURRENT_API_KEY
-    CURRENT_API_KEY = key
 
 
 def wipe_local_model(model_name: str = "qwen2.5vl:7b") -> dict[str, Any]:

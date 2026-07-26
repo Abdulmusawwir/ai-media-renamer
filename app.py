@@ -57,6 +57,7 @@ from engine import (
     load_api_key,
     load_session,
     log_event,
+    normalize_category,
     process_asset_to_base64,
     reload_config,
     restore_default_config,
@@ -1353,7 +1354,7 @@ with tab_upload:
                     suffix = Path(asset["original_name"]).suffix
                     new_name = f"{row['proposed_filename']}{suffix}"
                     if sort_folders:
-                        cat = row["category"].strip().lower().replace(" ", "_") or "uncategorized"
+                        cat = normalize_category(row["category"]) or "uncategorized"
                         new_path = str(target_dir / cat / new_name)
                     else:
                         new_path = str(target_dir / new_name)
@@ -1778,7 +1779,8 @@ with tab_config:
 
     with st.container(horizontal=True):
         if st.button(":material/save: Save Categories", type="primary", key="btn_save_cats"):
-            cleaned = [c.strip().lower().replace(" ", "_") for c in new_cats if c.strip()]
+                cleaned = [normalize_category(c) for c in new_cats if c.strip()]
+                cleaned = [c for c in cleaned if c]
             if len(cleaned) != len(set(cleaned)):
                 st.error("Duplicate categories found. Please remove duplicates.")
             elif any(not c for c in cleaned):
