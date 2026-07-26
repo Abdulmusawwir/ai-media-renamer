@@ -869,6 +869,7 @@ with tab_upload:
                         safe_name = truncate_filename(safe_name, st.session_state.max_filename_chars)
 
                         staged_assets = st.session_state.get("staged_assets", [])
+                        file_ext = Path(name).suffix.lower()
                         staged_assets.append({
                             "original_path": st.session_state.uploaded_files[name],
                             "original_name": name,
@@ -879,6 +880,8 @@ with tab_upload:
                             "tags": ai_data.get('tags', []),
                             "summary": ai_data.get('overall_visual_summary', ''),
                             "suggested_category": suggested_cat,
+                            "file_type": "document" if file_ext in DOCUMENT_EXTENSIONS else "media",
+                            "file_ext": file_ext,
                         })
                         st.session_state.staged_assets = staged_assets
 
@@ -1153,13 +1156,25 @@ with tab_upload:
             rendered = apply_case_style(rendered, case_style)
             rendered = truncate_filename(rendered, max_chars)
             existing_rating = asset.get("rating", "")
+            ft = asset.get("file_type", "media")
+            fext = asset.get("file_ext", "")
+            type_label = f"doc ({fext.lstrip('.')})" if ft == "document" else "media"
+            summary_text = asset["summary"]
+            if ft == "document":
+                txt = st.session_state.text_cache.get(asset["original_name"], "")
+                if txt:
+                    snippet = txt[:200].replace("\n", " ")
+                    if len(txt) > 200:
+                        snippet += "..."
+                    summary_text = snippet
             table_rows.append({
                 "select": select_all,
                 "original_name": asset["original_name"],
+                "type": type_label,
                 "proposed_filename": rendered,
                 "category": asset["category"] or "uncategorized",
                 "tags": ", ".join(asset["tags"]),
-                "summary": asset["summary"],
+                "summary": summary_text,
                 "rating": existing_rating,
             })
 
@@ -1177,6 +1192,7 @@ with tab_upload:
             column_config={
                 "select": st.column_config.CheckboxColumn("Apply", default=True),
                 "original_name": st.column_config.TextColumn("Original File", disabled=True, width="small"),
+                "type": st.column_config.TextColumn("Type", disabled=True, width="small"),
                 "proposed_filename": st.column_config.TextColumn("Proposed Filename", width="medium"),
                 "category": st.column_config.SelectboxColumn(
                     "Category",
