@@ -535,6 +535,7 @@ with st.sidebar:
             logging.getLogger('video_renamer').removeHandler(h)
         for log_path in LOG_DIR.glob("renamer_*.jsonl"):
             log_path.unlink(missing_ok=True)
+        load_log_entries.clear()
         st.rerun()
 
     if new_provider == "ollama" and env and env.get("ollama_running") and not env.get("model_available"):
@@ -622,6 +623,7 @@ if st.session_state.provider_info != "ollama":
 # -----------------------------------------------------------------------------
 
 @st.cache_data(ttl=10)
+@st.cache_data(ttl=5)
 def load_log_entries() -> list[dict[str, Any]]:
     """Load all JSONL log entries from the log directory.
 
@@ -923,7 +925,7 @@ with tab_upload:
     if st.session_state.analysis_done:
         n = len(st.session_state.staged_assets)
         if n:
-            st.success(f"✅ Analysis complete: {n} asset{'s' if n != 1 else ''} ready for review below.")
+            st.success(f"Analysis complete: {n} asset{'s' if n != 1 else ''} ready for review below.")
 
     # ------------------------------------------------------------------
     # AI Prompt Profile (before analysis, changeable per run)
@@ -1038,22 +1040,28 @@ with tab_upload:
                 else:
                     st.info("No hardware acceleration detected, using CPU fallback.")
 
-                # Phase 1: Parallel extraction
+                # Phase 1: Parallel extraction (skip files already cached)
                 st.write("**Step 1:** Preparing content for analysis...")
                 progress_bar = st.progress(0, text="Extracting content...")
-                base64_results = {}
-                text_results = {}
+                base64_results = dict(st.session_state.get("base64_cache", {}))
+                text_results = dict(st.session_state.get("text_cache", {}))
+                cached_count = len(base64_results) + len(text_results)
 
                 doc_exts = set(DOCUMENT_EXTENSIONS)
                 files_list = list(st.session_state.uploaded_files.values())
+                uncached = [fp for fp in files_list
+                            if fp.name not in base64_results and fp.name not in text_results]
+                if cached_count:
+                    st.caption(f"{cached_count} file(s) already cached, extracting {len(uncached)} new...")
                 with ThreadPoolExecutor(max_workers=EXTRACTION_WORKERS) as executor:
                     future_map = {}
-                    for fp in files_list:
+                    for fp in uncached:
                         if fp.suffix.lower() in doc_exts:
                             future_map[executor.submit(extract_text_from_file, fp)] = fp
                         else:
                             future_map[executor.submit(process_asset_to_base64, fp, hw_accel)] = fp
                     done_count = 0
+                    extract_total = max(len(uncached), 1)
                     for future in as_completed(future_map):
                         fp = future_map[future]
                         result = future.result()
@@ -1067,8 +1075,8 @@ with tab_upload:
                             log_event(logger, "ERROR", "extraction_failed", file_name=fp.name)
                         done_count += 1
                         progress_bar.progress(
-                            done_count / len(files_list),
-                            text=f"Extracted {done_count}/{len(files_list)}"
+                            done_count / extract_total,
+                            text=f"Extracted {done_count}/{extract_total}"
                         )
 
                 if not base64_results and not text_results:
@@ -1488,6 +1496,7 @@ with tab_analytics:
                 logging.getLogger('video_renamer').removeHandler(h)
             for log_path in LOG_DIR.glob("renamer_*.jsonl"):
                 log_path.unlink(missing_ok=True)
+            load_log_entries.clear()
             st.rerun()
         if st.button(":material/delete_sweep: Reset App and Settings", type="secondary", key="analytics_reset"):
             temp_dir = st.session_state.get("temp_dir")
@@ -1504,6 +1513,7 @@ with tab_analytics:
                 logging.getLogger('video_renamer').removeHandler(h)
             for log_path in LOG_DIR.glob("renamer_*.jsonl"):
                 log_path.unlink(missing_ok=True)
+            load_log_entries.clear()
             st.rerun()
 
     entries = load_log_entries()
@@ -1779,8 +1789,8 @@ with tab_config:
 
     with st.container(horizontal=True):
         if st.button(":material/save: Save Categories", type="primary", key="btn_save_cats"):
-                cleaned = [normalize_category(c) for c in new_cats if c.strip()]
-                cleaned = [c for c in cleaned if c]
+            cleaned = [normalize_category(c) for c in new_cats if c.strip()]
+            cleaned = [c for c in cleaned if c]
             if len(cleaned) != len(set(cleaned)):
                 st.error("Duplicate categories found. Please remove duplicates.")
             elif any(not c for c in cleaned):

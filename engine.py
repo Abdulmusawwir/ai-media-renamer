@@ -19,7 +19,7 @@ import ollama
 import openai
 import requests
 
-VERSION = "v1.4.5"
+VERSION = "v1.4.6"
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
