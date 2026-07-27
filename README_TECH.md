@@ -1,6 +1,6 @@
 # AI Media Renamer — Technical Reference
 
-Automatically organize, rename, and tag video/image assets using local AI vision models. 6 prompt profiles for different use cases. Comes with both a **CLI** and a **Streamlit web app**.
+Automatically organize, rename, and tag video/image assets using local AI vision models. 7 prompt profiles for different use cases. Comes with both a **CLI** and a **Streamlit web app**.
 
 > 👉 For a plain-language overview, see [README.md](README.md)
 
@@ -43,7 +43,7 @@ python cli.py "path/to/your/assets" [options]
 |---|---|
 | `dir` | Path to directory containing media files |
 | `--verbose` / `-v` | Debug output (raw AI responses) |
-| `--profile` / `-p` | AI prompt profile: `general_balanced`, `general_broll`, `cinematography`, `motion_overlays`, `religious_landmarks`, `custom` |
+| `--profile` / `-p` | AI prompt profile: `general_balanced`, `general_broll`, `cinematography`, `motion_overlays`, `religious_landmarks`, `document_naming`, `spreadsheet_naming`, `custom` |
 | `--template` / `-t` | Naming template preset (`default`, `short`, `editorial`) or raw pattern |
 | `--case-style` / `--style` | Case style: `snake_case` (default), `camelCase`, `kebab-case`, `pascal_case`, `lowercase` |
 | `--max-chars` / `--max` | Max filename length (0 = no limit) |
@@ -52,6 +52,12 @@ python cli.py "path/to/your/assets" [options]
 | `--export-csv <file>` | Export staging data to CSV after analysis |
 | `--import-csv <file>` | Skip AI analysis, load staging from CSV |
 | `--dry-run` | Preview commits without modifying files |
+| `--rollback` | Undo the last commit batch (move files back, remove metadata) |
+| `--non-interactive` / `-y` | Skip interactive prompts, auto-accept all |
+| `--output` / `-o` | Output directory (default: `~/Desktop/RenamedMedia`) |
+| `--no-progress` | Disable progress bars (pipe-friendly output) |
+| `--reset-config` | Reset config.json to factory defaults and exit |
+| `-r` / `--include-subdirectories` | Scan subdirectories recursively |
 
 ### CLI Workflow
 1. **Extraction** — Parallel FFmpeg frame extraction with HW acceleration detection

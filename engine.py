@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import base64
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -18,8 +19,27 @@ import keyring
 import ollama
 import openai
 import requests
+from pydantic import BaseModel, ValidationError
 
-VERSION = "v1.4.6"
+VERSION = "v1.5.0"
+
+
+class AssetAnalysisResponse(BaseModel):
+    """Structured Pydantic model for AI analysis responses.
+
+    Defines the expected JSON schema returned by all AI providers.
+    Used for validation, retry logic, and optional provider-level
+    structured output (response_format).
+    """
+
+    new_filename: str
+    suggested_category: str
+    overall_visual_summary: str
+    tags: list[str]
+    topic: str = ""
+    description: str = ""
+    confidence: float = 0.0
+
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -115,7 +135,16 @@ def get_active_prompt() -> str:
     raw = profile.get('prompt', '')
     cats = get_active_categories()
     cat_str = "\n".join(f'   - "{c}"' for c in cats)
-    return raw.replace("the allowed categories list", f"this list:\n{cat_str}")
+
+    for needle in ("the allowed categories list", "the allowed list"):
+        if needle in raw:
+            raw = raw.replace(needle, f"this list:\n{cat_str}")
+            break
+
+    constraint = (
+        f"\n\nIMPORTANT — ALLOWED CATEGORIES (use ONLY these, never invent new ones):\n{cat_str}"
+    )
+    return raw + constraint
 
 
 def set_active_profile(name: str) -> None:
@@ -328,6 +357,32 @@ class ExifToolSession:
             output += line
         return output
 
+    def execute_batch(self, all_args: list[list[str]]) -> list[str]:
+        """Send multiple file argument sets in a single -execute block.
+
+        Batches all metadata writes into one IPC round-trip instead of one
+        per file, reducing overhead from ~200ms x N to ~200ms total.
+
+        Args:
+            all_args: List of argument lists, one per file. Each inner list
+                      ends with the file path as the last element.
+
+        Returns:
+            List of ExifTool output strings, one per file argument set.
+        """
+        for file_args in all_args:
+            for arg in file_args:
+                self.process.stdin.write(f"{arg}\n")
+        self.process.stdin.write("-execute\n")
+        self.process.stdin.flush()
+
+        output = ""
+        for line in self.process.stdout:
+            if "{ready}" in line:
+                break
+            output += line
+        return [output]
+
     def close(self) -> None:
         """Shut down the persistent ExifTool subprocess."""
         if hasattr(self, 'process'):
@@ -485,6 +540,110 @@ def process_asset_to_base64(file_path: Path, hw_accel: str | None) -> str | None
 
 
 # -----------------------------------------------------------------------------
+# 3c. AUDIO TRANSCRIPTION
+# -----------------------------------------------------------------------------
+
+
+def extract_audio_from_video(video_path: str | Path) -> Path | None:
+    """Extract audio track from a video file using FFmpeg.
+
+    Outputs 16kHz mono WAV suitable for Whisper transcription.
+
+    Args:
+        video_path: Path to the video file.
+
+    Returns:
+        Path to extracted WAV file, or None if no audio track or on error.
+    """
+    import tempfile
+    video_path = Path(video_path)
+    if not video_path.exists():
+        return None
+    tmp = Path(tempfile.mktemp(suffix=".wav"))
+    cmd = [
+        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+        '-i', str(video_path),
+        '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1',
+        str(tmp),
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, check=True, creationflags=_NO_WINDOW)
+        return tmp if tmp.exists() else None
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        if tmp.exists():
+            tmp.unlink()
+        return None
+
+
+def _has_audio_track(video_path: str | Path) -> bool:
+    """Check if a video file has an audio track via FFprobe.
+
+    Args:
+        video_path: Path to the video file.
+
+    Returns:
+        True if the video has at least one audio stream.
+    """
+    cmd = [
+        'ffprobe', '-v', 'error',
+        '-select_streams', 'a',
+        '-show_entries', 'stream=index',
+        '-of', 'csv=p=0',
+        str(video_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
+        return bool(result.stdout.strip())
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+
+_whisper_model_cache: dict[str, Any] = {}
+
+
+def transcribe_audio(audio_path: str | Path, model_size: str = "base") -> dict[str, Any]:
+    """Transcribe an audio file using faster-whisper (local, no cloud).
+
+    The model is lazily loaded and cached in memory for subsequent calls.
+
+    Args:
+        audio_path: Path to the audio file (WAV, MP3, etc.).
+        model_size: Whisper model size — tiny (39MB), base (74MB),
+                    small (244MB), medium (769MB), large-v3 (1.5GB).
+
+    Returns:
+        Dict with keys: text (str), language (str), duration (float).
+        On error: text is empty and 'error' key is set.
+    """
+    audio_path = Path(audio_path)
+    if not audio_path.exists():
+        return {"text": "", "language": "", "duration": 0.0, "error": "File not found"}
+
+    if model_size not in _whisper_model_cache:
+        try:
+            from faster_whisper import WhisperModel
+            _whisper_model_cache[model_size] = WhisperModel(model_size, device="cpu", compute_type="int8")
+        except ImportError:
+            return {"text": "", "language": "", "duration": 0.0,
+                    "error": "faster-whisper not installed. Run: pip install faster-whisper"}
+        except Exception as exc:
+            return {"text": "", "language": "", "duration": 0.0,
+                    "error": f"Failed to load whisper model: {exc}"}
+
+    model = _whisper_model_cache[model_size]
+    try:
+        segments, info = model.transcribe(str(audio_path), beam_size=1)
+        text_parts = [seg.text for seg in segments]
+        return {
+            "text": " ".join(text_parts).strip(),
+            "language": info.language or "",
+            "duration": info.duration or 0.0,
+        }
+    except Exception as exc:
+        return {"text": "", "language": "", "duration": 0.0, "error": str(exc)}
+
+
+# -----------------------------------------------------------------------------
 # 4b. DOCUMENT TEXT EXTRACTION
 # -----------------------------------------------------------------------------
 
@@ -507,6 +666,8 @@ def extract_text_pdf(path: Path) -> str | None:
         Extracted text, or None on failure.
     """
     try:
+        import logging
+        logging.getLogger("pdfminer").setLevel(logging.ERROR)
         import pdfplumber
         text_parts: list[str] = []
         with pdfplumber.open(path) as pdf:
@@ -819,7 +980,11 @@ def apply_naming_template(template_string: str, asset_data: dict[str, Any]) -> s
 
 
 def _parse_ai_response(raw_text: str) -> tuple[dict[str, Any] | None, str | None, str | None]:
-    """Parse and extract JSON from an AI model's raw text response.
+    """Parse, validate, and extract JSON from an AI model's raw text response.
+
+    Uses Pydantic validation against AssetAnalysisResponse when possible.
+    Falls back to raw JSON parsing if the response doesn't match the schema
+    (e.g. partial responses from tests or incomplete model outputs).
 
     Args:
         raw_text: Raw text returned by the AI model.
@@ -828,17 +993,39 @@ def _parse_ai_response(raw_text: str) -> tuple[dict[str, Any] | None, str | None
         A tuple of (parsed_dict, error_type, error_detail). On success,
         error_type and error_detail are None. On failure, parsed_dict is None.
     """
+    import re
+
     clean_res = raw_text.strip()
     if not clean_res:
         return None, 'empty_response', 'Model returned an empty response'
 
+    candidates: list[str] = []
+
     if clean_res.startswith("```json"):
-        clean_res = clean_res.split("```json")[1].split("```")[0].strip()
+        candidates.append(clean_res.split("```json")[1].split("```")[0].strip())
     elif clean_res.startswith("```"):
-        clean_res = clean_res.split("```")[1].split("```")[0].strip()
+        candidates.append(clean_res.split("```")[1].split("```")[0].strip())
+
+    candidates.append(clean_res)
+
+    json_block = re.search(r"\{[\s\S]*\}", clean_res)
+    if json_block and json_block.group(0) not in candidates:
+        candidates.append(json_block.group(0))
+
+    for candidate in candidates:
+        try:
+            raw_dict = json.loads(candidate)
+            try:
+                validated = AssetAnalysisResponse.model_validate(raw_dict)
+                return validated.model_dump(), None, None
+            except ValidationError:
+                return raw_dict, None, None
+        except json.JSONDecodeError:
+            continue
 
     try:
-        return json.loads(clean_res), None, None
+        raw_dict = json.loads(clean_res)
+        return raw_dict, None, None
     except json.JSONDecodeError as exc:
         return None, 'json_parse_error', f'JSON decode failed: {exc}'
 
@@ -848,7 +1035,8 @@ def _parse_ai_response(raw_text: str) -> tuple[dict[str, Any] | None, str | None
 # -----------------------------------------------------------------------------
 
 VISION_MODEL_PREFIXES = {
-    "llava", "bakllava", "qwen2.5vl", "qwen2-vl", "minicpm", "cogvlm", "moondream",
+    "llava", "bakllava", "qwen2.5vl", "qwen2.5-vl", "qwen2-vl", "qwen3-vl",
+    "minicpm", "cogvlm", "moondream",
     "yi-vl", "gemma3", "xclip", "llama3.2-vision", "llama3.2-11b-vision",
     "llama3.2-90b-vision", "pixtral",
 }
@@ -877,7 +1065,8 @@ class AIProvider(ABC):
         self._api_key = ""
 
     @abstractmethod
-    def analyze(self, base64_img: str, verbose: bool = False) -> dict[str, Any]:
+    def analyze(self, base64_img: str, verbose: bool = False,
+                prompt_override: str | None = None) -> dict[str, Any]:
         ...
 
     def analyze_text(self, text_content: str, verbose: bool = False) -> dict[str, Any]:
@@ -971,23 +1160,26 @@ class OllamaProvider(AIProvider):
         self._model = MODEL_NAME
         self._retries = 2
 
-    def analyze(self, base64_img: str, verbose: bool = False) -> dict[str, Any]:
+    def analyze(self, base64_img: str, verbose: bool = False,
+                prompt_override: str | None = None) -> dict[str, Any]:
         """Send a base64 image to Ollama for AI analysis with retry logic.
 
         Args:
             base64_img: Base64-encoded JPEG image data.
             verbose: If True, include raw response in error details.
+            prompt_override: Optional custom prompt to use instead of get_active_prompt().
 
         Returns:
             Result dict with parsed data or error information.
         """
         result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
         last_exc = None
+        prompt = prompt_override or get_active_prompt()
         for attempt in range(self._retries):
             try:
                 response = ollama.generate(
                     model=self._model,
-                    prompt=get_active_prompt(),
+                    prompt=prompt,
                     images=[base64_img],
                     keep_alive=MODEL_KEEP_ALIVE,
                     options={"temperature": MODEL_TEMPERATURE, "num_ctx": MODEL_NUM_CTX}
@@ -1202,6 +1394,14 @@ class OpenAIProvider(AIProvider):
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
                     ]
                 }],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "asset_analysis",
+                        "strict": True,
+                        "schema": AssetAnalysisResponse.model_json_schema(),
+                    },
+                },
                 max_tokens=1024
             )
             raw_text = response.choices[0].message.content or ""
@@ -1363,20 +1563,32 @@ register_provider("groq", GroqProvider)
 register_provider("openrouter", OpenRouterProvider)
 
 
-def analyze_asset_with_ai(base64_img: str, verbose: bool = False, retry: bool = True) -> dict[str, Any]:
+def analyze_asset_with_ai(
+    base64_img: str,
+    verbose: bool = False,
+    retry: bool = True,
+    audio_transcription: str | None = None,
+) -> dict[str, Any]:
     """Analyze an image using the default Ollama provider.
 
     Args:
         base64_img: Base64-encoded JPEG image data.
         verbose: If True, include raw response in error details.
         retry: Unused, kept for API compatibility.
+        audio_transcription: Optional audio transcription text to include in the prompt.
 
     Returns:
         Result dict with parsed data or error information.
     """
     provider = get_provider("ollama")
     provider.model = config["model"]["name"]
-    return provider.analyze(base64_img, verbose=verbose)
+    prompt_override = None
+    if audio_transcription:
+        prompt_override = (
+            f"Audio transcription (if available):\n{audio_transcription}\n\n---\n\n"
+            f"{get_active_prompt()}"
+        )
+    return provider.analyze(base64_img, verbose=verbose, prompt_override=prompt_override)
 
 
 def analyze_document_with_ai(text_content: str, verbose: bool = False) -> dict[str, Any]:
@@ -1424,14 +1636,145 @@ def _format_ai_error(ai_result: dict[str, Any], verbose: bool = False) -> str:
     return msg
 
 
+# -----------------------------------------------------------------------------
+# 5c. PER-FORMAT DOCUMENT METADATA
+# -----------------------------------------------------------------------------
+
+
+def _write_docx_metadata(target_file: Path, title: str, summary: str, tags: list[str]) -> None:
+    """Write metadata to a DOCX file via python-docx core properties.
+
+    Args:
+        target_file: Path to the DOCX file.
+        title: Title string to write.
+        summary: Description/subject string to write.
+        tags: List of keyword strings to write.
+    """
+    try:
+        from docx import Document
+        doc = Document(str(target_file))
+        doc.core_properties.title = title
+        doc.core_properties.subject = summary
+        doc.core_properties.keywords = ", ".join(tags)
+        doc.save(str(target_file))
+    except Exception:
+        pass
+
+
+def _write_xlsx_metadata(target_file: Path, title: str, summary: str, tags: list[str]) -> None:
+    """Write metadata to an XLSX file via openpyxl document properties.
+
+    Args:
+        target_file: Path to the XLSX file.
+        title: Title string to write.
+        summary: Description/subject string to write.
+        tags: List of keyword strings to write.
+    """
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(str(target_file))
+        wb.properties.title = title
+        wb.properties.subject = summary
+        wb.properties.keywords = ", ".join(tags)
+        wb.save(str(target_file))
+    except Exception:
+        pass
+
+
+def _write_document_metadata(target_file: Path, asset: dict[str, Any]) -> bool:
+    """Write metadata to a document file using the appropriate format handler.
+
+    Routes to per-format writers (DOCX, XLSX) or skips for formats with
+    no standard metadata support (TXT, MD, RTF).
+
+    Args:
+        target_file: Path to the committed document file.
+        asset: Staged asset dict with tags, summary, staged_name.
+
+    Returns:
+        True if metadata was written, False if skipped or failed.
+    """
+    suffix = target_file.suffix.lower()
+    title = asset['staged_name'].replace("_", " ").replace("-", " ").title()
+
+    if suffix in ('.docx', '.doc'):
+        _write_docx_metadata(target_file, title, asset['summary'], asset['tags'])
+        return True
+    if suffix == '.xlsx':
+        _write_xlsx_metadata(target_file, title, asset['summary'], asset['tags'])
+        return True
+    if suffix in ('.txt', '.md', '.rtf', '.csv', '.pptx'):
+        return False
+    return False
+
+
+def _build_commit_args(asset: dict[str, Any], target_file: Path) -> list[str]:
+    """Build ExifTool argument list for a single asset's metadata.
+
+    Returns an empty list for documents handled by native Python libraries
+    (DOCX, XLSX) or formats with no metadata support (TXT, MD, RTF).
+
+    Args:
+        asset: Staged asset dict with tags, summary, staged_name.
+        target_file: Resolved path to the committed file.
+
+    Returns:
+        List of ExifTool CLI arguments (flags + file path as last element),
+        or empty list if ExifTool should not be used for this file.
+    """
+    tag_string = ", ".join(asset['tags'])
+    summary = asset['summary']
+    title = asset['staged_name'].replace("_", " ").replace("-", " ").title()
+    suffix = target_file.suffix.lower()
+
+    if suffix in DOCUMENT_EXTENSIONS and suffix != '.pdf':
+        return []
+
+    is_video = suffix in VIDEO_EXTENSIONS
+
+    args = [
+        "-overwrite_original",
+        "-api", "LargeFileSupport=1",
+        f"-XMP-dc:Title={title}",
+        f"-XMP-dc:Description={summary}",
+        f"-Microsoft:Category={tag_string}",
+    ]
+    for t in asset['tags']:
+        args.append(f"-XMP-dc:Subject={t}")
+
+    if is_video:
+        args.extend([
+            f"-QuickTime:Title={title}",
+            f"-QuickTime:Description={summary}",
+            f"-QuickTime:Comment={summary}",
+            f"-QuickTime:Keywords={tag_string}",
+            f"-Keys:Description={summary}",
+            f"-Keys:Keywords={tag_string}",
+        ])
+    else:
+        args.extend([
+            f"-EXIF:XPTitle={title}",
+            f"-EXIF:XPKeywords={tag_string}",
+            f"-Description={summary}",
+            f"-Comment={summary}",
+        ] + [f"-Keywords={t}" for t in asset['tags']])
+
+    args.append(str(target_file))
+    return args
+
+
 def execute_commit(
     asset: dict[str, Any],
     target_dir: Path,
     sort_into_folders: bool,
     exiftool_session: Any,
     skip_rename: bool = False,
+    skip_metadata: bool = False,
 ) -> str | Path:
     """Rename/move a staged asset to the target directory and write metadata.
+
+    Routes metadata writing by format: ExifTool for images/video/PDF,
+    native Python libraries for DOCX/XLSX, skip for TXT/MD/RTF/CSV/PPTX.
 
     Args:
         asset: Staged asset dict with original_path, staged_name, category, tags, summary.
@@ -1439,6 +1782,7 @@ def execute_commit(
         sort_into_folders: If True, create a subfolder named after the category.
         exiftool_session: Active ExifToolSession for writing metadata.
         skip_rename: If True, copy instead of rename (keeps original name).
+        skip_metadata: If True, skip all metadata writing.
 
     Returns:
         Relative path to the committed file, or 'ERROR:<message>' on failure.
@@ -1469,46 +1813,91 @@ def execute_commit(
             old_path.rename(new_path)
             target_file = new_path
 
-        tag_string = ", ".join(asset['tags'])
-        summary = asset['summary']
-        title = asset['staged_name'].replace("_", " ").replace("-", " ").title()
-        is_video = suffix in VIDEO_EXTENSIONS
-
-        args = [
-            "-overwrite_original",
-            "-api", "LargeFileSupport=1",
-            f"-XMP-dc:Title={title}",
-            f"-XMP-dc:Description={summary}",
-            f"-Microsoft:Category={tag_string}"
-        ]
-        for t in asset['tags']:
-            args.append(f"-XMP-dc:Subject={t}")
-
-        if is_video:
-            args.extend([
-                f"-QuickTime:Title={title}",
-                f"-QuickTime:Description={summary}",
-                f"-QuickTime:Comment={summary}",
-                f"-QuickTime:Keywords={tag_string}",
-                f"-Keys:Description={summary}",
-                f"-Keys:Keywords={tag_string}"
-            ])
-        else:
-            args.extend([
-                f"-EXIF:XPTitle={title}",
-                f"-EXIF:XPKeywords={tag_string}",
-                f"-Description={summary}",
-                f"-Comment={summary}",
-            ] + [f"-Keywords={t}" for t in asset['tags']])
-
-        args.append(str(target_file))
-        exiftool_session.execute(args)
+        args = _build_commit_args(asset, target_file)
+        if not skip_metadata:
+            if args:
+                exiftool_session.execute(args)
+            else:
+                _write_document_metadata(target_file, asset)
 
         if skip_rename:
             return target_file
         return new_path.relative_to(target_dir)
     except Exception as e:
         return f"ERROR:{e}"
+
+
+def execute_commit_batch(
+    assets: list[dict[str, Any]],
+    target_dir: Path,
+    sort_into_folders: bool,
+    exiftool_session: Any,
+    skip_rename: bool = False,
+    skip_metadata: bool = False,
+) -> list[str | Path]:
+    """Commit multiple assets in a batch with a single ExifTool IPC call.
+
+    Performs file moves/copies, then sends all metadata writes in one
+    -execute block to ExifTool, reducing IPC overhead from ~200ms x N
+    to ~200ms total. Documents use native Python metadata writers.
+
+    Args:
+        assets: List of staged asset dicts.
+        target_dir: Destination directory for file operations.
+        sort_into_folders: Whether to sort committed files into category subfolders.
+        exiftool_session: Active ExifToolSession for writing metadata.
+        skip_rename: If True, copy instead of rename (keeps original name).
+        skip_metadata: If True, skip all metadata writing.
+
+    Returns:
+        List of relative paths or 'ERROR:<message>' strings, one per asset.
+    """
+    prepared: list[tuple[dict[str, Any], Path]] = []
+    results: list[str | Path] = []
+
+    for asset in assets:
+        old_path = asset['original_path']
+        safe_name = asset['staged_name']
+        suffix = old_path.suffix.lower()
+        final_folder = target_dir / asset['category'] if sort_into_folders else target_dir
+        final_folder.mkdir(parents=True, exist_ok=True)
+        new_filename = f"{safe_name}{suffix}"
+        new_path = final_folder / new_filename
+        counter = 1
+        while new_path.exists() and new_path != old_path:
+            new_filename = f"{safe_name}_{counter}{suffix}"
+            new_path = final_folder / new_filename
+            counter += 1
+        try:
+            if skip_rename:
+                final_folder.mkdir(parents=True, exist_ok=True)
+                target_file = final_folder / old_path.name
+                if old_path != target_file:
+                    shutil.copy2(str(old_path), str(target_file))
+            else:
+                old_path.rename(new_path)
+                target_file = new_path
+            prepared.append((asset, target_file))
+        except Exception as exc:
+            results.append(f"ERROR:{exc}")
+
+    all_args = [_build_commit_args(asset, tf) for asset, tf in prepared]
+    if not skip_metadata:
+        exiftool_args = [a for a in all_args if a]
+        if exiftool_args:
+            exiftool_session.execute_batch(exiftool_args)
+        for (asset, tf), file_args in zip(prepared, all_args):
+            if not file_args:
+                _write_document_metadata(tf, asset)
+
+    for asset, target_file in prepared:
+        if skip_rename:
+            results.append(target_file)
+        else:
+            final_folder = target_dir / asset['category'] if sort_into_folders else target_dir
+            results.append(target_file.relative_to(target_dir))
+
+    return results
 
 
 # -----------------------------------------------------------------------------
@@ -1598,26 +1987,172 @@ def load_session(session_path: str | Path) -> dict[str, Any]:
 
 
 # -----------------------------------------------------------------------------
-# 5c. DUPLICATE DETECTION
+# 5c. UNDO / ROLLBACK
+# -----------------------------------------------------------------------------
+
+UNDO_DIR = Path(os.environ.get("APPDATA", Path.home())) / "ai-media-renamer"
+UNDO_LOG_FILE = UNDO_DIR / "undo_log.jsonl"
+
+
+def log_commit_batch(
+    batch_id: str,
+    target_dir: str,
+    records: list[dict[str, Any]],
+) -> Path:
+    """Write a commit batch to the undo log for potential rollback.
+
+    Args:
+        batch_id: Unique identifier for this commit batch (UUID).
+        target_dir: Destination directory the files were committed to.
+        records: List of per-asset dicts with original_path, new_path, category, tags.
+
+    Returns:
+        Path to the undo log file.
+    """
+    UNDO_DIR.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "batch_id": batch_id,
+        "timestamp": datetime.datetime.now().isoformat(),
+        "target_dir": str(target_dir),
+        "records": records,
+    }
+    with open(UNDO_LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+    return UNDO_LOG_FILE
+
+
+def list_undo_batches() -> list[dict[str, Any]]:
+    """Return a list of undoable commit batches (most recent first)."""
+    if not UNDO_LOG_FILE.exists():
+        return []
+    batches = []
+    with open(UNDO_LOG_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    batches.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    return list(reversed(batches))
+
+
+def rollback_last_batch() -> dict[str, Any]:
+    """Revert the most recent commit batch.
+
+    Moves files back to original paths and strips injected metadata.
+
+    Returns:
+        Dict with ok, restored, failed, errors, batch_id keys.
+    """
+    batches = list_undo_batches()
+    if not batches:
+        return {"ok": False, "restored": 0, "failed": 0, "errors": ["No undo batches found"], "batch_id": None}
+
+    batch = batches[0]
+    batch_id = batch["batch_id"]
+    records = batch.get("records", [])
+
+    restored = 0
+    failed = 0
+    errors: list[str] = []
+
+    exif = ExifToolSession()
+
+    for rec in records:
+        orig = Path(rec["original_path"])
+        new = Path(rec["new_path"])
+
+        try:
+            if new.exists():
+                if new != orig:
+                    orig.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(new), str(orig))
+
+                tag_names = rec.get("injected_tags", [])
+                if tag_names:
+                    tag_args = []
+                    for t in tag_names:
+                        tag_args.append(f"-{t}=")
+                    tag_args.append(str(orig))
+                    try:
+                        exif.execute(tag_args)
+                    except Exception:
+                        pass
+
+                restored += 1
+            else:
+                failed += 1
+                errors.append(f"File not found: {new}")
+        except Exception as e:
+            failed += 1
+            errors.append(f"{orig.name}: {e}")
+
+    try:
+        exif.close()
+    except Exception:
+        pass
+
+    remaining = [b for b in batches if b["batch_id"] != batch_id]
+    UNDO_DIR.mkdir(parents=True, exist_ok=True)
+    with open(UNDO_LOG_FILE, "w", encoding="utf-8") as f:
+        for b in reversed(remaining):
+            f.write(json.dumps(b) + "\n")
+
+    return {
+        "ok": failed == 0,
+        "restored": restored,
+        "failed": failed,
+        "errors": errors,
+        "batch_id": batch_id,
+    }
+
+
+# -----------------------------------------------------------------------------
+# 5d. DUPLICATE DETECTION
 # -----------------------------------------------------------------------------
 
 def compute_asset_hash(file_path: str | Path) -> str | None:
-    """Compute perceptual hash for an asset. For images, hashes directly.
-    For videos, extracts the midpoint frame and hashes that."""
-    try:
-        import imagehash
-        from PIL import Image
-    except ImportError:
-        return None
-
+    """Compute hash for an asset. For images/videos, returns perceptual hash (pHash).
+    For documents, returns SHA-256 of content. Returns None on failure."""
     path = Path(file_path)
     suffix = path.suffix.lower()
 
     if suffix in VIDEO_EXTENSIONS:
-        return _compute_video_hash(path, imagehash)
-    elif suffix in IMAGE_EXTENSIONS:
-        return _compute_image_hash(path, imagehash, Image)
+        try:
+            import imagehash as _ih
+        except ImportError:
+            return None
+        h = _compute_video_hash(path, _ih)
+        return f"phash:{h}" if h else None
+
+    if suffix in IMAGE_EXTENSIONS:
+        try:
+            import imagehash as _ih
+        except ImportError:
+            return None
+        h = _compute_image_hash(path, _ih, None)
+        return f"phash:{h}" if h else None
+
+    if suffix in DOCUMENT_EXTENSIONS:
+        return _compute_document_hash(path)
+
     return None
+
+
+def _compute_document_hash(path: Path) -> str | None:
+    """Compute SHA-256 hash for a document file.
+    For text-based files under 1MB, hashes extracted text for finer dedup.
+    For larger or binary files, hashes raw bytes."""
+    try:
+        text_suffixes = {'.txt', '.md', '.rtf'}
+        if path.suffix.lower() in text_suffixes and path.stat().st_size <= 1_048_576:
+            text = extract_text_from_file(path)
+            if text:
+                return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
+        return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+    except Exception:
+        return None
 
 
 def _compute_image_hash(path: Path, imagehash: Any, pil_image: Any) -> str | None:
@@ -1666,25 +2201,38 @@ def _compute_video_hash(path: Path, imagehash: Any) -> str | None:
 
 def find_duplicates(staged_assets: list[dict[str, Any]], threshold: int = 10) -> list[dict[str, Any]]:
     """Compare all staged assets pairwise. Returns list of duplicate pairs.
-    threshold: Hamming distance threshold (0-64). Lower = stricter match.
-    Default 10 means ~84% similarity required."""
+    threshold: Hamming distance threshold for pHash (0-64). Lower = stricter match.
+    Default 10 means ~84% similarity required. For SHA-256, exact match only."""
     try:
         import imagehash as _ih
     except ImportError:
-        return []
+        _ih = None
 
-    hashes = {}
+    raw_hashes: dict[int, str] = {}
     for i, asset in enumerate(staged_assets):
         h = compute_asset_hash(asset["original_path"])
         if h:
-            hashes[i] = _ih.hex_to_hash(h)
+            raw_hashes[i] = h
 
-    duplicates = []
-    indices = sorted(hashes.keys())
-    for i in range(len(indices)):
-        for j in range(i + 1, len(indices)):
-            idx_a, idx_b = indices[i], indices[j]
-            dist = hashes[idx_a] - hashes[idx_b]
+    phash_entries: dict[int, Any] = {}
+    sha256_entries: dict[int, str] = {}
+
+    for idx, h in raw_hashes.items():
+        if h.startswith("phash:") and _ih is not None:
+            try:
+                phash_entries[idx] = _ih.hex_to_hash(h[6:])
+            except Exception:
+                pass
+        elif h.startswith("sha256:"):
+            sha256_entries[idx] = h[7:]
+
+    duplicates: list[dict[str, Any]] = []
+
+    phash_indices = sorted(phash_entries.keys())
+    for i in range(len(phash_indices)):
+        for j in range(i + 1, len(phash_indices)):
+            idx_a, idx_b = phash_indices[i], phash_indices[j]
+            dist = phash_entries[idx_a] - phash_entries[idx_b]
             if dist <= threshold:
                 confidence = max(0, round((1 - dist / 64) * 100))
                 duplicates.append({
@@ -1692,8 +2240,24 @@ def find_duplicates(staged_assets: list[dict[str, Any]], threshold: int = 10) ->
                     "index_b": idx_b,
                     "name_a": staged_assets[idx_a]["original_name"],
                     "name_b": staged_assets[idx_b]["original_name"],
+                    "hash_type": "phash",
                     "distance": dist,
                     "confidence": confidence,
+                })
+
+    sha256_indices = sorted(sha256_entries.keys())
+    for i in range(len(sha256_indices)):
+        for j in range(i + 1, len(sha256_indices)):
+            idx_a, idx_b = sha256_indices[i], sha256_indices[j]
+            if sha256_entries[idx_a] == sha256_entries[idx_b]:
+                duplicates.append({
+                    "index_a": idx_a,
+                    "index_b": idx_b,
+                    "name_a": staged_assets[idx_a]["original_name"],
+                    "name_b": staged_assets[idx_b]["original_name"],
+                    "hash_type": "sha256",
+                    "distance": 0,
+                    "confidence": 100,
                 })
 
     return duplicates
@@ -1768,6 +2332,7 @@ def check_environment() -> dict[str, Any]:
     exiftool_path = _resolve_binary_path("exiftool")
     ollama_running = False
     model_available = False
+    vision_models: list[str] = []
     errors = []
 
     if not ffmpeg_path:
@@ -1781,10 +2346,15 @@ def check_environment() -> dict[str, Any]:
         ollama_running = True
         models = tags.get('models', [])
         for m in models:
-            name = m.get('name', '') if isinstance(m, dict) else str(m)
-            if 'qwen2.5vl' in name:
+            if isinstance(m, dict):
+                name = m.get('name', '')
+            elif hasattr(m, 'model'):
+                name = m.model
+            else:
+                name = str(m)
+            if _is_vision_model(name):
+                vision_models.append(name)
                 model_available = True
-                break
     except Exception:
         ollama_running = False
         errors.append("Ollama is not running. Start Ollama and try again.")
@@ -1796,6 +2366,7 @@ def check_environment() -> dict[str, Any]:
         "exiftool": bool(exiftool_path),
         "ollama_running": ollama_running,
         "model_available": model_available,
+        "vision_models": vision_models,
         "cloud_configured": cloud_configured,
         "errors": errors,
     }
@@ -1965,7 +2536,7 @@ def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[st
     if not env["ollama_running"]:
         return {"ok": False, "require_download": False, "message": "Ollama is not running. Start Ollama first."}
     if not env["model_available"]:
-        return {"ok": False, "require_download": True, "message": "Model qwen2.5vl:7b not found. Download required."}
+        return {"ok": False, "require_download": True, "message": "No vision model found. Download required."}
     return {"ok": True, "message": "Switched to local Ollama."}
 
 

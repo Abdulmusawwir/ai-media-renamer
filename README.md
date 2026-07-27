@@ -24,7 +24,7 @@ Grab the latest `AIMediaRenamer.exe` from the [Releases page](https://github.com
 ## Features
 
 ### AI Analysis
-- **7 prompt profiles** — General, B-Roll, Cinematography, Motion & Overlays, Religious Landmarks, and Custom
+- **7 prompt profiles** — General, B-Roll, Cinematography, Motion & Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming, and Custom
 - **6 AI providers** — Ollama (local), Gemini, OpenAI, Anthropic, Groq, OpenRouter
 - **Single-frame extraction** — one representative frame per video for accurate analysis
 - **Image analysis** — downscaled in memory, no disk writes
@@ -93,6 +93,10 @@ See [README_TECH.md](README_TECH.md#cli-reference) for the full flag reference.
 1. Install prerequisites: [Ollama](https://ollama.com) + vision model (`ollama pull qwen2.5vl:7b`), [ExifTool 12+](https://exiftool.org), [FFmpeg 6+](https://ffmpeg.org)
 2. `pip install -r requirements.txt`
 3. `streamlit run app.py`
+
+### Docker
+
+Run `docker compose up` for a fully containerized setup (includes Ollama + GPU passthrough).
 
 ---
 

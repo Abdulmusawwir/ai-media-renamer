@@ -26,6 +26,7 @@ from engine import (
     flush_telemetry,
     import_staging_csv,
     is_already_processed,
+    log_commit_batch,
     log_event,
     normalize_category,
     process_image_to_base64,
@@ -335,6 +336,7 @@ def process_library(
                 "topic": topic,
                 "description": description,
                 "base64_data": base64_img,
+                "audio_transcription": "",
             })
 
             if template_string:
@@ -568,12 +570,37 @@ def _commit_all(
                     log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
                               details={"new_path": str(final_rel_path), "category": asset['category']})
                     committed_count += 1
+                    new_path_resolved = target_dir / str(final_rel_path)
+                    injected_tags = [
+                        "XMP-dc:Title", "XMP-dc:Description", "Microsoft:Category", "XMP-dc:Subject",
+                    ]
+                    if asset["original_path"].suffix.lower() in VIDEO_EXTENSIONS:
+                        injected_tags += [
+                            "QuickTime:Title", "QuickTime:Description", "QuickTime:Comment",
+                            "QuickTime:Keywords", "Keys:Description", "Keys:Keywords",
+                        ]
+                    else:
+                        injected_tags += [
+                            "EXIF:XPTitle", "EXIF:XPKeywords", "Description", "Comment", "Keywords",
+                        ]
+                    undo_records.append({
+                        "original_path": str(asset["original_path"]),
+                        "new_path": str(new_path_resolved),
+                        "original_name": asset["original_name"],
+                        "new_name": asset["staged_name"],
+                        "category": asset["category"],
+                        "tags": asset.get("tags", []),
+                        "injected_tags": injected_tags,
+                    })
                 else:
                     log_event(logger, "ERROR", "file_commit_failed", file_name=asset['original_name'])
                 if _show_progress:
                     progress.update(task, advance=1, description=f"Committing {asset['original_name']}...")
 
     committed_count = 0
+    import uuid as _uuid
+    batch_id = str(_uuid.uuid4())[:12]
+    undo_records: list[dict] = []
     if _show_progress:
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
                       BarColumn(), TaskProgressColumn()) as progress:
@@ -588,6 +615,8 @@ def _commit_all(
     log_event(logger, "INFO", "session_end", details={
         "committed": committed_count, "total": len(staged_assets), "mode": "batch"
     })
+    if undo_records:
+        log_commit_batch(batch_id, str(target_dir), undo_records)
     track_event("cli_session_completed", {
         "committed": committed_count,
         "total": len(staged_assets),
@@ -631,6 +660,9 @@ def _interactive_commit(
     committed_count = 0
     skipped_count = 0
     reanalyzed_count = 0
+    import uuid as _uuid
+    batch_id = str(_uuid.uuid4())[:12]
+    undo_records: list[dict] = []
 
     for idx, asset in enumerate(staged_assets, 1):
         print("\n" + "-" * 70)
@@ -662,6 +694,21 @@ def _interactive_commit(
                 log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
                           details={"new_path": str(final_rel_path), "category": asset['category']})
                 committed_count += 1
+                injected_tags = ["XMP-dc:Title", "XMP-dc:Description", "Microsoft:Category", "XMP-dc:Subject"]
+                if asset["original_path"].suffix.lower() in VIDEO_EXTENSIONS:
+                    injected_tags += ["QuickTime:Title", "QuickTime:Description", "QuickTime:Comment",
+                                      "QuickTime:Keywords", "Keys:Description", "Keys:Keywords"]
+                else:
+                    injected_tags += ["EXIF:XPTitle", "EXIF:XPKeywords", "Description", "Comment", "Keywords"]
+                undo_records.append({
+                    "original_path": str(asset["original_path"]),
+                    "new_path": str(target_dir / str(final_rel_path)),
+                    "original_name": asset["original_name"],
+                    "new_name": asset["staged_name"],
+                    "category": asset["category"],
+                    "tags": asset.get("tags", []),
+                    "injected_tags": injected_tags,
+                })
 
         elif sub_choice in ('s', 'skip', 'n', 'no'):
             print("  Asset skipped.")
@@ -722,6 +769,21 @@ def _interactive_commit(
                     log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
                               details={"new_path": str(final_rel_path), "category": asset['category']})
                     committed_count += 1
+                    injected_tags = ["XMP-dc:Title", "XMP-dc:Description", "Microsoft:Category", "XMP-dc:Subject"]
+                    if asset["original_path"].suffix.lower() in VIDEO_EXTENSIONS:
+                        injected_tags += ["QuickTime:Title", "QuickTime:Description", "QuickTime:Comment",
+                                          "QuickTime:Keywords", "Keys:Description", "Keys:Keywords"]
+                    else:
+                        injected_tags += ["EXIF:XPTitle", "EXIF:XPKeywords", "Description", "Comment", "Keywords"]
+                    undo_records.append({
+                        "original_path": str(asset["original_path"]),
+                        "new_path": str(target_dir / str(final_rel_path)),
+                        "original_name": asset["original_name"],
+                        "new_name": asset["staged_name"],
+                        "category": asset["category"],
+                        "tags": asset.get("tags", []),
+                        "injected_tags": injected_tags,
+                    })
             else:
                 print(f"  [DRY RUN] Would commit: {asset['original_name']} -> {asset['staged_name']}")
 
@@ -742,6 +804,21 @@ def _interactive_commit(
                     log_event(logger, "INFO", "file_committed", file_name=asset['original_name'],
                               details={"new_path": str(final_rel_path), "category": safe_bulk})
                     committed_count += 1
+                    injected_tags = ["XMP-dc:Title", "XMP-dc:Description", "Microsoft:Category", "XMP-dc:Subject"]
+                    if asset["original_path"].suffix.lower() in VIDEO_EXTENSIONS:
+                        injected_tags += ["QuickTime:Title", "QuickTime:Description", "QuickTime:Comment",
+                                          "QuickTime:Keywords", "Keys:Description", "Keys:Keywords"]
+                    else:
+                        injected_tags += ["EXIF:XPTitle", "EXIF:XPKeywords", "Description", "Comment", "Keywords"]
+                    undo_records.append({
+                        "original_path": str(asset["original_path"]),
+                        "new_path": str(target_dir / str(final_rel_path)),
+                        "original_name": asset["original_name"],
+                        "new_name": asset["staged_name"],
+                        "category": asset["category"],
+                        "tags": asset.get("tags", []),
+                        "injected_tags": injected_tags,
+                    })
             else:
                 print("  Invalid category name, skipping.")
 
@@ -764,6 +841,21 @@ def _interactive_commit(
                                   "custom_name": clean_override,
                               })
                     committed_count += 1
+                    injected_tags = ["XMP-dc:Title", "XMP-dc:Description", "Microsoft:Category", "XMP-dc:Subject"]
+                    if asset["original_path"].suffix.lower() in VIDEO_EXTENSIONS:
+                        injected_tags += ["QuickTime:Title", "QuickTime:Description", "QuickTime:Comment",
+                                          "QuickTime:Keywords", "Keys:Description", "Keys:Keywords"]
+                    else:
+                        injected_tags += ["EXIF:XPTitle", "EXIF:XPKeywords", "Description", "Comment", "Keywords"]
+                    undo_records.append({
+                        "original_path": str(asset["original_path"]),
+                        "new_path": str(target_dir / str(final_rel_path)),
+                        "original_name": asset["original_name"],
+                        "new_name": asset["staged_name"],
+                        "category": asset["category"],
+                        "tags": asset.get("tags", []),
+                        "injected_tags": injected_tags,
+                    })
             else:
                 print("Invalid string input. Asset skipped.")
 
@@ -771,6 +863,8 @@ def _interactive_commit(
         "committed": committed_count, "skipped": skipped_count,
         "reanalyzed": reanalyzed_count, "total": len(staged_assets), "mode": "interactive"
     })
+    if undo_records:
+        log_commit_batch(batch_id, str(target_dir), undo_records)
     track_event("cli_session_completed", {
         "committed": committed_count,
         "skipped": skipped_count,
@@ -891,10 +985,25 @@ if __name__ == "__main__":
         help="Disable progress bars (for pipe-friendly output)."
     )
     parser.add_argument(
+        "--rollback", action="store_true",
+        help="Undo the last commit batch: move files back to original locations."
+    )
+    parser.add_argument(
         "--reset-config", action="store_true",
         help="Reset config.json to factory defaults and exit."
     )
     args = parser.parse_args()
+
+    if args.rollback:
+        from engine import rollback_last_batch as _rollback
+        result = _rollback()
+        if result["ok"]:
+            print(f"Restored {result['restored']} files to original locations.")
+        else:
+            print(f"Restored {result['restored']}, failed {result['failed']}.")
+            for err in result["errors"][:5]:
+                print(f"  - {err}")
+        sys.exit(0 if result["ok"] else 1)
 
     if args.reset_config:
         if restore_default_config():

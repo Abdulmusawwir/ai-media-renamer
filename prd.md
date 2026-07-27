@@ -37,27 +37,31 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] Drag-and-drop file upload via browser (Streamlit file uploader)
 - [x] Support video formats: MP4, MOV, AVI, MKV, WebM
 - [x] Support image formats: JPG, JPEG, PNG, WebP, GIF
+- [x] Support document formats: PDF, DOCX, XLSX, CSV, PPTX, TXT, MD, RTF (text extraction, no frame extraction)
 - [x] Eager file saving to temp directory (files survive Streamlit reruns)
 - [x] "Clear All Files" button to reset upload state
 - [x] Progress indicator during upload / file copy
-- [ ] `--include-subdirectories` flag for CLI scanning
+- [x] `--include-subdirectories` flag for CLI scanning
 
 ### AI Analysis Pipeline
 - [x] Phase 1 — Parallel FFmpeg frame extraction with hardware acceleration detection (NVIDIA, Intel QSV, AMF, CPU fallback)
 - [x] High-resolution image downscaling in memory (1024px max edge, no temp files)
 - [x] Single frame extraction (midpoint, fast-seeking via ffmpeg)
 - [x] Phase 2 — Sequential AI analysis via Ollama vision model (qwen2.5vl:7b)
+- [x] Model selection wizard for first-time users (Qwen2.5-VL 3B/7B, Qwen3-VL 4B, Moondream)
 - [x] Per-asset rerun loop: one AI call per script execution, advanced via `st.rerun()`
 - [x] Structured AI response parsing with typed error handling
+- [x] Pydantic structured outputs — response schema for AI, `response_format` for cloud providers, retry with fallback
 - [x] Configurable AI prompt with cinematography analysis (shot type, camera movement, lighting, color palette, composition, mood)
 - [x] 40-category taxonomy validation — invalid suggestions fall back to uncategorized
 - [x] Stop Analysis button (immediate abort, preserves already-analyzed assets)
 - [x] Progress bar during extraction and analysis phases
-- [x] 6 AI prompt profiles (General Balanced, General B-Roll, Cinematography, Motion Overlays, Religious Landmarks, Custom) — selectable in web UI (main interface, before analysis) and CLI via `--profile`
+- [x] 7 AI prompt profiles (General Balanced, General B-Roll, Cinematography, Motion Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming) + Custom — selectable in web UI (main interface, before analysis) and CLI via `--profile`
 - [x] Multi-provider AI support (Ollama, OpenAI, Anthropic, Groq, OpenRouter) with provider abstraction layer — cloud providers disabled in UI, untested
 - [x] Auto-detect available Ollama models via `ollama.list()` and populate dropdown
 - [x] "Re-analyze Selected" button (replaced per-asset + Re-analyze All buttons)
 - [x] Ollama health check with status indicator in web UI
+- [x] Audio transcription via `faster-whisper` — extract audio track from video, transcribe locally, feed into text analysis pipeline
 
 ### Boot Diagnostics & Environment Lifecycle
 - [x] 4-Stage Bootstrap Checklist on app startup (Core utilities, Ollama daemon, model manifest, cloud config)
@@ -89,6 +93,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] EXIF tags for images: `ImageDescription`, `UserComment`, `XPKeywords`, IPTC `Keywords`
 - [x] Commit success message persists across reruns
 - [x] Default output directory: `~/Desktop/RenamedMedia`
+- [x] Undo/rollback engine — `undo_log.jsonl`, `--rollback` CLI flag, UI button in Analytics tab
 
 ### Analytics & Logging
 - [x] Auto-refreshing analytics dashboard (every 10 seconds)
@@ -109,7 +114,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 
 ### Configuration
 - [x] Single `config.json` as source of truth for all tunable parameters
-- [x] Configurable: 6 AI prompt profiles, 40 categories, model/ provider settings, extensions, preview params, naming templates, logging limits
+- [x] Configurable: 7 AI prompt profiles, 40 categories, model/ provider settings, extensions, preview params, naming templates, logging limits
 - [x] No hardcoded constants in Python code
 - [x] Config editor tab (read-only + editable modes) in web UI
 - [x] In-app category management (add/delete/rename categories via UI)
@@ -128,7 +133,9 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - **Plugin / extensibility system** — No hook system for custom metadata sources, naming rules, or output formats.
 - **Face / object / scene detection** — AI analyzes the full visual context but does not detect specific faces, identify objects, or segment scenes.
 - **AI-generated content detection** — No reliable way to detect AI content from frame analysis alone.
-- **Subtitle/audio track analysis** — Frame extraction only; no audio stream processing.
+- **Watch folders / automation** — No folder monitoring or auto-processing. Manual trigger via CLI or web UI.
+- **NLE XML exports** — No DaVinci Resolve CSV or FCPXML export. Users rely on OS-level file tags and NLE metadata panel.
+- **Cloud API parallelization** — Cloud providers (OpenAI, Anthropic, etc.) are implemented but disabled/untested. Parallel analysis for cloud is deferred until providers are validated.
 
 ## Core Tech Stack & Assumptions
 
@@ -147,10 +154,11 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 | **OS** | Windows 10/11 | Primary target (NLE ecosystem). Linux/macOS secondary (compatible but untested) |
 
 ### Assumptions
-- **AI provider available.** For Ollama/LM Studio: app must be running locally. For OpenAI/Anthropic: valid API key required. Auto-detection of available Ollama models at startup.
-- **ExifTool and FFmpeg are in `PATH`.** Not bundled. Users install them independently.
+- **AI provider available.** For Ollama/LM Studio: app must be running locally. For OpenAI/Anthropic: valid API key required. Auto-detection of available Ollama models at startup. First-time users can select from 4 model options with size/quality tradeoff descriptions.
+- **ExifTool and FFmpeg are in `PATH`.** Not bundled. Users install them independently. The EXE bundles both.
 - **Single user per session.** No state shared between browser tabs or users.
 - **Files are under 4 GB typical.** `LargeFileSupport=1` is enabled in ExifTool args for oversized files, but very large files (>10 GB) may cause longer processing times.
 - **Network reliability for Ollama.** AI inference runs over localhost HTTP; transient failures are retried once.
 - **No concurrent file modification.** The app assumes exclusive access to files during the commit phase. External modifications during processing may cause `PermissionError`.
 - **Windows file system.** Paths use backslashes, `PermissionError` is the primary failure mode (locked by Explorer preview pane), `Path.rename()` works within the same drive only.
+- **Privacy-first audio.** Audio transcription runs locally via `faster-whisper` (CTranslate2). No cloud API calls for audio processing.

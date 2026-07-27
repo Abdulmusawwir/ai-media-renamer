@@ -257,6 +257,149 @@ def _log(msg):
         pass
 
 
+MODEL_CATALOG = [
+    {
+        "name": "qwen2.5vl:7b",
+        "label": "Qwen 2.5 VL 7B",
+        "size": "6.0 GB",
+        "quality": "Best",
+        "speed": "Moderate",
+        "desc": "Recommended. Best quality for structured JSON extraction and visual analysis.",
+        "recommended": True,
+    },
+    {
+        "name": "qwen2.5vl:3b",
+        "label": "Qwen 2.5 VL 3B",
+        "size": "3.2 GB",
+        "quality": "Good",
+        "speed": "Fast",
+        "desc": "Lighter model. Good quality, faster analysis. Suitable for 4-6 GB VRAM.",
+        "recommended": False,
+    },
+    {
+        "name": "qwen3-vl:4b",
+        "label": "Qwen 3 VL 4B",
+        "size": "~3 GB",
+        "quality": "Good",
+        "speed": "Fast",
+        "desc": "Newer architecture. Good quality with improved reasoning. 4+ GB VRAM.",
+        "recommended": False,
+    },
+    {
+        "name": "moondream:latest",
+        "label": "Moondream 2",
+        "size": "1.8 GB",
+        "quality": "Basic",
+        "speed": "Very fast",
+        "desc": "Smallest option. Basic visual understanding. For very low VRAM (2 GB).",
+        "recommended": False,
+    },
+]
+
+
+class ModelSelectionDialog:
+    """Tkinter modal dialog for choosing an AI model during first-time setup."""
+
+    def __init__(self, parent, already_installed: bool = False):
+        self.result: str | None = None
+        self.already_installed = already_installed
+
+        self.top = tk.Toplevel(parent)
+        self.top.title("Select AI Model")
+        self.top.geometry("520x480")
+        self.top.configure(bg=BG)
+        self.top.resizable(False, False)
+        self.top.transient(parent)
+        self.top.grab_set()
+        self.top.protocol("WM_DELETE_WINDOW", self._on_skip)
+
+        self._center(parent)
+
+        heading = "AI Model Already Installed" if already_installed else "Choose an AI Model"
+        tk.Label(self.top, text=heading, font=FONT_TITLE, bg=BG, fg=FG).pack(pady=(18, 2))
+
+        sub = "A vision model was found. You can switch or keep the current one."
+        if not already_installed:
+            sub = "Select a model to download. Larger models produce better results."
+        tk.Label(self.top, text=sub, font=("Segoe UI", 9), bg=BG, fg="#aaaaaa").pack(pady=(0, 10))
+
+        self._var = tk.StringVar(value="qwen2.5vl:7b")
+
+        container = tk.Frame(self.top, bg=BG)
+        container.pack(fill="x", padx=30, pady=(0, 6))
+
+        for m in MODEL_CATALOG:
+            self._add_option(container, m)
+
+        btn_frame = tk.Frame(self.top, bg=BG)
+        btn_frame.pack(pady=(8, 16))
+
+        if already_installed:
+            tk.Button(btn_frame, text="Keep Current", font=("Segoe UI", 10),
+                      bg="#333333", fg=FG, relief="flat", padx=14, pady=4,
+                      cursor="hand2", command=self._on_skip).pack(side="left", padx=(0, 10))
+
+        tk.Button(btn_frame, text="Download" if not already_installed else "Switch Model",
+                  font=("Segoe UI", 10, "bold"), bg=ACCENT, fg="white",
+                  relief="flat", padx=14, pady=4, cursor="hand2",
+                  command=self._on_confirm).pack(side="left")
+
+    def _add_option(self, parent, m):
+        row = tk.Frame(parent, bg=BAR_BG, highlightbackground="#444444",
+                       highlightthickness=1, cursor="hand2")
+        row.pack(fill="x", pady=3)
+
+        rb = tk.Radiobutton(row, variable=self._var, value=m["name"],
+                            bg=BAR_BG, fg=FG, selectcolor=BG,
+                            activebackground=BAR_BG, activeforeground=FG,
+                            indicatoron=False, width=2, anchor="w")
+        rb.pack(side="left", padx=(6, 0), pady=6)
+
+        info = tk.Frame(row, bg=BAR_BG)
+        info.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=6)
+
+        badge = f"  \u2605 Recommended" if m["recommended"] else ""
+        quality_color = GREEN if m["quality"] == "Best" else ACCENT if m["quality"] == "Good" else "#aaaaaa"
+
+        header_text = f'{m["label"]}  ({m["size"]})'
+        tk.Label(info, text=header_text, font=FONT_BOLD, bg=BAR_BG, fg=FG,
+                 anchor="w").pack(fill="x")
+        tk.Label(info, text=m["desc"], font=("Segoe UI", 8), bg=BAR_BG,
+                 fg="#aaaaaa", anchor="w", wraplength=380, justify="left").pack(fill="x")
+
+        tags = tk.Frame(info, bg=BAR_BG)
+        tags.pack(fill="x", pady=(2, 0))
+        for tag_text, color in [("Quality: " + m["quality"], quality_color),
+                                ("Speed: " + m["speed"], "#aaaaaa")]:
+            tk.Label(tags, text=tag_text, font=("Segoe UI", 8, "bold"),
+                     bg=BAR_BG, fg=color, anchor="w").pack(side="left", padx=(0, 12))
+        if badge:
+            tk.Label(tags, text=badge, font=("Segoe UI", 8, "bold"),
+                     bg=BAR_BG, fg="#f59e0b", anchor="w").pack(side="left")
+
+        for w in (row, info, tags):
+            for child in w.winfo_children():
+                child.bind("<Button-1>", lambda e, v=m["name"]: self._var.set(v))
+
+    def _center(self, parent):
+        self.top.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_x()
+        py = parent.winfo_y()
+        w = self.top.winfo_width()
+        h = self.top.winfo_height()
+        self.top.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
+
+    def _on_confirm(self):
+        self.result = self._var.get()
+        self.top.destroy()
+
+    def _on_skip(self):
+        self.result = None
+        self.top.destroy()
+
+
 def main():
     _log(f"main() argv={sys.argv} frozen={getattr(sys, 'frozen', False)}")
 
@@ -413,6 +556,8 @@ def main():
         win.update()
 
         # ---- Step 4: AI Model ----
+        selected_model = "qwen2.5vl:7b"
+
         def _vision_model_installed():
             try:
                 import ollama as _ollama
@@ -430,13 +575,36 @@ def main():
                 pass
             return False
 
-        if _vision_model_installed():
-            win.set_step(4, "\u2713 AI model (qwen2.5vl:7b)... found")
+        already_installed = _vision_model_installed()
+
+        if already_installed:
+            win.set_step(4, "\u2713 AI model found")
             win.set_progress(100)
             win.set_info("")
+            win.update()
+
+            dlg = ModelSelectionDialog(win.root, already_installed=True)
+            win.root.wait_window(dlg.top)
+
+            if dlg.result:
+                selected_model = dlg.result
+                _log(f"User chose to switch to model: {selected_model}")
+                _stream_model_with_progress(win, 4,
+                                            f"Downloading {selected_model}...",
+                                            selected_model)
+            else:
+                _log("User kept current model")
         else:
-            _stream_model_with_progress(win, 4, "Downloading AI model (qwen2.5vl:7b)...",
-                                        "qwen2.5vl:7b")
+            dlg = ModelSelectionDialog(win.root, already_installed=False)
+            win.root.wait_window(dlg.top)
+
+            selected_model = dlg.result or "qwen2.5vl:7b"
+            _log(f"User selected model: {selected_model}")
+            _stream_model_with_progress(win, 4,
+                                        f"Downloading {selected_model}...",
+                                        selected_model)
+
+        os.environ["SELECTED_MODEL"] = selected_model
         win.update()
 
         # ---- Step 5: Update check ----

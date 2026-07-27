@@ -49,6 +49,7 @@ from engine import (
     find_duplicates,
     flush_telemetry,
     get_active_profile,
+    get_active_prompt,
     get_provider,
     import_staging_csv,
     list_providers,
@@ -75,6 +76,12 @@ from engine import (
     truncate_filename,
     validate_category,
     wipe_local_model,
+    log_commit_batch,
+    rollback_last_batch,
+    list_undo_batches,
+    extract_audio_from_video,
+    _has_audio_track,
+    transcribe_audio,
 )
 
 _ICON_PATH = Path(sys._MEIPASS) / "icon.ico" if getattr(sys, "frozen", False) else Path(__file__).parent / "icon.ico"
@@ -233,6 +240,9 @@ if "base64_cache" not in st.session_state:
 
 if "text_cache" not in st.session_state:
     st.session_state.text_cache = {}
+
+if "audio_transcription_cache" not in st.session_state:
+    st.session_state.audio_transcription_cache = {}
 
 if "hw_accel" not in st.session_state:
     st.session_state.hw_accel = None
@@ -479,15 +489,21 @@ with st.sidebar:
     if env:
         if new_provider == "ollama":
             for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool"),
-                               ("ollama_running", "Ollama Daemon"), ("model_available", "Qwen2.5-VL Model")]:
+                               ("ollama_running", "Ollama Daemon"), ("model_available", "Vision Model")]:
                 ok = env.get(key, False)
                 status = "green" if ok else "red"
                 st.badge(label, color=status)
 
-            if not env.get("ollama_running"):
+            vision_models = env.get("vision_models", [])
+            if vision_models:
+                names = ", ".join(vision_models[:3])
+                if len(vision_models) > 3:
+                    names += f" (+{len(vision_models) - 3} more)"
+                st.caption(f"Installed: {names}")
+            elif not env.get("ollama_running"):
                 st.error("Ollama is not running. Start Ollama and click Refresh.")
             elif not env.get("model_available"):
-                st.info("Qwen2.5-VL model not downloaded yet.")
+                st.info("No vision model installed yet.")
         else:
             for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool")]:
                 ok = env.get(key, False)
@@ -524,7 +540,7 @@ with st.sidebar:
         temp_dir = st.session_state.get("temp_dir")
         if temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)
-        reset_keys = ["base64_cache", "text_cache", "staged_assets", "analysis_done", "uploaded_files",
+        reset_keys = ["base64_cache", "text_cache", "audio_transcription_cache", "staged_assets", "analysis_done", "uploaded_files",
                       "temp_dir", "output_dir", "logger", "analysis_in_progress",
                       "analysis_index", "analysis_aborted", "clear_counter",
                       "analysis_errors"]
@@ -539,7 +555,7 @@ with st.sidebar:
         st.rerun()
 
     if new_provider == "ollama" and env and env.get("ollama_running") and not env.get("model_available"):
-        if st.button(":material/download: Download Qwen2.5-VL Model", type="primary", key="download_model"):
+        if st.button(":material/download: Download Vision Model", type="primary", key="download_model"):
             st.session_state.model_downloading = True
             st.rerun()
 
@@ -559,10 +575,11 @@ if env and env.get("errors"):
         st.stop()
 
 if st.session_state.model_downloading:
-    with st.status("Downloading Qwen2.5-VL Model", expanded=True) as download_status:
+    download_model = st.session_state.get("download_model_name", "qwen2.5vl:7b")
+    with st.status(f"Downloading {download_model}", expanded=True) as download_status:
         progress_bar = st.progress(0)
         status_text = st.empty()
-        st.caption("Model is ~5.9 GB. Download progress updates every few seconds.")
+        st.caption("Model download progress updates every few seconds.")
         if st.button(":material/cancel: Cancel Download", key="cancel_download",
                      help="Cancels UI polling — Ollama download continues in background"):
             st.session_state.model_downloading = False
@@ -571,7 +588,7 @@ if st.session_state.model_downloading:
 
         gen = st.session_state.model_download_gen
         if gen is None:
-            gen = stream_model_download("qwen2.5vl:7b")
+            gen = stream_model_download(download_model)
             st.session_state.model_download_gen = gen
 
         try:
@@ -727,6 +744,7 @@ with tab_upload:
             st.session_state.staged_assets = []
             st.session_state.base64_cache = {}
             st.session_state.text_cache = {}
+            st.session_state.audio_transcription_cache = {}
             track_event("files_uploaded", {
                 "file_count": len(saved),
                 "video_count": sum(1 for n in saved if Path(n).suffix.lower() in VIDEO_EXTENSIONS),
@@ -794,6 +812,7 @@ with tab_upload:
                         st.session_state.analysis_index = 0
                         st.session_state.base64_cache = {}
                         st.session_state.text_cache = {}
+                        st.session_state.audio_transcription_cache = {}
                         if not result["staged_assets"] and result["missing_files"]:
                             st.warning(f"All {len(result['missing_files'])} file(s) missing from disk. "
                                        "Session restored with no assets. Re-upload files and re-analyze.",
@@ -854,7 +873,14 @@ with tab_upload:
                     if file_type == "text":
                         ai_result = prov.analyze_text(data, verbose=False)
                     else:
-                        ai_result = prov.analyze(data, verbose=False)
+                        audio_ctx = st.session_state.get("audio_transcription_cache", {}).get(name, "")
+                        prompt_override = None
+                        if audio_ctx:
+                            prompt_override = (
+                                f"Audio transcription (if available):\n{audio_ctx}\n\n---\n\n"
+                                f"{get_active_prompt()}"
+                            )
+                        ai_result = prov.analyze(data, verbose=False, prompt_override=prompt_override)
 
                     if ai_result['ok']:
                         ai_data = ai_result['data']
@@ -885,6 +911,7 @@ with tab_upload:
                             "suggested_category": suggested_cat,
                             "file_type": "document" if file_ext in DOCUMENT_EXTENSIONS else "media",
                             "file_ext": file_ext,
+                            "audio_transcription": st.session_state.get("audio_transcription_cache", {}).get(name, ""),
                         })
                         st.session_state.staged_assets = staged_assets
 
@@ -1083,8 +1110,34 @@ with tab_upload:
                     st.error("No files could be extracted. Aborting.")
                     st.stop()
 
+                audio_results = dict(st.session_state.get("audio_transcription_cache", {}))
+                video_files = [fp for fp in uncached
+                               if fp.suffix.lower() in VIDEO_EXTENSIONS and fp.name not in audio_results]
+                if video_files:
+                    audio_progress = st.progress(0, text="Extracting audio transcriptions...")
+                    for i, fp in enumerate(video_files):
+                        audio_progress.progress(
+                            i / max(len(video_files), 1),
+                            text=f"Transcribing {fp.name} ({i+1}/{len(video_files)})"
+                        )
+                        if _has_audio_track(fp):
+                            wav_path = extract_audio_from_video(fp)
+                            if wav_path:
+                                result = transcribe_audio(wav_path)
+                                audio_results[fp.name] = result.get("text", "")
+                                try:
+                                    wav_path.unlink()
+                                except OSError:
+                                    pass
+                            else:
+                                audio_results[fp.name] = ""
+                        else:
+                            audio_results[fp.name] = ""
+                    audio_progress.progress(1.0, text="Audio transcription complete")
+
                 st.session_state.base64_cache = base64_results
                 st.session_state.text_cache = text_results
+                st.session_state.audio_transcription_cache = audio_results
                 st.session_state.staged_assets = []
                 st.session_state.analysis_errors = []
                 st.session_state.analysis_index = 0
@@ -1274,6 +1327,10 @@ with tab_upload:
                 k: v for k, v in st.session_state.text_cache.items()
                 if k in selected_names
             }
+            st.session_state.audio_transcription_cache = {
+                k: v for k, v in st.session_state.audio_transcription_cache.items()
+                if k in selected_names
+            }
             st.session_state.analysis_index = 0
             st.session_state.analysis_in_progress = True
             st.session_state.analysis_done = False
@@ -1390,6 +1447,9 @@ with tab_upload:
                     failed = 0
                     progress = st.progress(0, text="Committing...")
                     exif = ExifToolSession()
+                    import uuid as _uuid
+                    batch_id = str(_uuid.uuid4())[:12]
+                    undo_records: list[dict] = []
 
                     committed_names = set()
                     for commit_i in range(len(selected)):
@@ -1414,6 +1474,31 @@ with tab_upload:
                             log_event(logger, "INFO", "file_committed", file_name=asset["original_name"],
                                       details={"new_path": str(result), "category": asset["category"],
                                                "rating": rating if rating else None})
+                            new_path_resolved = target_dir / str(result) if not isinstance(result, Path) else target_dir / result
+                            injected_tags = [
+                                "XMP-dc:Title", "XMP-dc:Description", "Microsoft:Category",
+                                "XMP-dc:Subject",
+                            ]
+                            if asset["original_path"].suffix.lower() in VIDEO_EXTENSIONS:
+                                injected_tags += [
+                                    "QuickTime:Title", "QuickTime:Description",
+                                    "QuickTime:Comment", "QuickTime:Keywords",
+                                    "Keys:Description", "Keys:Keywords",
+                                ]
+                            else:
+                                injected_tags += [
+                                    "EXIF:XPTitle", "EXIF:XPKeywords",
+                                    "Description", "Comment", "Keywords",
+                                ]
+                            undo_records.append({
+                                "original_path": str(asset["original_path"]),
+                                "new_path": str(new_path_resolved),
+                                "original_name": asset["original_name"],
+                                "new_name": asset["staged_name"],
+                                "category": asset["category"],
+                                "tags": asset.get("tags", []),
+                                "injected_tags": injected_tags,
+                            })
                         else:
                             failed += 1
                             err = result[6:] if isinstance(result, str) and result.startswith("ERROR:") else "unknown"
@@ -1430,6 +1515,9 @@ with tab_upload:
                     log_event(logger, "INFO", "session_end", details={
                         "committed": committed, "failed": failed, "total": len(selected), "mode": "web_batch"
                     })
+
+                    if undo_records:
+                        log_commit_batch(batch_id, str(target_dir), undo_records)
 
                     # Track ratings to telemetry
                     for asset in staged:
@@ -1459,6 +1547,7 @@ with tab_upload:
                         for name in committed_names:
                             st.session_state.base64_cache.pop(name, None)
                             st.session_state.text_cache.pop(name, None)
+                            st.session_state.audio_transcription_cache.pop(name, None)
 
                     if failed:
                         msg = f"Committed {committed} assets. {failed} failed — remaining assets kept for retry."
@@ -1502,7 +1591,7 @@ with tab_analytics:
             temp_dir = st.session_state.get("temp_dir")
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
-            reset_keys = ["base64_cache", "staged_assets", "analysis_done", "uploaded_files",
+            reset_keys = ["base64_cache", "audio_transcription_cache", "staged_assets", "analysis_done", "uploaded_files",
                           "temp_dir", "output_dir", "logger", "analysis_in_progress",
                           "analysis_index", "analysis_aborted", "clear_counter",
                           "analysis_errors"]
@@ -1531,6 +1620,27 @@ with tab_analytics:
         sc2.metric("Committed", committed)
         sc3.metric("Errors", errors)
         sc4.metric("Skipped", skipped)
+
+        st.divider()
+        undo_batches = list_undo_batches()
+        if undo_batches:
+            last = undo_batches[0]
+            n_files = len(last.get("records", []))
+            ts = last.get("timestamp", "")[:19].replace("T", " ")
+            st.caption(f"Last commit: {n_files} files at {ts}")
+            if st.button(":material/undo: Undo Last Commit", type="secondary",
+                         help="Moves files back to original locations and removes metadata tags."):
+                with st.spinner("Rolling back..."):
+                    result = rollback_last_batch()
+                if result["ok"]:
+                    st.success(f"Restored {result['restored']} files.")
+                    load_log_entries.clear()
+                    st.rerun()
+                else:
+                    st.warning(f"Restored {result['restored']}, failed {result['failed']}. "
+                               + "; ".join(result["errors"][:3]))
+        else:
+            st.caption("No commit history to undo.")
 
         # Category distribution
         cat_counter = Counter()

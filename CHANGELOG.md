@@ -1,5 +1,26 @@
 # Changelog
 
+## [v1.5.0] — 2026-07-27
+
+### New Features
+- **Undo/rollback engine (18.1):** `log_commit_batch()`, `rollback_last_batch()`, `list_undo_batches()` in engine.py. CLI `--rollback` flag. "Undo Last Commit" button in Analytics tab. All commit paths log undo records.
+- **Pydantic structured outputs (18.2):** `AssetAnalysisResponse` model validates AI responses. OpenAI/Groq/OpenRouter use `response_format` for structured output. Fallback chain: Pydantic → raw JSON → error.
+- **ExifTool batching (18.3):** `_build_commit_args()` helper, `execute_commit_batch()` for single-IPC batch writes, `execute_batch()` on ExifToolSession. Reduces metadata write overhead from ~200ms × N to ~200ms total.
+- **Audio transcription (19.1-19.3):** `faster-whisper` integration for local audio transcription. `extract_audio_from_video()` via FFmpeg. Phase 1 extracts+transcribes audio for all video files. Transcription fed into AI prompt context.
+- **Per-format document metadata (16.3):** DOCX metadata via python-docx, XLSX via openpyxl. TXT/MD/RTF/CSV/PPTX skip metadata with no error. `skip_metadata` param on `execute_commit()`.
+- **Model selection wizard (17.1-17.3):** tkinter dialog with 4 model options (Qwen2.5-VL 7B recommended, 3B, Qwen3-VL 4B, Moondream 2). Bootstrap downloads user-chosen model. Vision model detection returns installed model list.
+
+### Improvements
+- **Document categorization fix (16.1):** `get_active_prompt()` now appends explicit IMPORTANT constraint listing only profile-specific categories. Multiple needle replacement patterns for robustness.
+- **Document duplicate detection (16.2):** `compute_asset_hash()` returns `sha256:{hash}` for documents (text content for small text files, raw bytes for binary). `find_duplicates()` groups by hash type, compares within groups only.
+- **FontBBox suppression (16.4):** pdfminer.six warning suppressed in `extract_text_pdf()`.
+- **Vision model detection fixed:** Added `qwen2.5-vl` and `qwen3-vl` prefixes to `VISION_MODEL_PREFIXES`. Fixes "no vision model installed" false negative when Ollama returns hyphenated model names.
+
+### Code Quality
+- **Pydantic:** `pydantic>=2.0.0` added to requirements.txt. `AssetAnalysisResponse` BaseModel with validation.
+- **faster-whisper:** `faster-whisper>=1.0.0` added to requirements.txt. Lazy-loaded model cache.
+- **Test count:** 176 tests passing (up from 158).
+
 ## [v1.4.0] — 2026-07-25
 
 ### New Features

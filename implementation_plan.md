@@ -1,6 +1,6 @@
 # Implementation Plan — AI Media Renamer
 
-> **Status:** MVP is complete (all items checked in `prd.md`). This plan covers the v1.1 / v2 milestone backlog, organized by technical layer. Each checkbox is a discrete, executable unit of work.
+> **Status:** v1.5.0 shipped. All Layers 1-19 complete.
 
 ---
 
@@ -160,7 +160,7 @@
   ```
 - [x] In `app.py`, add a `st.selectbox("Naming template", list(templates.keys()))` before analysis
 - [x] Store selected template in `st.session_state.naming_template`
-- [ ] In `analyze_asset_with_ai()` or in a new `apply_naming_template()` function in `engine.py`:
+- [x] In `analyze_asset_with_ai()` or in a new `apply_naming_template()` function in `engine.py`:
   - Parse the AI response's `new_filename` into its semantic components
   - Rebuild the filename according to the selected template
   - Fall back to the AI's raw `new_filename` if template keys are missing
@@ -312,17 +312,17 @@
 ## Layer 9: Infrastructure & DevOps
 
 ### 9.1 Dockerfile
-- [ ] Create `Dockerfile` with:
+- [x] Create `Dockerfile` with:
   - Base image: `python:3.11-slim`
   - Install system deps: `exiftool`, `ffmpeg`, `curl`
   - Install Python deps from `requirements.txt`
   - Copy app source
   - Expose port 8501
   - Entrypoint: `streamlit run app.py --server.port=8501 --server.address=0.0.0.0`
-- [ ] Create `docker-compose.yml` with two services:
+- [x] Create `docker-compose.yml` with two services:
   - `ollama`: image `ollama/ollama`, volumes for model storage, GPU passthrough
   - `renamer`: build from Dockerfile, depends on ollama, port 8501
-- [ ] Add a note in `README.md`: "Run `docker compose up` for a fully containerized setup"
+- [x] Add a note in `README.md`: "Run `docker compose up` for a fully containerized setup"
 
 ### 9.2 Startup validation
 - [x] Create `validate_env()` function in `engine.py`:
@@ -442,11 +442,11 @@
   - `test_parse_malformed_json`
 
 ### 11.2 Integration tests
-- [ ] Write `tests/test_extraction.py` (skipped if ffmpeg not available):
+- [x] Write `tests/test_extraction.py` (skipped if ffmpeg not available):
   - Create a tiny synthetic test video (1 second, black frame) via ffmpeg
   - `test_process_video_to_base64_returns_string`
   - `test_process_image_to_base64_returns_string`
-- [ ] Write `tests/test_commit.py` (skipped if exiftool not available):
+- [x] Write `tests/test_commit.py` (skipped if exiftool not available):
   - Create temp dir with test file
   - Run `execute_commit()` with known values
   - Verify file was renamed
@@ -627,6 +627,151 @@
 
 ---
 
+## Layer 16: Document Pipeline Hardening
+
+> Addresses real-world testing failures: RTF categorised as `text_overlays`, MD as `presentation_slides`, PDF as `motion_graphics`. Documents silently skipped by duplicate detection. Metadata-only mode partially broken for non-PDF documents.
+
+### 16.1 Fix document categorization prompt
+- [x] In `config.json`, update all prompt profiles that include document categories to explicitly constrain output:
+  - Append: `"ONLY use categories from this list: {allowed_categories}. NEVER invent new categories."`
+  - Replace generic `"Pick ONE category from the allowed list"` with profile-specific constraint
+- [x] In `engine.py`, modify `get_active_prompt()` to inject `allowed_categories` into the prompt string before sending to AI
+  - [x] Test: upload RTF, MD, PDF files and verify they categorize as `documents`, `reports`, `contracts`, `invoices`, or `manuals` (not `text_overlays`, `presentation_slides`, `motion_graphics`)
+
+### 16.2 Content-based hash for documents
+- [x] In `engine.py`, update `compute_asset_hash()` to handle documents:
+  - For PDF/DOCX/XLSX/PPTX: compute SHA-256 of file bytes
+  - For text files under 1MB: use extracted text hash (from `extract_text_from_file()`) for finer-grained dedup
+- [x] Verify `find_duplicates()` now includes document assets in pairwise comparison
+- [x] Add `hashlib` import (stdlib, no new dependency)
+
+### 16.3 Per-format metadata writing
+- [x] In `engine.py`, update `execute_commit()` to handle document metadata per format:
+  - PDF: ExifTool with Windows EXIF fields (`EXIF:XPTitle`, `EXIF:XPKeywords`) — already works
+  - DOCX: Use `python-docx` to write custom properties (`core_properties.title`, `core_properties.keywords`) — add `from docx import Document` import
+  - XLSX: Use `openpyxl` to write custom properties — add `from openpyxl import load_workbook` import
+  - TXT/MD/RTF: Skip metadata writing, log `metadata_skipped` with reason "no_standard_metadata_format", show `st.info()` in UI
+- [x] Add `skip_metadata=False` parameter to `execute_commit()` alongside existing `skip_rename=False`
+
+### 16.4 Suppress FontBBox pdfminer warning
+- [x] In `engine.py`, at the top of `extract_text_pdf()`, add:
+  ```python
+  logging.getLogger("pdfminer").setLevel(logging.ERROR)
+  ```
+- [x] This suppresses the harmless `FontBBox` warning from pdfminer.six without affecting extraction
+
+---
+
+## Layer 17: Model Selection & First-Time UX
+
+> First-time EXE user sees "Download Qwen2.5-VL Model" with no comparison. Bootstrap hardcodes `qwen2.5vl:7b`. No way to pick a lighter model for low-VRAM machines.
+
+### 17.1 Model selection wizard
+- [x] In `bootstrap.py`, after Ollama service starts (Step 3) and before model download (Step 4), add a tkinter dialog:
+  - Title: "Select AI Model"
+  - Radio buttons for available models with size + quality descriptions:
+    - `qwen2.5vl:3b` — 3.2 GB, Good quality, Fast
+    - `qwen2.5vl:7b` — 6.0 GB, Best quality, Recommended
+    - `qwen3-vl:4b` — ~3 GB, Newer architecture, Good quality
+    - `moondream:latest` — 1.8 GB, Basic quality, Very fast
+  - "Recommended" badge next to 7B option
+  - Default selection: `qwen2.5vl:7b`
+  - Store chosen model name in `st.session_state` (or pass as env var to Streamlit child)
+- [x] Alternative (if tkinter dialog is too complex): Show model selection in Streamlit UI as a full-page interstitial before the main app loads, when no vision model is detected
+
+### 17.2 Bootstrap downloads chosen model
+- [x] In `bootstrap.py`, update Step 4 to use the selected model name instead of hardcoded `"qwen2.5vl:7b"`
+- [x] Pass chosen model name to `_stream_model_with_progress()` via the variable from 17.1
+- [x] Update `_vision_model_installed()` to check for ANY vision model (already does via `_is_vision_model()`)
+
+### 17.3 Model detection recognizes all supported models
+- [x] In `engine.py`, update `check_environment()` to return list of ALL installed vision models (not just check for one)
+- [x] In `app.py`, update sidebar model indicator to show count of installed vision models and their names
+- [x] Ensure `VISION_MODEL_PREFIXES` list is complete (currently: `qwen2.5vl`, `qwen2-vl`, `llava`, `bakllava`, `moondream`, `xclip`, `qwen3-vl`)
+- [x] Update `config.json` `allowed_models` if any new models are added
+
+---
+
+## Layer 18: Safety & Trust
+
+> From Gemini v2.0 analysis: "#1 Reddit/GitHub concern: What if the AI messes up?" Undo/rollback and structured outputs address this directly.
+
+### 18.1 Undo/rollback engine
+- [x] In `engine.py`, create `log_commit_batch(batch_data)` that writes to `undo_log.jsonl`:
+  - Per asset: `{original_path, new_path, original_metadata, timestamp, batch_id}`
+  - Store in `%APPDATA%/ai-media-renamer/undo_log.jsonl`
+- [x] In `engine.py`, create `rollback_last_batch()`:
+  - Read last `batch_id` from `undo_log.jsonl`
+  - Verify all destination paths exist before starting rollback
+  - Move files back to original paths via `shutil.move()`
+  - Remove metadata injected by the commit (restore original metadata from log)
+  - Return `{success: bool, restored: int, failed: int, errors: list}`
+- [x] In `cli.py`, add `--rollback` flag:
+  - Calls `rollback_last_batch()`, prints result summary
+  - Mutually exclusive with normal pipeline
+- [x] In `app.py`, add "Undo Last Commit" button in Analytics tab:
+  - Shows confirmation dialog with batch summary (N files, timestamp)
+  - Calls `rollback_last_batch()` on confirm
+  - Shows success/failure toast
+
+### 18.2 Pydantic structured outputs
+- [x] Add `pydantic>=2.0.0` to `requirements.txt`
+- [x] In `engine.py`, define `AssetAnalysisResponse` Pydantic model:
+  ```python
+  class AssetAnalysisResponse(BaseModel):
+      filename: str
+      category: str
+      description: str
+      tags: list[str]
+      confidence: float
+  ```
+- [x] Update `parse_ai_response()` to use Pydantic validation:
+  - Try `AssetAnalysisResponse.model_validate_json(response_text)`
+  - On `ValidationError`: attempt regex extraction of JSON block, retry Pydantic validation
+  - On second failure: return fallback `{filename: original_name, category: "uncategorized", ...}`
+- [x] For cloud providers (OpenAI, Gemini, Groq): pass `response_format={"type": "json_schema", "json_schema": AssetAnalysisResponse}` when supported
+- [x] Add retry logic: max 2 retries on malformed response before fallback
+
+### 18.3 ExifTool batching
+- [x] In `engine.py`, update `execute_commit()` to batch metadata writes:
+  - Collect all metadata dicts into a single JSON file
+  - Run `exiftool -json=metadata_batch.json -overwrite_original <all_files>` once
+  - Fall back to per-file mode if batch fails
+- [x] This reduces IPC overhead from ~200ms × N files to ~200ms total for metadata writing
+- [x] Keep per-file mode as fallback for edge cases (mixed formats, partial failures)
+
+---
+
+## Layer 19: Audio & Extended Media
+
+> Privacy-first audio support. Users on Reddit/GitHub value local processing. `faster-whisper` runs locally via CTranslate2, no cloud dependency.
+
+### 19.1 faster-whisper integration
+- [x] Add `faster-whisper>=1.0.0` to `requirements.txt`
+- [x] In `engine.py`, create `transcribe_audio(audio_path, model_size="base")`:
+  - Use `faster_whisper.WhisperModel(model_size)` (lazy-loaded, cached via `@functools.lru_cache`)
+  - Model sizes: `tiny` (39MB), `base` (74MB), `small` (244MB), `medium` (769MB), `large-v3` (1.5GB)
+  - Return `{text: str, language: str, duration: float}`
+  - Handle errors gracefully: return `{text: "", error: str}`
+- [x] Add model download on first use (faster-whisper auto-downloads to `~/.cache/huggingface`)
+
+### 19.2 Audio extraction from video
+- [x] In `engine.py`, create `extract_audio_from_video(video_path)`:
+  - Use FFmpeg to extract audio track: `ffmpeg -i video.mp4 -vn -acodec pcm_s16le -ar 16000 -ac 1 audio.wav`
+  - Output to temp file, return path
+  - If no audio track: return `None` with log
+- [x] In `engine.py`, update `process_video_to_base64()` to also extract audio (or do it separately in analysis phase)
+
+### 19.3 Audio transcription → text analysis pipeline
+- [x] In `engine.py`, update `analyze_asset_with_ai()` flow:
+  - After frame extraction, check if video has audio track (via FFprobe)
+  - If audio exists: extract → transcribe → append transcription to AI prompt context
+  - Update prompt: `"Audio transcription (if available): {transcription}\n\nAnalyze the visual content..."`
+- [x] Store transcription in staged assets: `{audio_transcription: str}`
+- [x] In `app.py`, show audio transcription preview in staging table Summary column (if available)
+
+---
+
 ## Execution Order (Recommended)
 
 The phases are ordered by dependency — each phase can be worked on independently but earlier phases unblock later ones.
@@ -653,9 +798,17 @@ Phase R: 2.6, 2.7               → Multi-provider + model auto-detect — DONE 
 Phase S: S.1–S.5                → Desktop Bundling & Bootstrap Lifecycle Setup — DONE
 Phase T: 8.4                    → CLI subdirectories — DONE
 Phase U: 13.1, 13.2             → Duplicate detection + feedback — DONE
-Phase V: Support                 → Donation / sponsorship links — DONE
+Phase V: Support                 → Donation / sponsorship links — DEFERRED (no links yet)
 Phase W: 14.1, 14.2             → Caching + rerun optimization (Critical performance) — DONE
 Phase X: 14.3, 14.4, 14.5       → FFmpeg optimization + loading states + responsive table — DONE
 Phase Y: 14.6, 14.7, 14.8       → Keyboard shortcuts + config polish + download UX — DONE
 Phase Z: 15.1–15.5              → Privacy-first telemetry (PostHog, opt-in, PRIVACY.md) — DONE
+Phase AA: 16.1, 16.4            → Document categorization fix + FontBBox suppression (Critical bugs) — v1.5.0
+Phase AB: 17.1, 17.2, 17.3      → Model selection wizard + bootstrap + detection — v1.5.0
+Phase AC: 16.2                   → Document duplicate detection — v1.5.0
+Phase AD: 18.1                   → Undo/rollback engine — v1.5.0
+Phase AE: 18.2                   → Pydantic structured outputs — v1.5.0
+Phase AF: 16.3                   → Per-format document metadata — v1.5.0
+Phase AG: 18.3                   → ExifTool batching — v1.5.0
+Phase AH: 19.1, 19.2, 19.3      → Audio transcription pipeline — v1.5.0
 ```
