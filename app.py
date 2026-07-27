@@ -1009,13 +1009,14 @@ with tab_upload:
                 progress_bar = st.progress(0, text="Extracting content...")
                 base64_results = dict(st.session_state.get("base64_cache", {}))
                 text_results = dict(st.session_state.get("text_cache", {}))
-                cached_count = len(base64_results) + len(text_results)
+                audio_results = dict(st.session_state.get("audio_transcription_cache", {}))
+                cached_count = len(base64_results) + len(text_results) + len(audio_results)
 
                 doc_exts = set(DOCUMENT_EXTENSIONS)
                 audio_exts = set(AUDIO_EXTENSIONS)
                 files_list = list(st.session_state.uploaded_files.values())
                 uncached = [fp for fp in files_list
-                            if fp.name not in base64_results and fp.name not in text_results]
+                            if fp.name not in base64_results and fp.name not in text_results and fp.name not in audio_results]
                 if cached_count:
                     st.caption(f"{cached_count} file(s) already cached, extracting {len(uncached)} new...")
                 with ThreadPoolExecutor(max_workers=EXTRACTION_WORKERS) as executor:
@@ -1052,7 +1053,6 @@ with tab_upload:
                     st.error("No files could be extracted. Aborting.")
                     st.stop()
 
-                audio_results = dict(st.session_state.get("audio_transcription_cache", {}))
                 video_files = [fp for fp in uncached
                                if fp.suffix.lower() in VIDEO_EXTENSIONS and fp.name not in audio_results]
                 if video_files:
