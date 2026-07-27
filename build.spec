@@ -45,7 +45,6 @@ a = Analysis(
         'rich',
         'rich.progress',
         'imagehash',
-        'posthog',
         'pdfplumber',
         'pdfminer',
         'pdfminer.six',

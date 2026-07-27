@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import atexit
 import base64
 import datetime
 import hashlib
@@ -21,7 +20,7 @@ import openai
 import requests
 from pydantic import BaseModel, ValidationError
 
-VERSION = "v1.5.0"
+VERSION = "v1.6.0"
 
 
 class AssetAnalysisResponse(BaseModel):
@@ -94,6 +93,10 @@ def load_config(config_path: str = "config.json") -> dict[str, Any]:
 
     cfg['video_extensions'] = tuple(cfg.get('video_extensions', ['.mp4', '.mov', '.avi', '.mkv', '.webm']))
     cfg['image_extensions'] = tuple(cfg.get('image_extensions', ['.jpg', '.jpeg', '.png', '.webp', '.gif']))
+    cfg['audio_extensions'] = tuple(cfg.get('audio_extensions', [
+        '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a',
+        '.wma', '.opus', '.aiff', '.alac', '.ape', '.wv',
+    ]))
     cfg['allowed_categories'] = tuple(cfg.get('allowed_categories', []))
     return cfg
 
@@ -169,6 +172,10 @@ PROMPT_PROFILES = get_profile_labels()
 
 VIDEO_EXTENSIONS = config['video_extensions']
 IMAGE_EXTENSIONS = config['image_extensions']
+AUDIO_EXTENSIONS = config.get('audio_extensions', (
+    '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a',
+    '.wma', '.opus', '.aiff', '.alac', '.ape', '.wv',
+))
 MODEL_NAME = config['model']['name']
 MODEL_TEMPERATURE = config['model']['temperature']
 MODEL_NUM_CTX = config['model']['num_ctx']
@@ -206,7 +213,7 @@ def save_config() -> None:
 
 def reload_config() -> None:
     """Reload config from disk and refresh all module-level globals."""
-    global config, ALLOWED_CATEGORIES, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
+    global config, ALLOWED_CATEGORIES, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS, AUDIO_EXTENSIONS
     global MODEL_NAME, MODEL_TEMPERATURE, MODEL_NUM_CTX, MODEL_KEEP_ALIVE
     global EXTRACTION_WORKERS, DEFAULT_CASE_STYLE, DEFAULT_MAX_FILENAME_CHARS
     global NAMED_TEMPLATES, DEFAULT_TEMPLATE_STRING, PROMPT_PROFILES, CURRENT_PROVIDER
@@ -214,6 +221,7 @@ def reload_config() -> None:
     ALLOWED_CATEGORIES = config['allowed_categories']
     VIDEO_EXTENSIONS = config['video_extensions']
     IMAGE_EXTENSIONS = config['image_extensions']
+    AUDIO_EXTENSIONS = config['audio_extensions']
     MODEL_NAME = config['model']['name']
     MODEL_TEMPERATURE = config['model']['temperature']
     MODEL_NUM_CTX = config['model']['num_ctx']
@@ -1730,6 +1738,49 @@ def _build_commit_args(asset: dict[str, Any], target_file: Path) -> list[str]:
     if suffix in DOCUMENT_EXTENSIONS and suffix != '.pdf':
         return []
 
+    if suffix in AUDIO_EXTENSIONS:
+        if suffix == '.mp3':
+            args = [
+                "-overwrite_original",
+                f"-ID3:TIT2={title}",
+                f"-ID3:TALB={summary}",
+                f"-ID3:TCOM={summary}",
+            ]
+            for t in asset['tags']:
+                args.append(f"-ID3:TSRC={t}")
+            args.append(str(target_file))
+            return args
+        if suffix in ('.aiff', '.ape'):
+            args = [
+                "-overwrite_original",
+                f"-ID3:TIT2={title}",
+                f"-ID3:TALB={summary}",
+            ]
+            for t in asset['tags']:
+                args.append(f"-ID3:TSRC={t}")
+            args.append(str(target_file))
+            return args
+        if suffix in ('.wav', '.flac', '.ogg', '.wv'):
+            args = [
+                "-overwrite_original",
+                f"-XMP-dc:Title={title}",
+                f"-XMP-dc:Description={summary}",
+            ]
+            for t in asset['tags']:
+                args.append(f"-XMP-dc:Subject={t}")
+            args.append(str(target_file))
+            return args
+        if suffix in ('.m4a', '.aac'):
+            args = [
+                "-overwrite_original",
+                f"-QuickTime:Title={title}",
+                f"-QuickTime:Comment={summary}",
+                f"-QuickTime:Keywords={tag_string}",
+                str(target_file),
+            ]
+            return args
+        return []
+
     is_video = suffix in VIDEO_EXTENSIONS
 
     args = [
@@ -2134,6 +2185,9 @@ def compute_asset_hash(file_path: str | Path) -> str | None:
         h = _compute_image_hash(path, _ih, None)
         return f"phash:{h}" if h else None
 
+    if suffix in AUDIO_EXTENSIONS:
+        return _compute_audio_hash(path)
+
     if suffix in DOCUMENT_EXTENSIONS:
         return _compute_document_hash(path)
 
@@ -2151,6 +2205,31 @@ def _compute_document_hash(path: Path) -> str | None:
             if text:
                 return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
         return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+    except Exception:
+        return None
+
+
+def _compute_audio_hash(path: Path) -> str | None:
+    """Compute Chromaprint fingerprint for an audio file.
+
+    Uses fpcalc (bundled or system) to generate a perceptual audio fingerprint.
+    Returns 'chromaprint:{fingerprint_hex}:{duration}' or None on failure.
+    """
+    try:
+        fpcalc = _resolve_binary_path("fpcalc")
+        if not fpcalc:
+            return None
+        cmd = [fpcalc, "-json", str(path)]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW)
+        if proc.returncode != 0:
+            return None
+        import json as _json
+        data = _json.loads(proc.stdout)
+        fp = data.get("fingerprint")
+        dur = data.get("duration", 0)
+        if not fp:
+            return None
+        return f"chromaprint:{','.join(map(str, fp))}:{dur}"
     except Exception:
         return None
 
@@ -2202,7 +2281,8 @@ def _compute_video_hash(path: Path, imagehash: Any) -> str | None:
 def find_duplicates(staged_assets: list[dict[str, Any]], threshold: int = 10) -> list[dict[str, Any]]:
     """Compare all staged assets pairwise. Returns list of duplicate pairs.
     threshold: Hamming distance threshold for pHash (0-64). Lower = stricter match.
-    Default 10 means ~84% similarity required. For SHA-256, exact match only."""
+    Default 10 means ~84% similarity required. For SHA-256, exact match only.
+    For Chromaprint, uses a similarity threshold of 0.85."""
     try:
         import imagehash as _ih
     except ImportError:
@@ -2216,6 +2296,7 @@ def find_duplicates(staged_assets: list[dict[str, Any]], threshold: int = 10) ->
 
     phash_entries: dict[int, Any] = {}
     sha256_entries: dict[int, str] = {}
+    chromaprint_entries: dict[int, str] = {}
 
     for idx, h in raw_hashes.items():
         if h.startswith("phash:") and _ih is not None:
@@ -2225,6 +2306,8 @@ def find_duplicates(staged_assets: list[dict[str, Any]], threshold: int = 10) ->
                 pass
         elif h.startswith("sha256:"):
             sha256_entries[idx] = h[7:]
+        elif h.startswith("chromaprint:"):
+            chromaprint_entries[idx] = h
 
     duplicates: list[dict[str, Any]] = []
 
@@ -2260,7 +2343,47 @@ def find_duplicates(staged_assets: list[dict[str, Any]], threshold: int = 10) ->
                     "confidence": 100,
                 })
 
+    chromaprint_indices = sorted(chromaprint_entries.keys())
+    for i in range(len(chromaprint_indices)):
+        for j in range(i + 1, len(chromaprint_indices)):
+            idx_a, idx_b = chromaprint_indices[i], chromaprint_indices[j]
+            sim = _chromaprint_similarity(
+                chromaprint_entries[idx_a], chromaprint_entries[idx_b]
+            )
+            if sim >= 0.85:
+                duplicates.append({
+                    "index_a": idx_a,
+                    "index_b": idx_b,
+                    "name_a": staged_assets[idx_a]["original_name"],
+                    "name_b": staged_assets[idx_b]["original_name"],
+                    "hash_type": "chromaprint",
+                    "distance": 0,
+                    "confidence": round(sim * 100),
+                })
+
     return duplicates
+
+
+def _chromaprint_similarity(fp_a: str, fp_b: str) -> float:
+    """Compute similarity between two Chromaprint fingerprints.
+
+    Both strings have format 'chromaprint:<ints>:<duration>'.
+    Returns 0.0-1.0 similarity score. 0.0 = completely different, 1.0 = identical.
+    """
+    try:
+        _, ints_a, _ = fp_a.split(":", 2)
+        _, ints_b, _ = fp_b.split(":", 2)
+        a = list(map(int, ints_a.split(",")))
+        b = list(map(int, ints_b.split(",")))
+        if not a or not b:
+            return 0.0
+        min_len = min(len(a), len(b))
+        if min_len == 0:
+            return 0.0
+        matches = sum(1 for k in range(min_len) if a[k] == b[k])
+        return matches / min_len
+    except Exception:
+        return 0.0
 
 
 # -----------------------------------------------------------------------------
@@ -2642,155 +2765,3 @@ def import_staging_csv(csv_string: str, allowed_categories: tuple[str, ...] | li
             "summary": row.get("summary", ""),
         })
     return assets, warnings
-
-
-# -----------------------------------------------------------------------------
-# 8. TELEMETRY (opt-in, anonymous, privacy-first)
-# -----------------------------------------------------------------------------
-
-POSTHOG_API_KEY = os.environ.get('POSTHOG_PROJECT_TOKEN', "")
-POSTHOG_HOST = os.environ.get('POSTHOG_HOST', "https://us.i.posthog.com")
-TELEMETRY_DIR = Path(os.environ.get('APPDATA', Path.home())) / "ai-media-renamer"
-TELEMETRY_FILE = TELEMETRY_DIR / "telemetry.jsonl"
-_install_id = None
-
-
-def _get_install_id() -> str:
-    """Random UUID per install, stored locally. Never tied to identity."""
-    global _install_id
-    if _install_id:
-        return _install_id
-    id_file = TELEMETRY_DIR / ".install_id"
-    if id_file.exists():
-        _install_id = id_file.read_text(encoding="utf-8").strip()
-    else:
-        import uuid
-        _install_id = str(uuid.uuid4())
-        id_file.parent.mkdir(parents=True, exist_ok=True)
-        id_file.write_text(_install_id, encoding="utf-8")
-    return _install_id
-
-
-def _get_session_id() -> str:
-    """Fresh UUID per app launch. Non-persistent."""
-    import uuid
-    return str(uuid.uuid4())[:8]
-
-
-def telemetry_enabled() -> bool:
-    """Check if telemetry is opted-in via config.json."""
-    return config.get("telemetry", {}).get("enabled", False)
-
-
-def set_telemetry_enabled(enabled: bool) -> None:
-    """Update telemetry preference in config.json."""
-    config.setdefault("telemetry", {})["enabled"] = enabled
-    save_config()
-    reload_config()
-
-
-def track_event(event_name: str, properties: dict[str, Any] | None = None) -> None:
-    """Queue a telemetry event. Writes to local JSONL.
-    PostHog flush happens on app exit or batch threshold."""
-    if not telemetry_enabled():
-        return
-
-    entry = {
-        "event": event_name,
-        "timestamp": datetime.datetime.now().astimezone().isoformat(),
-        "install_id": _get_install_id(),
-        "session_id": _get_session_id(),
-        "app_version": VERSION,
-        "os": sys.platform,
-        "arch": "AMD64",
-    }
-    if properties:
-        entry["properties"] = properties
-
-    try:
-        TELEMETRY_DIR.mkdir(parents=True, exist_ok=True)
-        with open(TELEMETRY_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
-    except Exception:
-        pass
-
-
-def flush_telemetry() -> None:
-    """Send buffered telemetry events to PostHog, then clear local buffer."""
-    if not telemetry_enabled():
-        return
-
-    api_key = POSTHOG_API_KEY or config.get("telemetry", {}).get("api_key", "")
-    if not api_key:
-        return
-
-    if not TELEMETRY_FILE.exists():
-        return
-
-    try:
-        lines = TELEMETRY_FILE.read_text(encoding="utf-8").strip().split("\n")
-        lines = [ln for ln in lines if ln.strip()]
-        if not lines:
-            return
-
-        from posthog import Posthog as _Posthog
-        posthog_client = _Posthog(
-            api_key,
-            host=POSTHOG_HOST,
-            enable_exception_autocapture=True,
-        )
-        try:
-            for line in lines:
-                try:
-                    event = json.loads(line)
-                    posthog_client.capture(
-                        distinct_id=event.get("install_id", "unknown"),
-                        event=event["event"],
-                        properties=event.get("properties", {}),
-                        timestamp=event.get("timestamp"),
-                    )
-                except Exception:
-                    continue
-            posthog_client.flush()
-            TELEMETRY_FILE.unlink(missing_ok=True)
-        finally:
-            posthog_client.shutdown()
-    except ImportError:
-        pass
-    except Exception:
-        pass
-
-
-def send_opt_out_event() -> None:
-    """Send a final opt-out event before disabling telemetry."""
-    api_key = POSTHOG_API_KEY or config.get("telemetry", {}).get("api_key", "")
-    if not api_key:
-        return
-    try:
-        from posthog import Posthog as _Posthog
-        posthog_client = _Posthog(
-            api_key,
-            host=POSTHOG_HOST,
-            enable_exception_autocapture=True,
-        )
-        try:
-            posthog_client.capture(
-                distinct_id=_get_install_id(),
-                event="opt_out",
-                properties={"app_version": VERSION},
-            )
-            posthog_client.flush()
-        finally:
-            posthog_client.shutdown()
-    except Exception:
-        pass
-
-
-if os.environ.get('POSTHOG_DEBUG', '').lower() == 'true' and not POSTHOG_API_KEY:
-    print(
-        "WARNING: POSTHOG_PROJECT_TOKEN variable required by PostHog is missing or "
-        "un-configured, this causes events to be silently missed. "
-        "This error stops appearing once POSTHOG_PROJECT_TOKEN is configured"
-    )
-
-atexit.register(flush_telemetry)

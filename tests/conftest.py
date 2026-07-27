@@ -49,7 +49,6 @@ def sample_config(tmp_dir):
                 },
             },
         },
-        "telemetry": {"enabled": False, "api_key": ""},
     }
 
 

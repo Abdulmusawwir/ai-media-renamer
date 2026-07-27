@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from engine import (
+    AUDIO_EXTENSIONS,
+    DOCUMENT_EXTENSIONS,
     EXTRACTION_WORKERS,
     IMAGE_EXTENSIONS,
     NAMED_TEMPLATES,
@@ -18,12 +20,12 @@ from engine import (
     ExifToolSession,
     _format_ai_error,
     analyze_asset_with_ai,
+    analyze_document_with_ai,
     apply_case_style,
     apply_naming_template,
     detect_hw_accel,
     execute_commit,
     export_staging_csv,
-    flush_telemetry,
     import_staging_csv,
     is_already_processed,
     log_commit_batch,
@@ -34,7 +36,6 @@ from engine import (
     sanitize_name,
     set_active_profile,
     setup_logging,
-    track_event,
     truncate_filename,
     restore_default_config,
     validate_category,
@@ -170,15 +171,8 @@ def process_library(
         "case_style": case_style, "max_chars": max_chars,
         "force": force, "dry_run": dry_run,
     })
-    track_event("cli_session_started", {
-        "case_style": case_style,
-        "dry_run": dry_run,
-        "force": force,
-        "recursive": recursive,
-        "has_profile": bool(profile),
-    })
 
-    valid_exts = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS
+    valid_exts = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS + AUDIO_EXTENSIONS + DOCUMENT_EXTENSIONS
 
     # ------------------------------------------------------------------
     # CSV import path: skip extraction + analysis, load staging from file
@@ -257,6 +251,10 @@ def process_library(
                 if force or not is_already_processed(file, exif_session):
                     if file.suffix.lower() in VIDEO_EXTENSIONS:
                         future = executor.submit(process_video_to_base64, file, hw_accel)
+                    elif file.suffix.lower() in AUDIO_EXTENSIONS:
+                        future = executor.submit(transcribe_audio, file)
+                    elif file.suffix.lower() in DOCUMENT_EXTENSIONS:
+                        future = executor.submit(extract_text_from_file, file)
                     else:
                         future = executor.submit(process_image_to_base64, file)
                     future_to_file[future] = file
@@ -266,9 +264,12 @@ def process_library(
 
             for future in as_completed(future_to_file):
                 file = future_to_file[future]
-                base64_data = future.result()
-                if base64_data:
-                    pending_assets.append((file, base64_data))
+                result = future.result()
+                if result:
+                    is_text = file.suffix.lower() in DOCUMENT_EXTENSIONS or file.suffix.lower() in AUDIO_EXTENSIONS
+                    if is_text and isinstance(result, dict):
+                        result = result.get("text", "")
+                    pending_assets.append((file, result, is_text))
                 else:
                     print(f"Failed to extract preview: {file.name}")
                     log_event(logger, "ERROR", "extraction_failed", file_name=file.name)
@@ -295,13 +296,16 @@ def process_library(
 
     def _analyze() -> None:
         nonlocal staged_assets
-        for idx, (file_path, base64_img) in enumerate(pending_assets, 1):
+        for idx, (file_path, data, is_text) in enumerate(pending_assets, 1):
             if _show_progress:
                 progress.update(task, advance=0, description=f"Phase 2: Analyzing {file_path.name}...")
             else:
                 print(f"[{idx}/{len(pending_assets)}] AI analyzing: {file_path.name}...", end="", flush=True)
 
-            ai_result = analyze_asset_with_ai(base64_img, verbose=verbose)
+            if is_text:
+                ai_result = analyze_document_with_ai(data, verbose=verbose)
+            else:
+                ai_result = analyze_asset_with_ai(data, verbose=verbose)
 
             if not ai_result['ok']:
                 error_msg = _format_ai_error(ai_result, verbose=verbose)
@@ -335,8 +339,8 @@ def process_library(
                 "summary": ai_data.get('overall_visual_summary', ''),
                 "topic": topic,
                 "description": description,
-                "base64_data": base64_img,
-                "audio_transcription": "",
+                "base64_data": "" if is_text else data,
+                "audio_transcription": data if is_text and file_path.suffix.lower() in AUDIO_EXTENSIONS else "",
             })
 
             if template_string:
@@ -617,12 +621,6 @@ def _commit_all(
     })
     if undo_records:
         log_commit_batch(batch_id, str(target_dir), undo_records)
-    track_event("cli_session_completed", {
-        "committed": committed_count,
-        "total": len(staged_assets),
-        "mode": "batch",
-    })
-    flush_telemetry()
     print("\nHigh-Performance Run Complete!")
 
 
@@ -865,14 +863,6 @@ def _interactive_commit(
     })
     if undo_records:
         log_commit_batch(batch_id, str(target_dir), undo_records)
-    track_event("cli_session_completed", {
-        "committed": committed_count,
-        "skipped": skipped_count,
-        "reanalyzed": reanalyzed_count,
-        "total": len(staged_assets),
-        "mode": "interactive",
-    })
-    flush_telemetry()
     print(f"\nInteractive processing complete! {committed_count} committed, "
           f"{skipped_count} skipped, {reanalyzed_count} re-analyzed.")
 

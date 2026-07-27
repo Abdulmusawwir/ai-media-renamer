@@ -92,8 +92,36 @@ class TestBuildCommitArgs:
         args = _build_commit_args(asset, target)
         assert len(args) > 0
 
+    def test_mp3_returns_args(self, tmp_path: Path):
+        asset = _make_asset(tmp_path, ext=".mp3")
+        target = tmp_path / "renamed_test_video.mp3"
+        shutil.copy2(asset["original_path"], target)
+        args = _build_commit_args(asset, target)
+        assert any("ID3:TIT2" in a for a in args)
 
-# --- DOCX/XLSX native metadata writers (no ExifTool needed) ---
+    def test_wav_returns_args(self, tmp_path: Path):
+        asset = _make_asset(tmp_path, ext=".wav")
+        target = tmp_path / "renamed_test_video.wav"
+        shutil.copy2(asset["original_path"], target)
+        args = _build_commit_args(asset, target)
+        assert any("XMP-dc:Title" in a for a in args)
+
+    def test_m4a_returns_args(self, tmp_path: Path):
+        asset = _make_asset(tmp_path, ext=".m4a")
+        target = tmp_path / "renamed_test_video.m4a"
+        shutil.copy2(asset["original_path"], target)
+        args = _build_commit_args(asset, target)
+        assert any("QuickTime:Title" in a for a in args)
+
+    def test_flac_returns_args(self, tmp_path: Path):
+        asset = _make_asset(tmp_path, ext=".flac")
+        target = tmp_path / "renamed_test_video.flac"
+        shutil.copy2(asset["original_path"], target)
+        args = _build_commit_args(asset, target)
+        assert any("XMP-dc:Title" in a for a in args)
+
+
+# --- Audio hash and similarity tests ---
 
 class TestNativeMetadataWriters:
     def test_write_docx_metadata(self, tmp_path: Path):

@@ -45,7 +45,15 @@
     "reports",
     "contracts",
     "invoices",
-    "manuals"
+    "manuals",
+    "music",
+    "sound_effects",
+    "voiceover",
+    "podcast",
+    "interview",
+    "ambient",
+    "narration",
+    "soundtrack"
   ],
   "cinematography": {
     "shot_types": [
@@ -144,6 +152,20 @@
     ".xlsx",
     ".csv",
     ".pptx"
+  ],
+  "audio_extensions": [
+    ".mp3",
+    ".wav",
+    ".flac",
+    ".aac",
+    ".ogg",
+    ".m4a",
+    ".wma",
+    ".opus",
+    ".aiff",
+    ".alac",
+    ".ape",
+    ".wv"
   ],
   "model": {
     "name": "qwen2.5vl:7b",
@@ -333,15 +355,25 @@
           "data_visualization"
         ]
       },
+      "audio_naming": {
+        "label": "Audio Files",
+        "prompt": "You are an expert audio content analyst. Analyze the audio transcription and suggest a concise, descriptive filename.\n\nOUTPUT FORMAT \u2014 Respond with ONLY this JSON structure:\n{\n  \"new_filename\": \"short_descriptive_name_using_3_to_6_keywords\",\n  \"topic\": \"single_most_important_keyword_describing_the_main_subject\",\n  \"description\": \"qualifiers_and_context_separated_by_underscores\",\n  \"tags\": [\"keyword1\", \"keyword2\", \"keyword3\"],\n  \"overall_visual_summary\": \"One sentence summarizing the audio content.\",\n  \"suggested_category\": \"one_category_from_the_list\"\n}\n\nFIELD GUIDELINES:\n- topic: The primary subject or topic of the audio (e.g., \"interview\", \"ambient_rain\", \"tutorial_python\").\n- description: Additional context like speaker, setting, or content type separated by underscores (e.g., \"morning_meditation\", \"tech_podcast_ep4\").\n- new_filename: Combine topic and description with underscores.\n\nFILENAME GUIDELINES:\n- Use 3-6 lowercase keywords separated by underscores\n- Describe the audio content directly: \"interview_john_smith\" not \"audio_recording_of_person\"\n- Never start with filler like \"the_audio\", \"recording_file\"\n\nSUMMARY GUIDELINES:\n- Write one clear sentence summarizing what the audio is about.\n- Example: \"An ambient recording of ocean waves crashing on a rocky shoreline at sunset.\"\n\nCATEGORY GUIDELINES:\n- Pick exactly one category from the allowed list.\n- For audio, prefer: music, voiceover, podcast, ambient, narration, soundtrack, sound_effects, interview.\n\nRespond with ONLY the JSON. No markdown fences, no extra text.",
+        "allowed_categories": [
+          "music",
+          "sound_effects",
+          "voiceover",
+          "podcast",
+          "interview",
+          "ambient",
+          "narration",
+          "soundtrack"
+        ]
+      },
       "custom": {
         "label": "Custom Prompt",
         "prompt": "",
         "allowed_categories": []
       }
     }
-  },
-  "telemetry": {
-    "enabled": true,
-    "api_key": "phc_kXuZ7UR8Cz5tF3mXWvM7DDuXmK9NfFczJibPAMt3AUpt"
   }
 }

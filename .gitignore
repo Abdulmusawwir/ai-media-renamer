@@ -16,9 +16,6 @@ task.md
 .coverage
 htmlcov/
 
-# Telemetry
-telemetry.jsonl
-
 # Cache
 cache/
 *.log

@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from engine import find_duplicates
+from engine import find_duplicates, _chromaprint_similarity
 
 
 def _fake_phash(path):
@@ -142,3 +142,82 @@ class TestFindDuplicates:
         ]
         result = find_duplicates(assets)
         assert result == []
+
+    def test_find_duplicates_chromaprint_identical(self):
+        """Two identical Chromaprint fingerprints are flagged."""
+        fp = "chromaprint:1234,5678,9012:30.0"
+
+        def mock_hash(path):
+            return fp
+
+        with patch("engine.compute_asset_hash", side_effect=mock_hash):
+            assets = [
+                {"original_path": Path("/fake/a.mp3"), "original_name": "a.mp3"},
+                {"original_path": Path("/fake/b.mp3"), "original_name": "b.mp3"},
+            ]
+            result = find_duplicates(assets)
+            assert len(result) == 1
+            assert result[0]["hash_type"] == "chromaprint"
+            assert result[0]["confidence"] == 100
+
+    def test_find_duplicates_chromaprint_similar(self):
+        """Two similar Chromaprint fingerprints (>= 0.85) are flagged."""
+        def mock_hash(path):
+            name = Path(path).stem
+            if name == "a":
+                return "chromaprint:100,200,300,400,500,600,700:30.0"
+            return "chromaprint:100,200,300,400,500,600,999:30.0"
+
+        with patch("engine.compute_asset_hash", side_effect=mock_hash):
+            assets = [
+                {"original_path": Path("/fake/a.mp3"), "original_name": "a.mp3"},
+                {"original_path": Path("/fake/b.mp3"), "original_name": "b.mp3"},
+            ]
+            result = find_duplicates(assets)
+            assert len(result) == 1
+            assert result[0]["hash_type"] == "chromaprint"
+
+    def test_find_duplicates_chromaprint_different(self):
+        """Two different Chromaprint fingerprints (< 0.85) are NOT flagged."""
+        def mock_hash(path):
+            name = Path(path).stem
+            if name == "a":
+                return "chromaprint:1,2,3:30.0"
+            return "chromaprint:4,5,6:30.0"
+
+        with patch("engine.compute_asset_hash", side_effect=mock_hash):
+            assets = [
+                {"original_path": Path("/fake/a.mp3"), "original_name": "a.mp3"},
+                {"original_path": Path("/fake/b.mp3"), "original_name": "b.mp3"},
+            ]
+            result = find_duplicates(assets)
+            assert result == []
+
+
+class TestChromaprintSimilarity:
+    def test_identical(self):
+        fp = "chromaprint:100,200,300:30.0"
+        assert _chromaprint_similarity(fp, fp) == 1.0
+
+    def test_similar(self):
+        a = "chromaprint:100,200,300,400,500,600:30.0"
+        b = "chromaprint:100,200,300,400,500,999:30.0"
+        assert abs(_chromaprint_similarity(a, b) - 5/6) < 0.01
+
+    def test_different(self):
+        a = "chromaprint:1,2,3:30.0"
+        b = "chromaprint:4,5,6:30.0"
+        assert _chromaprint_similarity(a, b) == 0.0
+
+    def test_empty(self):
+        a = "chromaprint::30.0"
+        b = "chromaprint:1,2,3:30.0"
+        assert _chromaprint_similarity(a, b) == 0.0
+
+    def test_malformed(self):
+        assert _chromaprint_similarity("bad", "format") == 0.0
+
+    def test_different_lengths(self):
+        a = "chromaprint:100,200,300:30.0"
+        b = "chromaprint:100,200:30.0"
+        assert _chromaprint_similarity(a, b) == 1.0

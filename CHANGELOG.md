@@ -1,5 +1,24 @@
 # Changelog
 
+## [v1.6.0] — 2026-07-27
+
+### New Features
+- **Audio file upload & analysis:** Audio files (MP3, WAV, FLAC, AAC, OGG, M4A, WMA, OPUS, AIFF, ALAC, APE, WV) can now be uploaded and analyzed. Transcription fed into AI analysis context. New `audio_naming` prompt profile.
+- **Audio fingerprint duplicate detection:** Chromaprint-based audio fingerprinting detects files with same audio but different visuals. Cross-modal detection: video vs video (pHash), audio vs audio (Chromaprint), and mixed-type isolation (SHA-256).
+- **CLI document & audio support:** CLI now processes documents (text extraction) and audio files (transcription) alongside video and images. `valid_exts` includes all 4 media types.
+- **Audio metadata writing:** ExifTool metadata for audio files — ID3 tags for MP3/AIFF/APE, XMP for WAV/FLAC/OGG/WV, QuickTime atoms for M4A/AAC.
+
+### Improvements
+- **Extension management:** Audio extensions configurable in Configuration tab (4th column). Default list in config.json/config.default.json.
+- **Staging table:** Type column now shows "audio", "doc", or "media" with file extension. Audio files show transcription snippet in summary column.
+- **Duplicate detection expanded:** `find_duplicates()` now handles 3 hash types: pHash (visual), SHA-256 (document), Chromaprint (audio). `_chromaprint_similarity()` computes pairwise audio fingerprint similarity (0.85 threshold).
+
+### Code Quality
+- **13 new tests:** Audio build_commit_args, chromaprint similarity, duplicate detection with audio fingerprints. 220 total tests, all passing.
+- **README simplified:** Features, CLI details, and "Why Use This?" moved to README_TECH.md. README.md is now a concise landing page.
+
+---
+
 ## [v1.5.0] — 2026-07-27
 
 ### New Features

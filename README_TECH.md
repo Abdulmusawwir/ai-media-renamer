@@ -1,8 +1,8 @@
 # AI Media Renamer — Technical Reference
 
-Automatically organize, rename, and tag video/image assets using local AI vision models. 7 prompt profiles for different use cases. Comes with both a **CLI** and a **Streamlit web app**.
+Automatically organize, rename, and tag video, image, document, and audio assets using AI. 8 prompt profiles for different use cases. Comes with both a **CLI** and a **Streamlit web app**.
 
-> 👉 For a plain-language overview, see [README.md](README.md)
+> For a plain-language overview, see [README.md](README.md)
 
 ### Download the EXE
 
@@ -30,6 +30,53 @@ streamlit run app.py
 - **Ollama** with a vision model (e.g. `qwen2.5vl:7b`) — [ollama.com](https://ollama.com)
 - **ExifTool 12+** — [exiftool.org](https://exiftool.org)
 - **FFmpeg 6+** (including ffprobe) — [ffmpeg.org](https://ffmpeg.org)
+- **fpcalc** (Chromaprint) — for audio fingerprint duplicate detection (auto-downloaded by EXE)
+
+---
+
+## Why Use This?
+
+- **No more "final_v3_actual_use_this.mp4"** — every file gets a descriptive, consistent name
+- **Metadata written to the file** — not a separate spreadsheet. Your NLE reads it natively
+- **Works offline** — uses local Ollama models, no cloud API needed
+- **Bulk operations** — apply categories, edit names, filter, sort — all in one table
+- **Safe** — originals are preserved, dry-run mode shows what will happen before anything changes
+- **Duplicate detection** — visual hash (pHash), document hash (SHA-256), and audio fingerprint (Chromaprint) catch near-identical files before they clutter your library
+
+---
+
+## Features
+
+### AI Analysis
+- **8 prompt profiles** — General Balanced, General B-Roll, Cinematography, Motion & Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming, Audio Files, and Custom
+- **6 AI providers** — Ollama (local), Gemini, OpenAI, Anthropic, Groq, OpenRouter
+- **Single-frame extraction** — one representative frame per video for accurate analysis
+- **Image analysis** — downscaled in memory, no disk writes
+- **Audio transcription** — local Whisper transcription for audio files and video audio tracks
+- **Document analysis** — text extraction from PDF, DOCX, XLSX, CSV, PPTX, TXT, MD, RTF
+
+### Staging & Editing
+- **Spreadsheet-like table** — edit filenames, categories, tags, and ratings inline
+- **Bulk operations** — apply categories, case styles, and naming templates to selected rows
+- **Search & filter** — find files by name, category, or tags instantly
+- **Duplicate detection** — visual hash (pHash), document hash (SHA-256), and audio fingerprint (Chromaprint) comparison
+- **User ratings** — thumbs up/down on AI suggestions to track quality over time
+
+### Naming & Organization
+- **Naming templates** — `{topic}_{description}`, `{date}_{topic}`, or custom patterns
+- **Case styles** — snake_case, camelCase, kebab-case, PascalCase, lowercase, title case
+- **Category folders** — optionally sort committed files into category subdirectories
+- **Metadata writing** — XMP, EXIF, ID3, Vorbis, and QuickTime tags written directly into file headers (DaVinci Resolve, Premiere Pro, Windows Explorer compatible)
+
+### Configuration
+- **Web-based config editor** — edit AI models, categories, extensions, and prompt profiles in-app
+- **Config reset** — restore defaults from the web UI, CLI flag (`--reset-config`), or automatic recovery
+- **Session persistence** — save and resume analysis sessions across app restarts
+- **Undo/rollback** — revert the last commit batch (move files back, remove metadata)
+
+### Telemetry (Optional)
+- **Anonymous usage data** — opt-in to send non-identifying events (ratings, session stats, errors) to help improve the app
+- **Full control** — toggle on/off anytime in Configuration tab. See [PRIVACY.md](PRIVACY.md) for details
 
 ---
 
@@ -43,7 +90,7 @@ python cli.py "path/to/your/assets" [options]
 |---|---|
 | `dir` | Path to directory containing media files |
 | `--verbose` / `-v` | Debug output (raw AI responses) |
-| `--profile` / `-p` | AI prompt profile: `general_balanced`, `general_broll`, `cinematography`, `motion_overlays`, `religious_landmarks`, `document_naming`, `spreadsheet_naming`, `custom` |
+| `--profile` / `-p` | AI prompt profile: `general_balanced`, `general_broll`, `cinematography`, `motion_overlays`, `religious_landmarks`, `document_naming`, `spreadsheet_naming`, `audio_naming`, `custom` |
 | `--template` / `-t` | Naming template preset (`default`, `short`, `editorial`) or raw pattern |
 | `--case-style` / `--style` | Case style: `snake_case` (default), `camelCase`, `kebab-case`, `pascal_case`, `lowercase` |
 | `--max-chars` / `--max` | Max filename length (0 = no limit) |
@@ -60,7 +107,7 @@ python cli.py "path/to/your/assets" [options]
 | `-r` / `--include-subdirectories` | Scan subdirectories recursively |
 
 ### CLI Workflow
-1. **Extraction** — Parallel FFmpeg frame extraction with HW acceleration detection
+1. **Extraction** — Parallel FFmpeg frame extraction with HW acceleration detection; text extraction for documents; audio transcription for audio files
 2. **Analysis** — Sequential per-asset AI analysis with progress indicators
 3. **Staging Review** — Summary table, category override for uncategorized assets
 4. **Execution** — Choose: `[A]pply All`, `[I]nteractive mode`, `[D]ry-run preview`, or `[C]ancel`
@@ -73,23 +120,26 @@ Interactive mode per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze`, `[E]di
 
 | File | Purpose |
 |---|---|
-| `engine.py` | Core importable functions — config, ExifTool sessions, FFmpeg frame extraction, AI analysis, environment checks, file commits |
+| `engine.py` | Core importable functions — config, ExifTool sessions, FFmpeg frame extraction, AI analysis, environment checks, file commits, duplicate detection, audio transcription |
 | `app.py` | Streamlit web app — Upload & Analyze tab (file upload, per-asset AI analysis, editable staging matrix, commit), Analytics Dashboard |
 | `cli.py` | CLI workflow — scan, extract, analyze, stage, commit |
-| `config.json` | Single source of truth — prompt profiles (6), categories (40), model settings, naming templates, providers, logging |
+| `config.json` | Single source of truth — prompt profiles (8), categories (56), model settings, naming templates, providers, logging |
 
 ---
 
 ## Web App Features
 
 - **Upload & Analyze** — Drag-and-drop upload with extension/file-size validation, parallel FFmpeg frame extraction (single midpoint frame per video, hardware-accelerated), sequential per-asset AI analysis with progress bars
-- **Editable Staging Matrix** — `st.data_editor` with columns: select checkbox, original filename, editable proposed filename, category dropdown (with custom entry), comma-separated tags, read-only summary. Search/filter above the table. Native click-to-sort column headers.
+- **Audio Transcription** — Local Whisper transcription for audio files and video audio tracks, fed into AI analysis context
+- **Document Analysis** — Text extraction from PDF, DOCX, XLSX, CSV, PPTX, TXT, MD, RTF for AI analysis
+- **Editable Staging Matrix** — `st.data_editor` with columns: select checkbox, original filename, type (media/doc/audio), editable proposed filename, category dropdown (with custom entry), comma-separated tags, read-only summary. Search/filter above the table. Native click-to-sort column headers.
 - **Bulk Category Assignment** — Select assets, pick a category (or type a custom one), apply to all checked rows at once
-- **AI Prompt Profiles** — 6 built-in profiles (General Balanced, General B-Roll, Cinematography, Motion Overlays, Religious Landmarks, Custom) selectable right before analysis. Changeable per run.
+- **AI Prompt Profiles** — 8 built-in profiles selectable right before analysis. Changeable per run.
 - **Naming Settings** — Configurable `{category}_{topic}_{description}` pattern, case style (snake_case, camelCase, etc.), max filename length — all with live preview updates in the staging table
 - **Re-analyze Selected** — Check specific rows and re-analyze only those assets without re-processing the entire batch
 - **CSV Import/Export** — Export staging table as CSV ("Export Staged Changes"), re-import later to restore or modify
-- **Commit** — Write metadata (XMP, QuickTime, EXIF, IPTC) and optionally sort into categorized subfolders
+- **Commit** — Write metadata (XMP, QuickTime, EXIF, IPTC, ID3, Vorbis) and optionally sort into categorized subfolders
+- **Undo/Rollback** — Revert the last commit batch from the Analytics tab
 - **Analytics Dashboard** — Auto-refreshing stats cards, Plotly charts, filterable event timeline from JSONL logs, Reset All button
 - **Sidebar** — Provider (Ollama) + model selection, API key management, environment health check indicators
 
@@ -103,16 +153,38 @@ Renamed files land in `~/Desktop/RenamedMedia` by default. With `sort_folders` e
 
 After renaming, every file receives structured metadata written directly into its headers:
 
+### Video & Image Metadata
+
 | Tag | File Type | Description |
 |---|---|---|
+| `XMP-dc:Title` | All | File title |
 | `XMP-dc:Description` | All | Visual summary from AI analysis |
 | `XMP-dc:Subject` | All | Keywords as individual array elements |
 | `Microsoft:Category` | All | Assigned taxonomy category |
-| `QuickTime:Description/Comment/Keywords` | MP4/MOV/MKV | Video-specific metadata |
+| `QuickTime:Title/Description/Comment/Keywords` | MP4/MOV/MKV | Video-specific metadata |
 | `Keys:Description/Keywords` | MP4/MOV/MKV | Additional video metadata |
-| `EXIF:XPKeywords` | JPG/PNG | Windows Explorer "Tags" column |
+| `EXIF:XPTitle/XPKeywords` | JPG/PNG | Windows Explorer tags |
 | `IPTC:Keywords` | JPG/PNG | Individual keyword entries |
-| `EXIF:ImageDescription/UserComment` | JPG/PNG | EXIF description fields |
+
+### Audio Metadata
+
+| Tag | File Type | Description |
+|---|---|---|
+| `ID3:TIT2` | MP3, AIFF, APE | Title |
+| `ID3:TALB` | MP3, AIFF, APE | Summary/description |
+| `ID3:TCOM` | MP3 | Composer |
+| `ID3:TSRC` | MP3, AIFF, APE | Keywords |
+| `XMP-dc:Title/Description/Subject` | WAV, FLAC, OGG, WV | Title and keywords |
+| `QuickTime:Title/Comment/Keywords` | M4A, AAC | Title and keywords |
+
+### Document Metadata
+
+| Format | Method | Notes |
+|---|---|---|
+| PDF | ExifTool | Title, description, keywords via EXIF fields |
+| DOCX | python-docx | Title, subject, keywords via core properties |
+| XLSX | openpyxl | Title, subject, keywords via document properties |
+| TXT, MD, RTF, CSV, PPTX | Skip | No standard metadata support |
 
 Compatible with **DaVinci Resolve** and **Adobe Premiere Pro**.
 
@@ -120,13 +192,13 @@ Compatible with **DaVinci Resolve** and **Adobe Premiere Pro**.
 
 ## Configuration (`config.json`)
 
-- **`prompt_profiles`** — 6 AI prompt profiles with per-profile allowed categories
-- **`allowed_categories`** — 40 taxonomy entries
+- **`prompt_profiles`** — 8 AI prompt profiles with per-profile allowed categories
+- **`allowed_categories`** — 56 taxonomy entries (including audio categories)
 - **`cinematography`** — Reference tables for shot types, camera moves, lighting, color palettes, composition, moods
 - **`model`** — Provider, model name, temperature, num_ctx, keep_alive
 - **`preview`** — Image max edge (1024px), video frame scale (300px)
 - **`naming_templates`** — Preset filename patterns with `{category}`, `{topic}`, `{description}`, `{date}`
-- **`cloud`** — Provider list with base URLs (Ollama active; Gemini, OpenAI, Anthropic, Groq, OpenRouter implemented but untested)
+- **`video_extensions`** / `image_extensions` / `document_extensions` / `audio_extensions` — Configurable file type lists
 - **`logging`** — Log directory, file rotation, max upload size (10 GB)
 
 ---
@@ -143,10 +215,11 @@ Events logged as JSON Lines to `logs/renamer_YYYY-MM-DD.jsonl`. Each line: times
 - **Ollama** with a vision model (e.g. `qwen2.5vl:7b`)
 - **ExifTool 12+** in PATH
 - **FFmpeg 6+** (including ffprobe) in PATH
+- **fpcalc** (Chromaprint) — for audio fingerprint duplicate detection
 - **Windows 10/11** (primary target; Linux/macOS compatible but untested)
 
 ---
 
-## Support the Project
+## Support
 
 If this tool saves you time, consider supporting further development. Donation links coming soon.

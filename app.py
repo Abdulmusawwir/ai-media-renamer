@@ -19,6 +19,7 @@ import streamlit as st
 
 from engine import (
     ALLOWED_CATEGORIES,
+    AUDIO_EXTENSIONS,
     CASE_STYLE_LABELS,
     CASE_STYLE_OPTIONS,
     DEFAULT_CASE_STYLE,
@@ -32,6 +33,7 @@ from engine import (
     NAMED_TEMPLATES,
     PROMPT_PROFILES,
     VIDEO_EXTENSIONS,
+    VERSION,
     ExifToolSession,
     _format_ai_error,
     _is_vision_model,
@@ -47,7 +49,6 @@ from engine import (
     export_staging_csv,
     extract_text_from_file,
     find_duplicates,
-    flush_telemetry,
     get_active_profile,
     get_active_prompt,
     get_provider,
@@ -66,13 +67,10 @@ from engine import (
     save_api_key,
     save_config,
     save_session,
-    send_opt_out_event,
     set_active_profile,
-    set_telemetry_enabled,
     setup_logging,
     stream_model_download,
     switch_ai_provider,
-    track_event,
     truncate_filename,
     validate_category,
     wipe_local_model,
@@ -301,45 +299,6 @@ CATEGORY_LIST = list(ALLOWED_CATEGORIES)
 # Telemetry opt-in dialog (first launch)
 # -----------------------------------------------------------------------------
 
-if "telemetry_opted" not in st.session_state:
-    st.session_state.telemetry_opted = config.get("telemetry", {}).get("enabled", None)
-
-if st.session_state.telemetry_opted is None:
-    st.subheader(":material/feedback: Help improve AI Media Renamer")
-    st.markdown(
-        "Send anonymous usage data so we can fix bugs and prioritize features. "
-        "**No file names, content, or paths are ever sent.**"
-    )
-    col_what, col_whatnot = st.columns(2)
-    with col_what:
-        st.markdown(
-            "**What's collected:**\n"
-            "- Feature usage\n"
-            "- Error types\n"
-            "- Session duration\n"
-            "- Profile preference"
-        )
-    with col_whatnot:
-        st.markdown(
-            "**What's NOT collected:**\n"
-            "- File names or paths\n"
-            "- AI prompts or responses\n"
-            "- Your media content\n"
-            "- IP address or identity"
-        )
-    opt_in = st.checkbox("Send anonymous usage data", value=True, key="telemetry_opt_in")
-    st.caption("You can change this anytime in Settings.")
-    st.link_button("View privacy policy", "https://github.com/Abdulmusawwir/ai-media-renamer/blob/main/PRIVACY.md")
-    if st.button(":material/save: Save Preference", type="primary", key="telemetry_save_pref"):
-        set_telemetry_enabled(opt_in)
-        st.session_state.telemetry_opted = opt_in
-        if opt_in:
-            track_event("opt_in")
-        else:
-            send_opt_out_event()
-        st.rerun()
-    st.stop()
-
 # -----------------------------------------------------------------------------
 # Environment check (runs once, cached in session state)
 # -----------------------------------------------------------------------------
@@ -368,7 +327,6 @@ def _on_provider_switch(new_provider: str) -> None:
     api_key = load_api_key(new_provider) if new_provider != "ollama" else ""
     result = switch_ai_provider(new_provider, api_key)
     st.session_state.provider_info = new_provider
-    track_event("provider_switched", {"provider": new_provider})
     if not result["ok"]:
         if result.get("require_download"):
             st.warning("Model not found locally. Use the download button below.")
@@ -682,11 +640,13 @@ with tab_upload:
         uploaded_files = None
     else:
         uploaded_files = st.file_uploader(
-            "Choose video, image, or document files",
+            "Choose video, image, document, or audio files",
             type=["mp4", "mov", "avi", "mkv", "webm",
                   "jpg", "jpeg", "png", "webp", "gif",
                   "pdf", "docx", "doc", "txt", "md", "rtf",
-                  "xlsx", "csv", "pptx"],
+                  "xlsx", "csv", "pptx",
+                  "mp3", "wav", "flac", "aac", "ogg", "m4a",
+                  "wma", "opus", "aiff", "alac"],
             accept_multiple_files=True,
             key=f"fu_{st.session_state.clear_counter}",
         )
@@ -699,7 +659,7 @@ with tab_upload:
             saved = {}
             skipped_size = []
             skipped_ext = []
-            valid_exts = set(VIDEO_EXTENSIONS) | set(IMAGE_EXTENSIONS) | set(DOCUMENT_EXTENSIONS)
+            valid_exts = set(VIDEO_EXTENSIONS) | set(IMAGE_EXTENSIONS) | set(DOCUMENT_EXTENSIONS) | set(AUDIO_EXTENSIONS)
             all_bytes = sum(uf.size for uf in uploaded_files)
             copied_bytes = 0
             total_files = len(uploaded_files)
@@ -745,11 +705,6 @@ with tab_upload:
             st.session_state.base64_cache = {}
             st.session_state.text_cache = {}
             st.session_state.audio_transcription_cache = {}
-            track_event("files_uploaded", {
-                "file_count": len(saved),
-                "video_count": sum(1 for n in saved if Path(n).suffix.lower() in VIDEO_EXTENSIONS),
-                "image_count": sum(1 for n in saved if Path(n).suffix.lower() in IMAGE_EXTENSIONS),
-            })
 
     # Clear All button — always visible when files or staged assets exist
     if st.session_state.get("uploaded_files") or st.session_state.staged_assets:
@@ -843,106 +798,93 @@ with tab_upload:
 
         @st.fragment
         def _analysis_fragment() -> None:
-            """Run one AI analysis step per script execution within a Streamlit fragment."""
+            """Run all remaining AI analysis steps in a single execution within a Streamlit fragment."""
             b64_items = list(st.session_state.get("base64_cache", {}).items())
             text_items = list(st.session_state.get("text_cache", {}).items())
-            all_items = [(n, "image", d) for n, d in b64_items] + [(n, "text", d) for n, d in text_items]
+            audio_items = list(st.session_state.get("audio_transcription_cache", {}).items())
+            all_items = [(n, "image", d) for n, d in b64_items] + [(n, "text", d) for n, d in text_items] + [(n, "audio", d) for n, d in audio_items]
             total = len(all_items)
             idx = st.session_state.analysis_index
 
-            st.success(f"Step 1 complete: {len(b64_items)} media + {len(text_items)} documents extracted")
+            st.success(f"Step 1 complete: {len(b64_items)} media + {len(text_items)} documents + {len(audio_items)} audio extracted")
 
             if total > 0:
-                st.progress(idx / total, text=f"Analyzed {idx}/{total} files")
+                progress_bar = st.progress(idx / total, text=f"Analyzed {idx}/{total} files")
 
-            if 0 <= idx < total:
+            prov = get_provider(st.session_state.provider_info)
+            staged_assets = list(st.session_state.get("staged_assets", []))
+
+            while idx < total:
                 name, file_type, data = all_items[idx]
-                st.info(f"**Analyzing:** {name} ({idx+1}/{total})")
+                progress_bar.progress((idx + 1) / total, text=f"Analyzing {name} ({idx+1}/{total})")
 
-                col_stop, _ = st.columns([1, 4])
-                with col_stop:
-                    if st.button(":material/stop: Stop Analysis", key="stop_analysis"):
-                        st.session_state.analysis_aborted = True
-
-                if st.session_state.analysis_aborted:
-                    st.warning(f"Analysis stopped at {idx}/{total} files.")
-                    st.session_state.analysis_in_progress = False
-                    st.session_state.analysis_done = bool(st.session_state.staged_assets)
+                if file_type in ("text", "audio"):
+                    ai_result = prov.analyze_text(data, verbose=False)
                 else:
-                    prov = get_provider(st.session_state.provider_info)
-                    if file_type == "text":
-                        ai_result = prov.analyze_text(data, verbose=False)
-                    else:
-                        audio_ctx = st.session_state.get("audio_transcription_cache", {}).get(name, "")
-                        prompt_override = None
-                        if audio_ctx:
-                            prompt_override = (
-                                f"Audio transcription (if available):\n{audio_ctx}\n\n---\n\n"
-                                f"{get_active_prompt()}"
-                            )
-                        ai_result = prov.analyze(data, verbose=False, prompt_override=prompt_override)
-
-                    if ai_result['ok']:
-                        ai_data = ai_result['data']
-                        suggested_cat = ai_data.get('suggested_category', '')
-                        staged_category, _ = validate_category(suggested_cat)
-                        ai_topic = ai_data.get('topic', '')
-                        ai_desc = ai_data.get('description', '')
-                        safe_name = sanitize_name(ai_data['new_filename'])
-                        safe_name = apply_naming_template(
-                            st.session_state.template_string,
-                            {"category": staged_category, "topic": ai_topic,
-                             "description": ai_desc, "new_filename": safe_name},
+                    audio_ctx = st.session_state.get("audio_transcription_cache", {}).get(name, "")
+                    prompt_override = None
+                    if audio_ctx:
+                        prompt_override = (
+                            f"Audio transcription (if available):\n{audio_ctx}\n\n---\n\n"
+                            f"{get_active_prompt()}"
                         )
-                        safe_name = apply_case_style(safe_name, st.session_state.case_style)
-                        safe_name = truncate_filename(safe_name, st.session_state.max_filename_chars)
+                    ai_result = prov.analyze(data, verbose=False, prompt_override=prompt_override)
 
-                        staged_assets = st.session_state.get("staged_assets", [])
-                        file_ext = Path(name).suffix.lower()
-                        staged_assets.append({
-                            "original_path": st.session_state.uploaded_files[name],
-                            "original_name": name,
-                            "staged_name": safe_name,
-                            "category": staged_category,
-                            "topic": ai_topic,
-                            "description": ai_desc,
-                            "tags": ai_data.get('tags', []),
-                            "summary": ai_data.get('overall_visual_summary', ''),
-                            "suggested_category": suggested_cat,
-                            "file_type": "document" if file_ext in DOCUMENT_EXTENSIONS else "media",
-                            "file_ext": file_ext,
-                            "audio_transcription": st.session_state.get("audio_transcription_cache", {}).get(name, ""),
-                        })
-                        st.session_state.staged_assets = staged_assets
+                if ai_result['ok']:
+                    ai_data = ai_result['data']
+                    suggested_cat = ai_data.get('suggested_category', '')
+                    staged_category, _ = validate_category(suggested_cat)
+                    ai_topic = ai_data.get('topic', '')
+                    ai_desc = ai_data.get('description', '')
+                    safe_name = sanitize_name(ai_data['new_filename'])
+                    safe_name = apply_naming_template(
+                        st.session_state.template_string,
+                        {"category": staged_category, "topic": ai_topic,
+                         "description": ai_desc, "new_filename": safe_name},
+                    )
+                    safe_name = apply_case_style(safe_name, st.session_state.case_style)
+                    safe_name = truncate_filename(safe_name, st.session_state.max_filename_chars)
 
-                        log_event(logger, "INFO", "ai_analysis_success", file_name=name, details={
-                            "staged_name": safe_name, "category": staged_category
-                        })
-                    else:
-                        error_msg = _format_ai_error(ai_result)
-                        st.session_state.analysis_errors.append(f"{name}: {error_msg}")
-                        log_event(logger, "ERROR", "ai_analysis_failed", file_name=name, details={"error": error_msg})
+                    file_ext = Path(name).suffix.lower()
+                    is_audio = file_ext in AUDIO_EXTENSIONS
+                    is_doc = file_ext in DOCUMENT_EXTENSIONS
+                    staged_assets.append({
+                        "original_path": st.session_state.uploaded_files[name],
+                        "original_name": name,
+                        "staged_name": safe_name,
+                        "category": staged_category,
+                        "topic": ai_topic,
+                        "description": ai_desc,
+                        "tags": ai_data.get('tags', []),
+                        "summary": ai_data.get('overall_visual_summary', ''),
+                        "suggested_category": suggested_cat,
+                        "file_type": "audio" if is_audio else ("document" if is_doc else "media"),
+                        "file_ext": file_ext,
+                        "audio_transcription": st.session_state.get("audio_transcription_cache", {}).get(name, ""),
+                    })
 
-                    st.session_state.analysis_index = idx + 1
-                    st.rerun()
-            else:
-                n = len(st.session_state.get("staged_assets", []))
-                errs = st.session_state.analysis_errors
-                track_event("analysis_completed", {
-                    "total_files": total,
-                    "staged_count": n,
-                    "error_count": len(errs),
-                    "provider": st.session_state.get("provider_info", "unknown"),
-                    "profile": get_active_profile(),
-                })
-                st.session_state.analysis_in_progress = False
-                st.session_state.analysis_done = True
-                if n:
-                    st.success(f"Analysis complete: {n} assets staged.")
+                    log_event(logger, "INFO", "ai_analysis_success", file_name=name, details={
+                        "staged_name": safe_name, "category": staged_category
+                    })
                 else:
-                    st.warning(f"No assets were staged ({len(errs)} failure(s)).")
-                    for e in errs:
-                        st.caption(f"  {e}")
+                    error_msg = _format_ai_error(ai_result)
+                    st.session_state.analysis_errors.append(f"{name}: {error_msg}")
+                    log_event(logger, "ERROR", "ai_analysis_failed", file_name=name, details={"error": error_msg})
+
+                idx += 1
+
+            st.session_state.staged_assets = staged_assets
+            st.session_state.analysis_index = idx
+            st.session_state.analysis_in_progress = False
+            st.session_state.analysis_done = True
+            n = len(staged_assets)
+            errs = st.session_state.analysis_errors
+            if n:
+                st.success(f"Analysis complete: {n} assets staged.")
+            else:
+                st.warning(f"No assets were staged ({len(errs)} failure(s)).")
+                for e in errs:
+                    st.caption(f"  {e}")
 
         _analysis_fragment()
 
@@ -1054,11 +996,6 @@ with tab_upload:
             st.caption("Upload media files above, then click 'Run AI Analysis' to begin.")
 
         if analyze_btn:
-            track_event("analysis_started", {
-                "file_count": len(st.session_state.get("uploaded_files", {})),
-                "provider": st.session_state.provider_info,
-                "profile": get_active_profile(),
-            })
             try:
                 hw_accel = detect_hw_accel()
                 st.session_state.hw_accel = hw_accel
@@ -1075,6 +1012,7 @@ with tab_upload:
                 cached_count = len(base64_results) + len(text_results)
 
                 doc_exts = set(DOCUMENT_EXTENSIONS)
+                audio_exts = set(AUDIO_EXTENSIONS)
                 files_list = list(st.session_state.uploaded_files.values())
                 uncached = [fp for fp in files_list
                             if fp.name not in base64_results and fp.name not in text_results]
@@ -1085,6 +1023,8 @@ with tab_upload:
                     for fp in uncached:
                         if fp.suffix.lower() in doc_exts:
                             future_map[executor.submit(extract_text_from_file, fp)] = fp
+                        elif fp.suffix.lower() in audio_exts:
+                            future_map[executor.submit(transcribe_audio, fp)] = fp
                         else:
                             future_map[executor.submit(process_asset_to_base64, fp, hw_accel)] = fp
                     done_count = 0
@@ -1095,6 +1035,8 @@ with tab_upload:
                         if result:
                             if fp.suffix.lower() in doc_exts:
                                 text_results[fp.name] = result
+                            elif fp.suffix.lower() in audio_exts:
+                                audio_results[fp.name] = result.get("text", "") if isinstance(result, dict) else ""
                             else:
                                 base64_results[fp.name] = result
                         else:
@@ -1220,7 +1162,12 @@ with tab_upload:
             existing_rating = asset.get("rating", "")
             ft = asset.get("file_type", "media")
             fext = asset.get("file_ext", "")
-            type_label = f"doc ({fext.lstrip('.')})" if ft == "document" else "media"
+            if ft == "audio":
+                type_label = f"audio ({fext.lstrip('.')})"
+            elif ft == "document":
+                type_label = f"doc ({fext.lstrip('.')})"
+            else:
+                type_label = "media"
             summary_text = asset["summary"]
             if ft == "document":
                 txt = st.session_state.text_cache.get(asset["original_name"], "")
@@ -1229,6 +1176,13 @@ with tab_upload:
                     if len(txt) > 200:
                         snippet += "..."
                     summary_text = snippet
+            elif ft == "audio":
+                txt = st.session_state.get("audio_transcription_cache", {}).get(asset["original_name"], "")
+                if txt:
+                    snippet = txt[:200].replace("\n", " ")
+                    if len(txt) > 200:
+                        snippet += "..."
+                    summary_text = f"[Transcription] {snippet}"
             table_rows.append({
                 "select": select_all,
                 "original_name": asset["original_name"],
@@ -1518,26 +1472,6 @@ with tab_upload:
 
                     if undo_records:
                         log_commit_batch(batch_id, str(target_dir), undo_records)
-
-                    # Track ratings to telemetry
-                    for asset in staged:
-                        rating = asset.get("rating", "")
-                        if rating:
-                            track_event("ai_rating", {
-                                "outcome": "thumbs_up" if rating == "\U0001f44d" else "thumbs_down",
-                                "profile": get_active_profile(),
-                                "model": config.get("model", {}).get("name", "unknown"),
-                                "provider": config.get("model", {}).get("last_provider", "ollama"),
-                            })
-
-                    # Track session completion
-                    track_event("session_complete", {
-                        "files_analyzed": len(staged),
-                        "files_committed": committed,
-                        "files_failed": failed,
-                        "profile": get_active_profile(),
-                        "case_style": st.session_state.case_style,
-                    })
 
                     if committed_names:
                         st.session_state.staged_assets = [
@@ -1925,7 +1859,7 @@ with tab_config:
     # -- 6.4: Extension management --
     st.subheader(":material/format_list_bulleted: Supported Extensions")
 
-    ext_col1, ext_col2, ext_col3 = st.columns(3)
+    ext_col1, ext_col2, ext_col3, ext_col4 = st.columns(4)
     with ext_col1:
         video_exts = st.multiselect("Video Extensions",
                                      options=[".mp4", ".mov", ".avi", ".mkv", ".webm",
@@ -1944,16 +1878,23 @@ with tab_config:
                                             ".xlsx", ".csv", ".pptx"],
                                    default=list(config.get("document_extensions", [])),
                                    key="cfg_doc_exts")
+    with ext_col4:
+        audio_exts = st.multiselect("Audio Extensions",
+                                     options=[".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a",
+                                              ".wma", ".opus", ".aiff", ".alac", ".ape", ".wv"],
+                                     default=list(config.get("audio_extensions", [])),
+                                     key="cfg_audio_exts")
 
     if st.button(":material/save: Save Extensions", type="primary", key="btn_save_exts"):
         config["video_extensions"] = sorted(set(video_exts))
         config["image_extensions"] = sorted(set(image_exts))
         config["document_extensions"] = sorted(set(doc_exts))
+        config["audio_extensions"] = sorted(set(audio_exts))
         save_config()
         reload_config()
-        st.success(f"Saved {len(video_exts)} video + {len(image_exts)} image + {len(doc_exts)} document extensions.")
+        st.success(f"Saved {len(video_exts)} video + {len(image_exts)} image + {len(doc_exts)} document + {len(audio_exts)} audio extensions.")
         log_event(logger, "INFO", "extensions_updated",
-                  details={"video": len(video_exts), "image": len(image_exts), "document": len(doc_exts)})
+                  details={"video": len(video_exts), "image": len(image_exts), "document": len(doc_exts), "audio": len(audio_exts)})
 
     st.space()
 
@@ -1994,30 +1935,6 @@ with tab_config:
             else:
                 st.error("config.default.json not found — cannot restore.")
 
-    # -- Telemetry settings --
-    st.subheader(":material/monitoring: Telemetry")
-    st.caption("Anonymous usage data to help improve the app")
-
-    current_telemetry = config.get("telemetry", {}).get("enabled", False)
-    new_telemetry = st.toggle("Send anonymous usage data", value=current_telemetry,
-                              key="telemetry_toggle",
-                              help="No file names, content, or paths are ever sent. "
-                                   "See PRIVACY.md for details.")
-    if new_telemetry != current_telemetry:
-        set_telemetry_enabled(new_telemetry)
-        if new_telemetry:
-            track_event("opt_in")
-        else:
-            send_opt_out_event()
-            track_event("opt_out")
-        st.toast(f"Telemetry {'enabled' if new_telemetry else 'disabled'}")
-
-# Flush telemetry on session end
-try:
-    flush_telemetry()
-except Exception:
-    pass
-
 # -----------------------------------------------------------------------------
 # Footer — always renders at the bottom
 # -----------------------------------------------------------------------------
@@ -2025,6 +1942,7 @@ except Exception:
 st.markdown(
     "<hr style='margin-top: 3rem; margin-bottom: 0.5rem; border-color: #27272A;'>"
     "<p style='text-align: center; color: #71717A; font-size: 0.8rem;'>"
+    f"AI Media Renamer {VERSION} &mdash; "
     "Made with love from Tanzania by "
     "<a href='https://github.com/Abdulmusawwir/ai-media-renamer' "
     "   style='color: #A1A1AA; text-decoration: none;'>Abdul Musawwir</a>"

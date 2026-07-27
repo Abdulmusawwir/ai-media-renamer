@@ -38,6 +38,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] Support video formats: MP4, MOV, AVI, MKV, WebM
 - [x] Support image formats: JPG, JPEG, PNG, WebP, GIF
 - [x] Support document formats: PDF, DOCX, XLSX, CSV, PPTX, TXT, MD, RTF (text extraction, no frame extraction)
+- [x] Support audio formats: MP3, WAV, FLAC, AAC, OGG, M4A, WMA, OPUS, AIFF, ALAC, APE, WV (transcription, no visual extraction)
 - [x] Eager file saving to temp directory (files survive Streamlit reruns)
 - [x] "Clear All Files" button to reset upload state
 - [x] Progress indicator during upload / file copy
@@ -56,7 +57,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] 40-category taxonomy validation — invalid suggestions fall back to uncategorized
 - [x] Stop Analysis button (immediate abort, preserves already-analyzed assets)
 - [x] Progress bar during extraction and analysis phases
-- [x] 7 AI prompt profiles (General Balanced, General B-Roll, Cinematography, Motion Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming) + Custom — selectable in web UI (main interface, before analysis) and CLI via `--profile`
+- [x] 8 AI prompt profiles (General Balanced, General B-Roll, Cinematography, Motion Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming, Audio Files) + Custom — selectable in web UI (main interface, before analysis) and CLI via `--profile`
 - [x] Multi-provider AI support (Ollama, OpenAI, Anthropic, Groq, OpenRouter) with provider abstraction layer — cloud providers disabled in UI, untested
 - [x] Auto-detect available Ollama models via `ollama.list()` and populate dropdown
 - [x] "Re-analyze Selected" button (replaced per-asset + Re-analyze All buttons)
@@ -114,7 +115,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 
 ### Configuration
 - [x] Single `config.json` as source of truth for all tunable parameters
-- [x] Configurable: 7 AI prompt profiles, 40 categories, model/ provider settings, extensions, preview params, naming templates, logging limits
+- [x] Configurable: 8 AI prompt profiles, 56 categories, model/ provider settings, extensions (video/image/document/audio), preview params, naming templates, logging limits
 - [x] No hardcoded constants in Python code
 - [x] Config editor tab (read-only + editable modes) in web UI
 - [x] In-app category management (add/delete/rename categories via UI)
