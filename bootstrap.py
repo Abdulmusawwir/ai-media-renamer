@@ -1,9 +1,11 @@
 import os
+import re
 import shutil
 import subprocess
 import sys
 import threading
 import webbrowser
+import zipfile
 from pathlib import Path
 
 if getattr(sys, "frozen", False) and sys.stdin is None:
@@ -188,21 +190,6 @@ def _progress_callback(downloaded, total, win, step_text):
     win.update()
 
 
-def _download_with_progress(win, step_num, label, url, dest):
-    win.set_step(step_num, f"\u27f3 {label}")
-    win.set_progress(0)
-    win.set_info("Starting download...")
-    win.update()
-
-    def cb(d, t):
-        _progress_callback(d, t, win, label)
-
-    download_file(url, dest, progress_callback=cb)
-    win.set_step(step_num, f"\u2713 {label} — ready")
-    win.set_progress(100)
-    win.update()
-
-
 def _add_to_user_path(path):
     try:
         import winreg
@@ -216,6 +203,170 @@ def _add_to_user_path(path):
         os.environ["PATH"] = str(path) + ";" + os.environ.get("PATH", "")
     except Exception:
         pass
+
+
+def _is_valid_zip(path: Path) -> bool:
+    """Return True if the given file is a readable ZIP archive."""
+    try:
+        with zipfile.ZipFile(path) as zf:
+            return zf.testzip() is None
+    except Exception:
+        return False
+
+
+def _exiftool_download_urls() -> list[str]:
+    """Return candidate download URLs for the latest Windows ExifTool build.
+
+    ExifTool's Windows builds are hosted on SourceForge with a versioned
+    filename like 'exiftool-13.59_64.zip'. The current version is resolved
+    dynamically from exiftool.org's ver.txt, with pinned fallbacks so the
+    setup never hardcodes a version that could go stale.
+    """
+    urls: list[str] = []
+    try:
+        resp = requests.get("https://exiftool.org/ver.txt", timeout=10)
+        ver = resp.text.strip()
+        if re.fullmatch(r"\d+\.\d+", ver):
+            urls.append(
+                f"https://sourceforge.net/projects/exiftool/files/exiftool-{ver}_64.zip/download"
+            )
+    except Exception:
+        pass
+    for pinned in ("13.59", "13.58", "13.57"):
+        urls.append(
+            f"https://sourceforge.net/projects/exiftool/files/exiftool-{pinned}_64.zip/download"
+        )
+    return urls
+
+
+def _extract_exiftool(zip_path: Path) -> bool:
+    """Extract the ExifTool Windows zip and install exiftool.exe + support files.
+
+    The Windows exiftool package ships 'exiftool(-k).exe' plus an
+    'exiftool_files' folder that MUST sit next to the executable. Returns
+    True when exiftool.exe is in place under BIN_DIR.
+    """
+    try:
+        extract_dir = CACHE_DIR / "exiftool_extracted"
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(extract_dir)
+
+        exe_src = None
+        for f in extract_dir.rglob("*.exe"):
+            if f.name.lower() in ("exiftool(-k).exe", "exiftool.exe"):
+                exe_src = f
+                break
+        if exe_src is None:
+            return False
+
+        BIN_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(exe_src, BIN_DIR / "exiftool.exe")
+        files_dir = exe_src.parent / "exiftool_files"
+        if files_dir.is_dir():
+            shutil.copytree(files_dir, BIN_DIR / "exiftool_files", dirs_exist_ok=True)
+        return True
+    except Exception:
+        return False
+
+
+def _verify_exiftool() -> bool:
+    """Run 'exiftool -ver' against the installed binary to confirm it works."""
+    try:
+        result = subprocess.run(
+            [str(BIN_DIR / "exiftool.exe"), "-ver"],
+            capture_output=True, text=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def _install_exiftool(win) -> None:
+    """Download, extract, and verify the Windows ExifTool build."""
+    win.set_step(1, "\u27f3 Downloading ExifTool...")
+    win.set_progress(0)
+    win.set_info("Downloading...")
+    win.update()
+
+    zip_dest = CACHE_DIR / "exiftool.zip"
+    last_err = None
+    for url in _exiftool_download_urls():
+        try:
+            zip_dest.unlink(missing_ok=True)
+            download_file(url, zip_dest,
+                          progress_callback=lambda d, t: _progress_callback(d, t, win, "ExifTool"))
+            if not _is_valid_zip(zip_dest):
+                raise RuntimeError("downloaded file is not a valid ZIP archive")
+            if not _extract_exiftool(zip_dest):
+                raise RuntimeError("exiftool.exe not found inside archive")
+            if not _verify_exiftool():
+                raise RuntimeError("installed exiftool.exe did not run correctly")
+            zip_dest.unlink(missing_ok=True)
+            win.set_step(1, "\u2713 Checking ExifTool... ready")
+            win.set_progress(100)
+            win.set_info("")
+            win.update()
+            return
+        except Exception as exc:
+            last_err = exc
+            continue
+
+    win.set_step(1, "\u2716 ExifTool download failed")
+    win.set_progress(0)
+    win.set_info(f"Automatic download failed: {last_err}. "
+                 "Install ExifTool manually from exiftool.org (64-bit Windows zip) and retry.")
+    win.update()
+    import time
+    time.sleep(5)
+
+
+def _install_ffmpeg(win) -> None:
+    """Download, extract, and verify FFmpeg/FFprobe from the Gyan.dev essentials build."""
+    win.set_step(2, "\u27f3 Downloading FFmpeg...")
+    win.set_progress(0)
+    win.set_info("Downloading...")
+    win.update()
+
+    zip_dest = CACHE_DIR / "ffmpeg.zip"
+    try:
+        download_file("https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+                      zip_dest,
+                      progress_callback=lambda d, t: _progress_callback(d, t, win, "FFmpeg"))
+        if not _is_valid_zip(zip_dest):
+            raise RuntimeError("downloaded file is not a valid ZIP archive")
+        extract_dir = CACHE_DIR / "ffmpeg_extracted"
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(zip_dest, "r") as zf:
+            zf.extractall(extract_dir)
+
+        moved = 0
+        for f in extract_dir.rglob("*.exe"):
+            if f.name.lower() == "ffmpeg.exe":
+                shutil.copy2(f, BIN_DIR / "ffmpeg.exe")
+                moved += 1
+            elif f.name.lower() == "ffprobe.exe":
+                shutil.copy2(f, BIN_DIR / "ffprobe.exe")
+                moved += 1
+        if moved < 2:
+            raise RuntimeError("ffmpeg.exe/ffprobe.exe not found inside archive")
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        zip_dest.unlink(missing_ok=True)
+        win.set_step(2, "\u2713 Checking FFmpeg... ready")
+        win.set_progress(100)
+        win.set_info("")
+        win.update()
+    except Exception as exc:
+        win.set_step(2, "\u2716 FFmpeg download failed")
+        win.set_progress(0)
+        win.set_info(f"Automatic download failed: {exc}. "
+                     "Install FFmpeg manually from gyan.dev and retry.")
+        win.update()
+        import time
+        time.sleep(5)
 
 
 def _stream_model_with_progress(win, step_num, label, model_name):
@@ -453,9 +604,7 @@ def main():
             win.set_progress(100)
             win.set_info("")
         else:
-            url = "https://exiftool.org/exiftool-12.91.zip"
-            dest = BIN_DIR / "exiftool.exe"
-            _download_with_progress(win, 1, "Downloading ExifTool...", url, dest)
+            _install_exiftool(win)
             _add_to_user_path(BIN_DIR)
         win.update()
 
@@ -465,33 +614,24 @@ def main():
             win.set_progress(100)
             win.set_info("")
         else:
-            url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-            win.set_step(2, "\u27f3 Downloading FFmpeg...")
-            win.set_progress(0)
-            win.set_info("Downloading...")
-            win.update()
-            zip_dest = CACHE_DIR / "ffmpeg.zip"
-            download_file(url, zip_dest, progress_callback=lambda d, t: _progress_callback(d, t, win, "FFmpeg"))
-            import zipfile
-            with zipfile.ZipFile(zip_dest, "r") as zf:
-                for member in zf.namelist():
-                    if member.endswith("ffmpeg.exe") or member.endswith("ffprobe.exe"):
-                        zf.extract(member, CACHE_DIR / "ffmpeg_extracted")
-            for f in CACHE_DIR.glob("ffmpeg_extracted/**/ffmpeg.exe"):
-                shutil.move(str(f), str(BIN_DIR / "ffmpeg.exe"))
-                break
-            for f in CACHE_DIR.glob("ffmpeg_extracted/**/ffprobe.exe"):
-                shutil.move(str(f), str(BIN_DIR / "ffprobe.exe"))
-                break
-            shutil.rmtree(CACHE_DIR / "ffmpeg_extracted", ignore_errors=True)
-            zip_dest.unlink(missing_ok=True)
+            _install_ffmpeg(win)
             _add_to_user_path(BIN_DIR)
-            win.set_step(2, "\u2713 Checking FFmpeg... ready")
-            win.set_progress(100)
         win.update()
 
         # ---- Step 3: Ollama ----
-        ollama_binary = shutil.which("ollama")
+        def _ollama_binary():
+            """Locate the ollama executable, including the default install path
+            that a just-finished silent installer won't expose via PATH yet."""
+            found = shutil.which("ollama")
+            if found:
+                return found
+            default_path = (Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+                            / "Programs" / "Ollama" / "ollama.exe")
+            if default_path.exists():
+                return str(default_path)
+            return None
+
+        ollama_binary = _ollama_binary()
         installer_path = OLLAMA_INSTALLER_CACHE / "OllamaSetup.exe"
 
         if not ollama_binary:
@@ -511,7 +651,7 @@ def main():
             win.set_info("Running silent installer (this may take a moment)...")
             win.update()
             subprocess.run([str(installer_path), "/S"], check=True, capture_output=True)
-            ollama_binary = shutil.which("ollama")
+            ollama_binary = _ollama_binary()
 
         # Check if the Ollama service is actually running
         ollama_running = False
