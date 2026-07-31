@@ -2532,6 +2532,15 @@ def stream_model_download(model_name: str = "qwen2.5vl:7b") -> Any:
         yield {"status": "error", "message": str(exc)}
 
 
+def _parse_version(version: str) -> tuple[int, int, int]:
+    """Parse a version string like 'v1.6.0' or '1.4.1' into a comparable tuple."""
+    import re
+    match = re.match(r"[vV]?(\d+)\.(\d+)\.(\d+)", version.strip())
+    if not match:
+        return (0, 0, 0)
+    return tuple(int(g) for g in match.groups())  # type: ignore[return-value]
+
+
 def check_for_updates() -> dict[str, Any]:
     """Check GitHub releases for a newer version of the application.
 
@@ -2548,7 +2557,7 @@ def check_for_updates() -> dict[str, Any]:
         return {
             "current": VERSION,
             "latest": latest,
-            "update_available": latest != VERSION,
+            "update_available": bool(latest) and _parse_version(latest) > _parse_version(VERSION),
             "download_url": data.get("html_url", ""),
             "ok": True,
         }
