@@ -99,6 +99,60 @@ class TestVideoExtraction:
 
 
 @pytest.mark.skipif(not _HAS_FFMPEG, reason="FFmpeg not installed")
+class TestVideoCpuFallback:
+    def test_fallback_retries_cpu_and_logs(self, tmp_path: Path, monkeypatch):
+        video = tmp_path / "test.mp4"
+        fallback_log: dict[str, bool] = {}
+        attempts = []
+
+        def fake_extract(path, hw_accel):
+            attempts.append(hw_accel)
+            return None if hw_accel == "cuda" else "ZmFrZQ=="
+
+        monkeypatch.setattr("engine._extract_frame_to_base64", fake_extract)
+        monkeypatch.setattr("engine.get_video_duration", lambda p: 10.0)
+
+        result = process_video_to_base64(video, "cuda", fallback_log)
+
+        assert result == "ZmFrZQ=="
+        assert attempts == ["cuda", None]
+        assert video.name in fallback_log
+
+    def test_no_fallback_when_hw_succeeds(self, tmp_path: Path, monkeypatch):
+        video = tmp_path / "test.mp4"
+        fallback_log: dict[str, bool] = {}
+        attempts = []
+
+        def fake_extract(path, hw_accel):
+            attempts.append(hw_accel)
+            return "ZmFrZQ=="
+
+        monkeypatch.setattr("engine._extract_frame_to_base64", fake_extract)
+        monkeypatch.setattr("engine.get_video_duration", lambda p: 10.0)
+
+        result = process_video_to_base64(video, "cuda", fallback_log)
+
+        assert result == "ZmFrZQ=="
+        assert attempts == ["cuda"]
+        assert fallback_log == {}
+
+    def test_plain_cpu_does_not_log_fallback(self, tmp_path: Path, monkeypatch):
+        video = tmp_path / "test.mp4"
+        fallback_log: dict[str, bool] = {}
+
+        def fake_extract(path, hw_accel):
+            return "ZmFrZQ=="
+
+        monkeypatch.setattr("engine._extract_frame_to_base64", fake_extract)
+        monkeypatch.setattr("engine.get_video_duration", lambda p: 10.0)
+
+        result = process_video_to_base64(video, None, fallback_log)
+
+        assert result == "ZmFrZQ=="
+        assert fallback_log == {}
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="FFmpeg not installed")
 class TestImageExtraction:
     def test_process_image_to_base64_returns_string(self, tmp_path: Path):
         img = tmp_path / "test.png"

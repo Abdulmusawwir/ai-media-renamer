@@ -278,6 +278,9 @@ if "model_download_gen" not in st.session_state:
 if "analysis_errors" not in st.session_state:
     st.session_state.analysis_errors = []
 
+if "hw_fallback_files" not in st.session_state:
+    st.session_state.hw_fallback_files = []
+
 if "clear_counter" not in st.session_state:
     st.session_state.clear_counter = 0
 
@@ -577,7 +580,7 @@ def _reset_app_settings() -> None:
     reset_keys = ["base64_cache", "text_cache", "audio_transcription_cache", "staged_assets", "analysis_done", "uploaded_files",
                   "temp_dir", "output_dir", "logger", "analysis_in_progress",
                   "analysis_index", "analysis_aborted", "clear_counter",
-                  "analysis_errors"]
+                  "analysis_errors", "hw_fallback_files"]
     for key in reset_keys:
         st.session_state.pop(key, None)
     for h in logging.getLogger('video_renamer').handlers[:]:
@@ -745,6 +748,7 @@ with tab_upload:
             st.session_state.base64_cache = {}
             st.session_state.text_cache = {}
             st.session_state.audio_transcription_cache = {}
+            st.session_state.hw_fallback_files = []
 
     # Clear All button — always visible when files or staged assets exist
     if st.session_state.get("uploaded_files") or st.session_state.staged_assets:
@@ -754,7 +758,8 @@ with tab_upload:
                 shutil.rmtree(temp_dir, ignore_errors=True)
             for s in list_sessions():
                 delete_session(s["path"])
-            for key in ["uploaded_files", "base64_cache", "text_cache", "staged_assets", "temp_dir", "analysis_errors"]:
+            for key in ["uploaded_files", "base64_cache", "text_cache", "staged_assets",
+                        "temp_dir", "analysis_errors", "hw_fallback_files"]:
                 st.session_state.pop(key, None)
             st.session_state.analysis_done = False
             st.session_state.analysis_in_progress = False
@@ -846,6 +851,17 @@ with tab_upload:
     # Phase 2: Per-asset rerun loop (one AI call per script execution)
     # Uses st.fragment to isolate reruns — only the analysis area re-renders
     # ------------------------------------------------------------------
+    def _render_hw_fallback_warning() -> None:
+        """Show a durable notice when files had to fall back to CPU decoding."""
+        fnames = st.session_state.get("hw_fallback_files", [])
+        if not fnames:
+            return
+        shown = ", ".join(fnames[:3])
+        if len(fnames) > 3:
+            shown += f" and {len(fnames) - 3} more"
+        st.warning(f"GPU decoding failed for {len(fnames)} file(s) — fell back to CPU "
+                   f"({shown}). Extraction succeeded but analysis may be slower.")
+
     if st.session_state.analysis_in_progress:
 
         @st.fragment
@@ -853,7 +869,8 @@ with tab_upload:
             """Run all remaining AI analysis steps in a single execution within a Streamlit fragment."""
             b64_items = list(st.session_state.get("base64_cache", {}).items())
             text_items = list(st.session_state.get("text_cache", {}).items())
-            audio_items = list(st.session_state.get("audio_transcription_cache", {}).items())
+            audio_items = [(n, d) for n, d in st.session_state.get("audio_transcription_cache", {}).items()
+                           if Path(n).suffix.lower() in AUDIO_EXTENSIONS]
             all_items = [(n, "image", d) for n, d in b64_items] + [(n, "text", d) for n, d in text_items] + [(n, "audio", d) for n, d in audio_items]
             total = len(all_items)
             idx = st.session_state.analysis_index
@@ -947,6 +964,7 @@ with tab_upload:
         n = len(st.session_state.staged_assets)
         if n:
             st.success(f"Analysis complete: {n} asset{'s' if n != 1 else ''} ready for review below.")
+        _render_hw_fallback_warning()
 
     # ------------------------------------------------------------------
     # AI Prompt Profile (before analysis, changeable per run)
@@ -1051,6 +1069,7 @@ with tab_upload:
             try:
                 hw_accel = detect_hw_accel()
                 st.session_state.hw_accel = hw_accel
+                st.session_state.hw_fallback_files = []
                 if hw_accel:
                     st.info(f"Hardware Acceleration: FFmpeg will use '{hw_accel}'")
                 else:
@@ -1072,6 +1091,7 @@ with tab_upload:
                 if cached_count:
                     st.caption(f"{cached_count} file(s) already cached, extracting {len(uncached)} new...")
                 with ThreadPoolExecutor(max_workers=EXTRACTION_WORKERS) as executor:
+                    fallback_log: dict[str, bool] = {}
                     future_map = {}
                     for fp in uncached:
                         if fp.suffix.lower() in doc_exts:
@@ -1079,7 +1099,7 @@ with tab_upload:
                         elif fp.suffix.lower() in audio_exts:
                             future_map[executor.submit(transcribe_audio, fp)] = fp
                         else:
-                            future_map[executor.submit(process_asset_to_base64, fp, hw_accel)] = fp
+                            future_map[executor.submit(process_asset_to_base64, fp, hw_accel, fallback_log)] = fp
                     done_count = 0
                     extract_total = max(len(uncached), 1)
                     for future in as_completed(future_map):
@@ -1100,6 +1120,9 @@ with tab_upload:
                             done_count / extract_total,
                             text=f"Extracted {done_count}/{extract_total}"
                         )
+
+                if fallback_log:
+                    st.session_state.hw_fallback_files = list(fallback_log)
 
                 if not base64_results and not text_results:
                     st.error("No files could be extracted. Aborting.")

@@ -469,7 +469,7 @@ def get_video_duration(video_path: str | Path) -> float:
     return duration
 
 
-def process_video_to_base64(video_path: str | Path, hw_accel: str | None) -> str | None:
+def _extract_frame_to_base64(video_path: str | Path, hw_accel: str | None) -> str | None:
     """Extract the midpoint frame of a video and return as base64 JPEG.
 
     Args:
@@ -503,6 +503,32 @@ def process_video_to_base64(video_path: str | Path, hw_accel: str | None) -> str
         return None
 
 
+def process_video_to_base64(video_path: str | Path, hw_accel: str | None,
+                            fallback_log: dict[str, bool] | None = None) -> str | None:
+    """Extract the midpoint frame of a video, falling back to CPU on failure.
+
+    If hardware-accelerated decoding is requested but fails, retries the
+    extraction with software decoding and records the file name in
+    ``fallback_log`` so callers can notify the user about the degradation.
+
+    Args:
+        video_path: Path to the video file.
+        hw_accel: Hardware accelerator name or None for software decoding.
+        fallback_log: Optional dict; file names that needed CPU fallback are
+            recorded here (name -> True).
+
+    Returns:
+        Base64-encoded JPEG string, or None on failure.
+    """
+    if hw_accel:
+        result = _extract_frame_to_base64(video_path, hw_accel)
+        if result is not None:
+            return result
+        if fallback_log is not None:
+            fallback_log[Path(video_path).name] = True
+    return _extract_frame_to_base64(video_path, None)
+
+
 def process_image_to_base64(image_path: str | Path, max_edge: int = IMAGE_PREVIEW_MAX_EDGE) -> str | None:
     """Downscale an image and return as base64 JPEG.
 
@@ -532,18 +558,21 @@ def process_image_to_base64(image_path: str | Path, max_edge: int = IMAGE_PREVIE
         return None
 
 
-def process_asset_to_base64(file_path: Path, hw_accel: str | None) -> str | None:
+def process_asset_to_base64(file_path: Path, hw_accel: str | None,
+                            fallback_log: dict[str, bool] | None = None) -> str | None:
     """Route a media file to the appropriate base64 encoder.
 
     Args:
         file_path: Path to the video or image file.
         hw_accel: Hardware accelerator name or None.
+        fallback_log: Optional dict forwarded to ``process_video_to_base64``
+            to record files that fell back to CPU decoding.
 
     Returns:
         Base64-encoded JPEG string, or None on failure.
     """
     if file_path.suffix.lower() in VIDEO_EXTENSIONS:
-        return process_video_to_base64(file_path, hw_accel)
+        return process_video_to_base64(file_path, hw_accel, fallback_log)
     return process_image_to_base64(file_path)
 
 
