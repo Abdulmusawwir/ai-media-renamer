@@ -177,6 +177,7 @@ AUDIO_EXTENSIONS = config.get('audio_extensions', (
     '.wma', '.opus', '.aiff', '.alac', '.ape', '.wv',
 ))
 MODEL_NAME = config['model']['name']
+TEXT_MODEL_NAME = config['model'].get('text_model', 'qwen2.5:3b')
 MODEL_TEMPERATURE = config['model']['temperature']
 MODEL_NUM_CTX = config['model']['num_ctx']
 MODEL_KEEP_ALIVE = config['model']['keep_alive']
@@ -1097,9 +1098,10 @@ def _is_vision_model(name: str) -> bool:
 
 class AIProvider(ABC):
     def __init__(self) -> None:
-        """Initialize default model and API key slots."""
+        """Initialize default model, text model, and API key slots."""
         self._model = ""
         self._api_key = ""
+        self.text_model = TEXT_MODEL_NAME
 
     @abstractmethod
     def analyze(self, base64_img: str, verbose: bool = False,
@@ -1254,10 +1256,11 @@ class OllamaProvider(AIProvider):
         """
         result: dict[str, Any] = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
         last_exc = None
+        model = self.text_model or self._model
         for attempt in range(self._retries):
             try:
                 response = ollama.generate(
-                    model=self._model,
+                    model=model,
                     prompt=prompt,
                     keep_alive=MODEL_KEEP_ALIVE,
                     options={"temperature": MODEL_TEMPERATURE, "num_ctx": MODEL_NUM_CTX}
@@ -1640,6 +1643,7 @@ def analyze_document_with_ai(text_content: str, verbose: bool = False) -> dict[s
     """
     provider = get_provider("ollama")
     provider.model = config["model"]["name"]
+    provider.text_model = config["model"].get("text_model", TEXT_MODEL_NAME)
     return provider.analyze_text(text_content, verbose=verbose)
 
 

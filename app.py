@@ -326,6 +326,13 @@ def _on_model_change() -> None:
     save_config()
 
 
+def _on_text_model_change() -> None:
+    """Persist the selected text model to config when its dropdown changes."""
+    model = st.session_state.get("text_model_ollama", "")
+    config["model"]["text_model"] = model
+    save_config()
+
+
 with st.sidebar:
     st.header(":material/smart_toy: AI Provider")
 
@@ -377,6 +384,36 @@ with st.sidebar:
             st.selectbox("Model", models, index=m_idx, key=model_key, on_change=_on_model_change)
         else:
             st.caption("No models available.")
+
+        # Text model for documents & audio (text-only analysis)
+        if new_provider == "ollama":
+            text_models = [m for m in models if not _is_vision_model(m)]
+            text_cur = config["model"].get("text_model", "")
+            if text_cur and text_cur not in text_models:
+                text_models = [text_cur] + text_models
+            if text_models:
+                t_idx = text_models.index(text_cur) if text_cur in text_models else 0
+                st.selectbox(
+                    "Text model (documents & audio)",
+                    text_models,
+                    index=t_idx,
+                    key="text_model_ollama",
+                    on_change=_on_text_model_change,
+                    help="Used for text-only analysis of documents and audio transcripts. "
+                         "A small non-vision model (e.g. qwen2.5:3b) is much faster on CPU.",
+                )
+                if st.button(":material/download: Download this text model", type="secondary",
+                             key="download_text_model",
+                             help=f"Download '{text_cur or text_models[0]}' via Ollama."):
+                    st.session_state.download_model_name = text_cur or text_models[0]
+                    st.session_state.model_downloading = True
+                    st.rerun()
+                if text_cur and _is_vision_model(text_cur):
+                    st.caption(":material/warning: Current text model is a vision model — "
+                               "install a small text model for faster analysis "
+                               "(`ollama pull qwen2.5:3b`).")
+            else:
+                st.caption("No text models installed — add one via `ollama pull qwen2.5:3b`.")
 
         # Warn if selected model is not vision-capable
         if new_provider == "ollama" and models:
@@ -888,6 +925,7 @@ with tab_upload:
                 progress_bar.progress((idx + 1) / total, text=f"Analyzing {name} ({idx+1}/{total})")
 
                 if file_type in ("text", "audio"):
+                    prov.text_model = config["model"].get("text_model", "")
                     ai_result = prov.analyze_text(data, verbose=False)
                 else:
                     audio_ctx = st.session_state.get("audio_transcription_cache", {}).get(name, "")
