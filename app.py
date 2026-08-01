@@ -410,22 +410,16 @@ with st.sidebar:
             if cur_val and not _is_vision_model(cur_val):
                 st.caption("\u26a0\ufe0f This model may not support vision analysis.")
 
-        # Ollama health status
+        # Ollama health status (refreshed via the "Refresh Status" button below)
         if new_provider == "ollama":
             health = st.session_state.get("ollama_health")
             if health is None:
                 health = check_ollama_health()
                 st.session_state.ollama_health = health
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                if health["connected"]:
-                    st.markdown(f"\u2705 **Ollama** — {health['model_count']} models")
-                else:
-                    st.markdown("\u274c **Ollama** — disconnected")
-            with col2:
-                if st.button(":material/refresh: Refresh Ollama status", key="refresh_ollama"):
-                    st.session_state.ollama_health = None
-                    st.rerun()
+            if health["connected"]:
+                st.markdown(f"\u2705 **Ollama** — {health['model_count']} models")
+            else:
+                st.markdown("\u274c **Ollama** — disconnected")
 
         # API key (cloud providers only)
         if new_provider != "ollama":
@@ -788,7 +782,7 @@ with tab_upload:
                         st.toast("Session deleted.")
                         st.rerun()
                 else:
-                    st.caption("")
+                    st.space()
 
     # ------------------------------------------------------------------
     # Phase 2: Per-asset rerun loop (one AI call per script execution)
@@ -1103,8 +1097,8 @@ with tab_upload:
 
         col_filter, _ = st.columns([3, 2])
         with col_filter:
-            st.text_input("\U0001f50d", placeholder="Filter assets...", key="staging_filter",
-                          label_visibility="collapsed", on_change=lambda: None)
+            st.text_input("Filter assets", placeholder="Filter assets...", key="staging_filter",
+                          label_visibility="collapsed", icon=":material/search:")
 
         staged_raw = st.session_state.staged_assets
         filter_text = st.session_state.get("staging_filter", "").lower().strip()
@@ -1804,32 +1798,27 @@ with tab_config:
     st.subheader(":material/label: Categories")
     st.caption(f"{len(ALLOWED_CATEGORIES)} categories configured")
 
-    cat_cols = st.columns([4, 1])
-    with cat_cols[1]:
-        if st.button(":material/add: Add Category", key="btn_add_category"):
-            st.session_state.setdefault("edit_categories", list(ALLOWED_CATEGORIES))
-            st.session_state.edit_categories.append("")
-            st.rerun()
-
     edit_cats = st.session_state.get("edit_categories", list(ALLOWED_CATEGORIES))
-    new_cats = []
-    cols_per_row = 4
-    for i in range(0, len(edit_cats), cols_per_row):
-        row = st.columns(cols_per_row)
-        for j, col in enumerate(row):
-            idx = i + j
-            if idx >= len(edit_cats):
-                break
-            with col:
-                c1, c2 = st.columns([4, 1])
-                with c1:
-                    new_val = st.text_input(f"Cat {idx+1}", value=edit_cats[idx],
-                                            key=f"cat_{idx}", label_visibility="collapsed")
-                    new_cats.append(new_val)
-                with c2:
-                    if st.button(":material/close: Remove", key=f"cat_del_{idx}"):
-                        new_cats.pop()
-                        continue
+    cat_df = pd.DataFrame({"Category": edit_cats})
+    edited = st.data_editor(
+        cat_df,
+        num_rows="dynamic",
+        hide_index=True,
+        height=360,
+        width="stretch",
+        key="category_editor",
+        column_config={
+            "Category": st.column_config.TextColumn(
+                "Category",
+                width="stretch",
+                max_chars=80,
+            ),
+        },
+    )
+    new_cats = ["" if pd.isna(c) else str(c).strip() for c in edited["Category"].tolist()]
+    st.session_state["edit_categories"] = new_cats
+
+    st.caption("Add a row with the '+' button. Select rows and use 'Delete row(s)' to remove them.")
 
     with st.container(horizontal=True):
         if st.button(":material/save: Save Categories", type="primary", key="btn_save_cats"):
@@ -1844,15 +1833,15 @@ with tab_config:
                 save_config()
                 reload_config()
                 st.session_state.pop("edit_categories", None)
+                st.session_state.pop("category_editor", None)
                 st.success(f"Saved {len(cleaned)} categories.")
                 log_event(logger, "INFO", "categories_updated",
                           details={"count": len(cleaned)})
                 st.rerun()
         if st.button(":material/restart_alt: Reset", key="btn_reset_cats"):
             st.session_state.pop("edit_categories", None)
+            st.session_state.pop("category_editor", None)
             st.rerun()
-
-    st.session_state["edit_categories"] = new_cats
 
     st.space()
 
