@@ -79,6 +79,9 @@ from engine import (
     extract_audio_from_video,
     _has_audio_track,
     transcribe_audio,
+    load_setup_profile,
+    SETUP_USE_CASES,
+    MODEL_CATALOG,
 )
 
 _ICON_PATH = Path(sys._MEIPASS) / "icon.ico" if getattr(sys, "frozen", False) else Path(__file__).parent / "icon.ico"
@@ -284,6 +287,9 @@ if "hw_fallback_files" not in st.session_state:
 if "clear_counter" not in st.session_state:
     st.session_state.clear_counter = 0
 
+if "setup_profile" not in st.session_state:
+    st.session_state.setup_profile = []
+
 if "logger" not in st.session_state:
     st.session_state.logger = setup_logging()
 
@@ -301,7 +307,70 @@ CATEGORY_LIST = list(ALLOWED_CATEGORIES)
 # -----------------------------------------------------------------------------
 
 if st.session_state.env_check is None and not st.session_state.model_downloading:
-    st.session_state.env_check = check_environment()
+    setup_profile = load_setup_profile()
+    st.session_state.setup_profile = setup_profile.get("profile", [])
+    st.session_state.env_check = check_environment(st.session_state.setup_profile)
+
+# -----------------------------------------------------------------------------
+# Model download progress (fragment auto-refresh — no full-page flash)
+# -----------------------------------------------------------------------------
+
+@st.fragment(run_every="1s")
+def _download_model_fragment() -> None:
+    """Poll the Ollama pull stream in place. Only this fragment re-runs every
+    second, so the rest of the page stays static instead of flashing."""
+    if not st.session_state.get("model_downloading", False):
+        return
+    download_model = st.session_state.get("download_model_name", "qwen2.5vl:7b")
+    with st.status(f"Downloading {download_model}", expanded=True) as download_status:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        if st.button(":material/cancel: Cancel Download", key="cancel_download",
+                     help="Cancels UI polling — Ollama download continues in background"):
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+            st.rerun()
+
+        gen = st.session_state.get("model_download_gen")
+        if gen is None:
+            gen = stream_model_download(download_model)
+            st.session_state.model_download_gen = gen
+
+        try:
+            update = next(gen)
+        except StopIteration:
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+            st.rerun()
+
+        if update["status"] == "progress":
+            pct = update.get("percentage", 0) or 0
+            progress_bar.progress(int(pct) / 100.0)
+            completed_gb = (update.get("completed") or 0) / (1024 ** 3)
+            total_gb = (update.get("total") or 0) / (1024 ** 3)
+            status_text.text(f"Downloading: {completed_gb:.1f}GB / {total_gb:.1f}GB ({pct:.0f}%)")
+            st.session_state.model_download_gen = gen
+        elif update["status"] == "status":
+            status_text.text(f"{update['detail']}...")
+            st.session_state.model_download_gen = gen
+        elif update["status"] == "success":
+            progress_bar.progress(1.0)
+            status_text.success("Download complete! Model installed. Refreshing environment...")
+            download_status.update(label="Download complete", state="complete")
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+            st.session_state.env_check = None
+            st.rerun()
+        elif update["status"] == "error":
+            status_text.error(f"Download failed: {update['message']}")
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+            st.rerun()
+
+
+def _model_option_label(model: str, installed: set[str]) -> str:
+    """Dropdown label with an install-state marker for the given model."""
+    return f"{model}  (installed)" if model in installed else f"{model}  (not installed)"
 
 # -----------------------------------------------------------------------------
 # Sidebar: AI Provider & Environment
@@ -331,6 +400,22 @@ def _on_text_model_change() -> None:
     model = st.session_state.get("text_model_ollama", "")
     config["model"]["text_model"] = model
     save_config()
+
+
+def _spawn_setup_wizard() -> None:
+    """Re-open the bootstrap setup wizard (Tk) in a separate process."""
+    import subprocess
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        if getattr(sys, "frozen", False):
+            subprocess.Popen([sys.executable, "--setup"], creationflags=flags)
+        else:
+            subprocess.Popen(
+                [sys.executable, str(Path(__file__).parent / "bootstrap.py"), "--setup"],
+                creationflags=flags,
+            )
+    except Exception as exc:  # pragma: no cover - subprocess spawn failure
+        st.error(f"Could not open setup wizard: {exc}")
 
 
 with st.sidebar:
@@ -367,21 +452,38 @@ with st.sidebar:
         st.caption(f"Provider: {st.session_state.provider_info.title()}")
         st.caption(f"Model: {config['model']['name']}")
     else:
-        # Model dropdown
+        # Model dropdown (installed + catalog alternatives, marked by install state)
         p = get_provider(new_provider)
         models = p.available_models()
+        installed = set(models)
         model_key = f"model_{new_provider}"
-        if models:
-            cur_val = st.session_state.get(model_key, p.model or models[0])
+        vision_options = list(models)
+        for m in MODEL_CATALOG:
+            if m["kind"] == "vision" and m["name"] not in vision_options:
+                vision_options.append(m["name"])
+
+        def _fmt_model(name: str) -> str:
+            return _model_option_label(name, installed)
+
+        if vision_options:
+            cur_val = st.session_state.get(model_key, p.model or vision_options[0])
             if new_provider == "ollama" and cur_val and not _is_vision_model(cur_val):
-                vl_first = next((m for m in models if _is_vision_model(m)), None)
+                vl_first = next((m for m in vision_options if _is_vision_model(m)), None)
                 if vl_first:
                     cur_val = vl_first
                     config["model"]["providers"].setdefault("ollama", {})["selected_model"] = vl_first
                     config["model"]["name"] = vl_first
                     save_config()
-            m_idx = models.index(cur_val) if cur_val in models else 0
-            st.selectbox("Model", models, index=m_idx, key=model_key, on_change=_on_model_change)
+            m_idx = vision_options.index(cur_val) if cur_val in vision_options else 0
+            st.selectbox("Model", vision_options, index=m_idx, key=model_key,
+                         on_change=_on_model_change, format_func=_fmt_model)
+            if new_provider == "ollama" and cur_val not in installed:
+                if st.button(f":material/download: Download {cur_val}",
+                             key="download_vision_model_btn",
+                             help="Downloads the selected model via Ollama."):
+                    st.session_state.download_model_name = cur_val
+                    st.session_state.model_downloading = True
+                    st.rerun()
         else:
             st.caption("No models available.")
 
@@ -391,6 +493,9 @@ with st.sidebar:
             text_cur = config["model"].get("text_model", "")
             if text_cur and text_cur not in text_models:
                 text_models = [text_cur] + text_models
+            for m in MODEL_CATALOG:
+                if m["kind"] == "text" and m["name"] not in text_models:
+                    text_models.append(m["name"])
             if text_models:
                 t_idx = text_models.index(text_cur) if text_cur in text_models else 0
                 st.selectbox(
@@ -399,15 +504,18 @@ with st.sidebar:
                     index=t_idx,
                     key="text_model_ollama",
                     on_change=_on_text_model_change,
+                    format_func=_fmt_model,
                     help="Used for text-only analysis of documents and audio transcripts. "
                          "A small non-vision model (e.g. qwen2.5:3b) is much faster on CPU.",
                 )
-                if st.button(":material/download: Download this text model", type="secondary",
-                             key="download_text_model",
-                             help=f"Download '{text_cur or text_models[0]}' via Ollama."):
-                    st.session_state.download_model_name = text_cur or text_models[0]
-                    st.session_state.model_downloading = True
-                    st.rerun()
+                text_target = text_cur if text_cur in text_models else text_models[0]
+                if text_target not in installed:
+                    if st.button(":material/download: Download this text model", type="secondary",
+                                 key="download_text_model",
+                                 help=f"Download '{text_target}' via Ollama."):
+                        st.session_state.download_model_name = text_target
+                        st.session_state.model_downloading = True
+                        st.rerun()
                 if text_cur and _is_vision_model(text_cur):
                     st.caption(":material/warning: Current text model is a vision model — "
                                "install a small text model for faster analysis "
@@ -518,56 +626,8 @@ if env and env.get("errors"):
         st.stop()
 
 if st.session_state.model_downloading:
-    download_model = st.session_state.get("download_model_name", "qwen2.5vl:7b")
-    with st.status(f"Downloading {download_model}", expanded=True) as download_status:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        st.caption("Model download progress updates every few seconds.")
-        if st.button(":material/cancel: Cancel Download", key="cancel_download",
-                     help="Cancels UI polling — Ollama download continues in background"):
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-            st.rerun()
-
-        gen = st.session_state.model_download_gen
-        if gen is None:
-            gen = stream_model_download(download_model)
-            st.session_state.model_download_gen = gen
-
-        try:
-            update = next(gen)
-        except StopIteration:
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-            st.rerun()
-
-        if update["status"] == "progress":
-            pct = update.get("percentage", 0) or 0
-            progress_bar.progress(int(pct) / 100.0)
-            completed_gb = (update.get("completed") or 0) / (1024 ** 3)
-            total_gb = (update.get("total") or 0) / (1024 ** 3)
-            status_text.text(f"Downloading: {completed_gb:.1f}GB / {total_gb:.1f}GB ({pct:.0f}%)")
-            st.session_state.model_download_gen = gen
-            st.rerun()
-        elif update["status"] == "status":
-            status_text.text(f"{update['detail']}...")
-            st.session_state.model_download_gen = gen
-            st.rerun()
-        elif update["status"] == "success":
-            progress_bar.progress(1.0)
-            status_text.success("Download complete! Model installed. Refreshing environment...")
-            download_status.update(label="Download complete", state="complete")
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-            st.session_state.env_check = None
-            st.rerun()
-        elif update["status"] == "error":
-            status_text.error(f"Download failed: {update['message']}")
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-
-    if st.session_state.model_downloading:
-        st.stop()
+    _download_model_fragment()
+    st.stop()
 
 if st.session_state.provider_info == "ollama" and env and not env.get("ollama_running"):
     st.warning("Ollama is not running. Please start the Ollama application, "
@@ -2022,6 +2082,24 @@ with tab_config:
                 st.rerun()
             else:
                 st.error(result.get("message", "Failed to wipe model."))
+
+    st.space()
+
+    # -- Setup & onboarding profile --
+    with st.expander("Setup & onboarding", expanded=False):
+        setup_profile = st.session_state.get("setup_profile", [])
+        if setup_profile:
+            labels = ", ".join(SETUP_USE_CASES.get(k, {}).get("label", k) for k in setup_profile)
+            st.caption(f"Using the app for: **{labels}**")
+        else:
+            st.caption("No onboarding profile saved — the media toolchain checks are active.")
+        st.caption("Re-running setup lets you change what you rename and download "
+                   "the right models and tools for it.")
+        if st.button(":material/settings_suggest: Re-run setup wizard", key="rerun_setup",
+                     help="Opens the one-time setup wizard. Complete it and a fresh app "
+                          "window opens with the new configuration."):
+            _spawn_setup_wizard()
+            st.toast("Setup wizard opened.")
 
     st.space()
 
