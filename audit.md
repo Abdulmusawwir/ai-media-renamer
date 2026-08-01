@@ -25,6 +25,6 @@
 ## 3. PRD Divergences
 
 - ~~**Undo/rollback (impl. plan 4.2)** — Listed as out-of-scope in `prd.md`. _Resolution: implemented in v1.5.0 Layer 18.1. `log_commit_batch()`, `rollback_last_batch()`, `list_undo_batches()` in engine.py. CLI `--rollback` flag. Analytics tab UI button. PRD updated._~~
-- **Cloud providers untested** — Gemini, OpenAI, Anthropic, Groq, and OpenRouter are implemented but disabled in the UI (`app.py:_on_provider_switch` rejects non-ollama selections). No API keys available for testing. _Resolution: disabled until API keys and test credentials are provided._
+- **Cloud providers untested** — Gemini, OpenAI, Anthropic, Groq, and OpenRouter are implemented but disabled in the UI. Since `7afcdf9`, the sidebar provider radio offers only "Local (Ollama)"; cloud engines are listed as "coming soon" via a caption built from `list_providers()`, and a stale cloud `provider_info` is reset to `ollama` on load. No API keys available for testing. _Resolution: disabled until API keys and test credentials are provided._
 - **Document format support added** — PRD originally listed only video/image formats. PDF/DOCX/XLSX/PPTX/TXT/MD/RTF text extraction added in v1.4.3. PRD updated in v1.5.0 to include document formats in Upload & Ingestion section.
 - **Subtitle/audio track analysis now in scope** — PRD originally listed as out-of-scope. Audio transcription via `faster-whisper` added to v1.5.0 plan (Layer 19). PRD updated to remove from out-of-scope, add to AI Analysis Pipeline.
