@@ -772,6 +772,37 @@
 
 ---
 
+## Layer 20: Security Checkup & Enhancements
+
+> Requested add-on: full security audit of the shipped app (EXE, web UI, CLI). Every item below is unstarted — plan only.
+
+### 20.1 Dependency & supply-chain audit
+- [ ] Run `pip-audit` (or OSV-scanner) against `requirements.txt`; fix or document every reported CVE
+- [ ] Freeze exact versions into `requirements.lock` (`pip freeze`) so builds are reproducible and auditable
+- [ ] Bootstrap binary downloads (ffmpeg, exiftool, model files): enforce HTTPS-only and verify a published SHA-256 checksum before use — reject mismatches instead of proceeding
+
+### 20.2 Secrets management hardening
+- [ ] Audit every log/event/error path: API keys must never reach `config.json`, JSONL logs, telemetry events, or exception messages — add redaction in `log_event()` and `track_event()`
+- [ ] Keyring fallback: if the OS keychain is unavailable, fail closed (no plaintext file fallback) and surface a clear warning in UI
+- [ ] Mask secret-looking keys (`api_key`, `token`, `password`, `*secret*`) in the Configuration tab JSON view / editor
+
+### 20.3 Local server exposure
+- [ ] Desktop EXE must bind Streamlit to `127.0.0.1` by default (never `0.0.0.0`); add a config flag to opt into LAN exposure with an in-UI warning
+- [ ] Docker compose: keep `renamer` and `ollama` off exposed host ports unless explicitly requested; document the unauth exposure risk
+
+### 20.4 Input validation & injection
+- [ ] Audit all `st.markdown(unsafe_allow_html=True)` call sites — confirm no user-controlled strings (filenames, AI summaries, tags, profile prompts) can reach HTML; sanitize or render as text
+- [ ] CSV import: neutralize spreadsheet formula injection (cells starting `=`, `+`, `-`, `@`) and validate imported paths/filenames before use
+- [ ] Session restore: schema-validate loaded JSON, reject paths outside expected roots, never follow symlinks
+- [ ] Add a test asserting staged filenames can never traverse directories on commit (sanitization already exists — lock it in)
+
+### 20.5 Telemetry & log privacy
+- [ ] Confirm telemetry events carry only counts/profiles/versions — never absolute paths, filenames, or AI text; add a redaction pass in `track_event()`
+- [ ] Purge `telemetry.jsonl` on opt-out
+- [ ] Logs store absolute paths: add a `redact_paths` flag (default on for non-verbose) and document log retention for `undo_log.jsonl`
+
+---
+
 ## Execution Order (Recommended)
 
 The phases are ordered by dependency — each phase can be worked on independently but earlier phases unblock later ones.
@@ -782,12 +813,12 @@ Phase B: 2.3, 9.2, 11.1          → Health checks + unit tests (confidence laye
 Phase C: 1.2, 1.4, 1.3          → Upload hardening — DONE
 Phase D: 3.1, 3.2, 3.3          → Staging UX improvements — DONE (sort via native click-to-sort)
 Phase E: 4.1, 4.4               → Commit flexibility (metadata-only + dry-run) — DONE (dry-run both CLI + app; naming controls in staging)
-Phase F: 5.1, 5.2, 5.3         → Session persistence + recovery
+Phase F: 5.1, 5.2, 5.3         → Session persistence + recovery — DONE
 Phase G: 2.1, 2.2, 2.4          → Analysis flexibility (re-analyze, model select, workers) — DONE
 Phase H: 6.1, 6.2, 6.3, 6.4    → Configuration UI — DONE
 Phase I: 7.1, 7.2, 7.3, 7.4    → Analytics enhancements — DONE
 Phase J: 8.1, 8.2, 8.3         → CLI improvements — DONE (dry-run + export/import CSV; interactive mode enhanced)
-Phase K: 9.1, 11.2, 11.3       → Docker + integration tests
+Phase K: 9.1, 11.2, 11.3       → Docker + integration tests — DONE (Dockerfile, docker-compose, test_extraction/test_commit)
 Phase L: 10.1, 10.2, 10.3, 10.4 → Quality of life (core) — DONE (dark mode skip; keyboard skip; sound done; batch warning done)
 Phase M: 3.4, 3.5               → CSV import/export — DONE
 Phase N: 4.2                    → Naming templates — DONE (full template system with case style + max chars in staging expander)
@@ -811,4 +842,5 @@ Phase AE: 18.2                   → Pydantic structured outputs — v1.5.0
 Phase AF: 16.3                   → Per-format document metadata — v1.5.0
 Phase AG: 18.3                   → ExifTool batching — v1.5.0
 Phase AH: 19.1, 19.2, 19.3      → Audio transcription pipeline — v1.5.0
+Phase AI: 20.1–20.5             → Security checkup & enhancements — PENDING (only remaining work)
 ```

@@ -1,17 +1,23 @@
 # Changelog
 
-## [v1.6.0] — 2026-07-27
+## [v1.6.0] — 2026-08-02
 
 ### New Features
+- **First-run onboarding wizard:** Use-case questionnaire (videos / photos / documents / spreadsheets / audio) → dependency + model install plan → Ollama registry-validated model picker. Profile persists to `%APPDATA%\ai-media-renamer\setup.json`. "Skip" launches the app without installing. `--setup` re-runs the wizard.
+- **In-app model download:** sidebar dropdowns list all catalog models with `(installed)` / `(not installed)` markers and per-model download buttons with live progress; Configuration tab "Setup & onboarding" re-launches the wizard.
+- **Separate text model for documents & audio:** `config.model.text_model` (default `qwen2.5:3b`); document/audio prompts no longer go through the big vision model. Sidebar text-model selector (non-vision models only, download button). `check_environment()` reports `text_models` / `text_model_available`.
 - **Audio file upload & analysis:** Audio files (MP3, WAV, FLAC, AAC, OGG, M4A, WMA, OPUS, AIFF, ALAC, APE, WV) can now be uploaded and analyzed. Transcription fed into AI analysis context. New `audio_naming` prompt profile.
 - **Audio fingerprint duplicate detection:** Chromaprint-based audio fingerprinting detects files with same audio but different visuals. Cross-modal detection: video vs video (pHash), audio vs audio (Chromaprint), and mixed-type isolation (SHA-256).
 - **CLI document & audio support:** CLI now processes documents (text extraction) and audio files (transcription) alongside video and images. `valid_exts` includes all 4 media types.
 - **Audio metadata writing:** ExifTool metadata for audio files — ID3 tags for MP3/AIFF/APE, XMP for WAV/FLAC/OGG/WV, QuickTime atoms for M4A/AAC.
 
 ### Improvements
+- **Wizard UX:** modern dark theme (accent `#4f8cff`), row-click checkbox toggles, Select all / Clear, honest model-size ranges ("1.8–6.0 GB" / "1.0–4.7 GB"), scrollable resizable model dialog with pinned header/footer, themed progressbar.
+- **No more wizard freeze:** registry checks go through a queue drained by a main-thread poll; dialogs close via `_close_dialog()`; `main()` uses `_show_modal()` (update loop) instead of `wait_window()`. Closing mid-registry-check returns <0.5s.
 - **Extension management:** Audio extensions configurable in Configuration tab (4th column). Default list in config.json/config.default.json.
 - **Staging table:** Type column now shows "audio", "doc", or "media" with file extension. Audio files show transcription snippet in summary column.
 - **Duplicate detection expanded:** `find_duplicates()` now handles 3 hash types: pHash (visual), SHA-256 (document), Chromaprint (audio). `_chromaprint_similarity()` computes pairwise audio fingerprint similarity (0.85 threshold).
+- **GPU→CPU fallback:** video frame extraction retries with software decoding when hardware decode fails; app shows a durable "GPU decoding failed … fell back to CPU" warning.
 
 ### Code Quality
 - **13 new tests:** Audio build_commit_args, chromaprint similarity, duplicate detection with audio fingerprints. 220 total tests, all passing.
