@@ -560,7 +560,8 @@ with st.sidebar:
     if env:
         if new_provider == "ollama":
             for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool"),
-                               ("ollama_running", "Ollama Daemon"), ("model_available", "Vision Model")]:
+                               ("ollama_running", "Ollama Daemon"), ("model_available", "Vision Model"),
+                               ("text_model_available", "Text Model")]:
                 ok = env.get(key, False)
                 status = "green" if ok else "red"
                 st.badge(label, color=status)
@@ -570,11 +571,20 @@ with st.sidebar:
                 names = ", ".join(vision_models[:3])
                 if len(vision_models) > 3:
                     names += f" (+{len(vision_models) - 3} more)"
-                st.caption(f"Installed: {names}")
+                st.caption(f"Vision: {names}")
             elif not env.get("ollama_running"):
                 st.error("Ollama is not running. Start Ollama and click Refresh.")
             elif not env.get("model_available"):
                 st.info("No vision model installed yet.")
+
+            text_models = env.get("text_models", [])
+            if text_models:
+                tnames = ", ".join(text_models[:3])
+                if len(text_models) > 3:
+                    tnames += f" (+{len(text_models) - 3} more)"
+                st.caption(f"Text: {tnames}")
+            elif env.get("ollama_running"):
+                st.caption("Text model not installed — `ollama pull qwen2.5:3b`")
         else:
             for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool")]:
                 ok = env.get(key, False)

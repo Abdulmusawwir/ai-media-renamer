@@ -2719,6 +2719,7 @@ def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
     ollama_running = False
     model_available = False
     vision_models: list[str] = []
+    text_models: list[str] = []
     errors = []
 
     if not ffmpeg_path and "ffmpeg" in needs:
@@ -2741,6 +2742,8 @@ def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
             if _is_vision_model(name):
                 vision_models.append(name)
                 model_available = True
+            else:
+                text_models.append(name)
         # A documents-only profile can run on a text model alone.
         if not model_available and profile and models and "vision_model" not in needs:
             model_available = True
@@ -2756,6 +2759,8 @@ def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
         "ollama_running": ollama_running,
         "model_available": model_available,
         "vision_models": vision_models,
+        "text_models": text_models,
+        "text_model_available": bool(text_models),
         "cloud_configured": cloud_configured,
         "errors": errors,
     }

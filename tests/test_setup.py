@@ -202,6 +202,43 @@ class TestSetupProfile:
 
 
 # ---------------------------------------------------------------------------
+# Setup wizard plan sizing (bootstrap helper)
+# ---------------------------------------------------------------------------
+
+class TestPlanSizes:
+    def test_model_kind_shows_range_across_catalog(self):
+        import bootstrap
+        sizes = bootstrap._plan_sizes({"vision": "qwen2.5vl:7b",
+                                       "text": "qwen2.5:3b"})
+        # Ranges must be honest regardless of which model the user picks next.
+        assert sizes["vision_model"] == "1.8–6.0 GB"
+        assert sizes["text_model"] == "1.0–4.7 GB"
+
+    def test_fixed_deps_have_single_sizes(self):
+        import bootstrap
+        sizes = bootstrap._plan_sizes({})
+        assert sizes["ollama"] == "~1.5 GB"
+        assert sizes["ffmpeg"] == "~109 MB"
+        assert sizes["exiftool"] == "~10 MB"
+        assert sizes["whisper"] == "~74 MB"
+
+    def test_build_plan_marks_model_downloads(self, monkeypatch):
+        import bootstrap
+        monkeypatch.setattr(bootstrap, "_ollama_binary", lambda: "ollama")
+        monkeypatch.setattr(bootstrap, "_resolve_binary_path", lambda name: None)
+        monkeypatch.setattr(bootstrap, "_installed_models", lambda: set())
+        plan = bootstrap._build_plan(["documents"],
+                                     {"text_model"},
+                                     {"text": "qwen2.5:3b"})
+        labels = {p["label"] for p in plan}
+        assert "Text AI model" in labels
+        assert "FFmpeg" not in labels, "documents-only must not need FFmpeg"
+        text_row = next(p for p in plan if p["label"] == "Text AI model")
+        assert text_row["status"] == "download"
+        assert text_row["size"] == "1.0–4.7 GB"
+
+
+# ---------------------------------------------------------------------------
 # Profile-aware environment checks
 # ---------------------------------------------------------------------------
 
@@ -237,5 +274,31 @@ class TestCheckEnvironmentProfile:
                             lambda: {"models": [{"name": "qwen2.5vl:7b"}]})
         env = engine.check_environment()
         for key in ("ffmpeg", "exiftool", "ollama_running", "model_available",
-                    "vision_models", "cloud_configured", "errors"):
+                    "vision_models", "text_models", "text_model_available",
+                    "cloud_configured", "errors"):
             assert key in env
+
+    def test_text_model_detected(self, monkeypatch):
+        monkeypatch.setattr(engine, "_resolve_binary_path", lambda name: "found")
+        monkeypatch.setattr(engine.ollama, "list",
+                            lambda: {"models": [{"name": "qwen2.5:3b"},
+                                                {"name": "qwen2.5vl:7b"}]})
+        env = engine.check_environment(profile=["documents"])
+        assert env["text_models"] == ["qwen2.5:3b"]
+        assert env["text_model_available"] is True
+
+    def test_no_text_model_available_flag_false(self, monkeypatch):
+        monkeypatch.setattr(engine, "_resolve_binary_path", lambda name: None)
+        monkeypatch.setattr(engine.ollama, "list",
+                            lambda: {"models": [{"name": "qwen2.5vl:7b"}]})
+        env = engine.check_environment(profile=["documents"])
+        assert env["text_models"] == []
+        assert env["text_model_available"] is False
+
+    def test_text_only_profile_not_blocked_without_ffmpeg(self, monkeypatch):
+        monkeypatch.setattr(engine, "_resolve_binary_path", lambda name: None)
+        monkeypatch.setattr(engine.ollama, "list",
+                            lambda: {"models": [{"name": "qwen2.5:3b"}]})
+        env = engine.check_environment(profile=["spreadsheets"])
+        assert env["errors"] == []
+        assert env["text_model_available"] is True

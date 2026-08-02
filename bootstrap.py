@@ -1,9 +1,11 @@
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 import zipfile
 from pathlib import Path
@@ -53,15 +55,116 @@ CACHE_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
 BIN_DIR = CACHE_DIR / "bin"
 OLLAMA_INSTALLER_CACHE = CACHE_DIR / "cache"
 
-# ---------- theme colors ----------
-BG = "#1e1e1e"
-FG = "#e0e0e0"
-ACCENT = "#3b82f6"
-GREEN = "#22c55e"
-BAR_BG = "#333333"
+# ---------- theme colors (modern dark) ----------
+BG = "#14161c"
+PANEL = "#1f232c"
+PANEL_HOVER = "#272c37"
+BORDER = "#333a47"
+FG = "#e8eaf0"
+MUTED = "#9aa3b2"
+ACCENT = "#4f8cff"
+ACCENT_HOVER = "#3a74e8"
+GREEN = "#34d399"
+RED = "#f87171"
+AMBER = "#fbbf24"
 FONT = ("Segoe UI", 10)
 FONT_BOLD = ("Segoe UI", 10, "bold")
-FONT_TITLE = ("Segoe UI", 14, "bold")
+FONT_SEMI = ("Segoe UI", 9, "bold")
+FONT_TITLE = ("Segoe UI", 15, "bold")
+FONT_MUTED = ("Segoe UI", 9)
+BAR_BG = PANEL  # kept as alias for any remaining callers
+
+
+def _hover_btn(parent, text, command, *, bg=None, fg="white", font=None,
+               padx=20, pady=6, width=None, disabled=False, cursor="hand2"):
+    """Modern flat button with hover states."""
+    bg = bg or ACCENT
+    font = font or ("Segoe UI", 10, "bold")
+    btn = tk.Button(parent, text=text, font=font, bg=bg, fg=fg, relief="flat",
+                    padx=padx, pady=pady, cursor=cursor, command=command,
+                    activebackground=bg, activeforeground=fg, bd=0,
+                    highlightthickness=0, disabledforeground="#8a93a3")
+    if width:
+        btn.config(width=width)
+    if disabled:
+        btn.config(state="disabled")
+
+    def _on_enter(_e):
+        if str(btn.cget("state")) == "normal":
+            btn.config(bg=ACCENT_HOVER if bg == ACCENT else PANEL_HOVER)
+
+    def _on_leave(_e):
+        if str(btn.cget("state")) == "normal":
+            btn.config(bg=bg)
+
+    btn.bind("<Enter>", _on_enter)
+    btn.bind("<Leave>", _on_leave)
+    return btn
+
+
+def _hover_row(row, normal_bg=PANEL, hover_bg=PANEL_HOVER,
+               border=BORDER, border_hover=ACCENT):
+    """Add hover feedback to a clickable row (binds all children too)."""
+
+    def _set(bg, bord, *_):
+        for w in (row, *row.winfo_children()):
+            try:
+                if str(w.cget("bg")) != "systemTransparent":
+                    w.config(bg=bg)
+            except tk.TclError:
+                pass
+        try:
+            row.config(highlightbackground=bord)
+        except tk.TclError:
+            pass
+
+    row.bind("<Enter>", lambda e: _set(hover_bg, border_hover))
+    row.bind("<Leave>", lambda e: _set(normal_bg, border))
+    for child in row.winfo_children():
+        child.bind("<Enter>", lambda e: _set(hover_bg, border_hover))
+        child.bind("<Leave>", lambda e: _set(normal_bg, border))
+
+
+def _bind_wheel(widget):
+    """Wire mouse-wheel scrolling onto a widget and all its children."""
+    widget.bind_all("<MouseWheel>",
+                    lambda e: widget.yview_scroll(int(-e.delta / 120), "units")
+                    if widget.winfo_exists() else None)
+    widget.bind_all("<Button-4>", lambda e: widget.yview_scroll(-1, "units"))
+    widget.bind_all("<Button-5>", lambda e: widget.yview_scroll(1, "units"))
+
+
+def _show_modal(win, dlg):
+    """Run a modal Toplevel without nesting an event loop.
+
+    A plain update() loop is immune to the Windows tkinter hang that occurs
+    when a grab-holding Toplevel is destroyed inside wait_window()'s nested
+    loop, so closing a dialog can never freeze the wizard.
+    """
+    while True:
+        try:
+            if not dlg.top.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        try:
+            win.root.update()
+        except tk.TclError:
+            return
+        time.sleep(0.005)
+
+
+def _close_dialog(dlg):
+    """Destroy a dialog safely: release any grab, then destroy."""
+    dlg._closed = True
+    try:
+        dlg.top.grab_release()
+    except tk.TclError:
+        pass
+    try:
+        dlg.top.destroy()
+    except tk.TclError:
+        pass
 
 
 class SetupWindow:
@@ -71,7 +174,7 @@ class SetupWindow:
             print("tkinter not available — running in headless mode.")
             return
         self.root.title("AI Media Renamer — Setup")
-        self.root.geometry("520x320")
+        self.root.geometry("560x380")
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -80,30 +183,41 @@ class SetupWindow:
         except Exception:
             pass
 
+        # Modern progress-bar style (accent fill, rounded, dark track)
+        try:
+            style = ttk.Style(self.root)
+            style.theme_use("clam")
+            style.configure(
+                "dark.Horizontal.TProgressbar", troughcolor="#262b35",
+                background=ACCENT, bordercolor=BG, lightcolor=ACCENT,
+                darkcolor=ACCENT, thickness=8)
+        except Exception:
+            pass
+
         self._center_window()
 
-        # Title
-        title = tk.Label(self.root, text="AI Media Renamer", font=FONT_TITLE,
-                         bg=BG, fg=FG)
-        title.pack(pady=(20, 4))
-
-        self.version_label = tk.Label(self.root, text=f"{VERSION}",
-                                      font=("Segoe UI", 9), bg=BG, fg="#888888")
-        self.version_label.pack(pady=(0, 16))
+        # Title + accent rule
+        header = tk.Frame(self.root, bg=BG)
+        header.pack(fill="x", padx=40, pady=(24, 0))
+        tk.Label(header, text="AI Media Renamer", font=("Segoe UI", 17, "bold"),
+                 bg=BG, fg=FG).pack(anchor="w")
+        tk.Label(header, text="Setting up your local AI workspace…",
+                 font=FONT_MUTED, bg=BG, fg=MUTED, anchor="w").pack(fill="x", pady=(2, 0))
+        tk.Frame(header, bg=ACCENT, height=2).pack(fill="x", pady=(12, 0))
 
         # Status step label
         self.step_label = tk.Label(self.root, text="", font=FONT_BOLD,
                                    bg=BG, fg=FG, anchor="w")
-        self.step_label.pack(fill="x", padx=40, pady=(0, 4))
+        self.step_label.pack(fill="x", padx=40, pady=(16, 4))
 
         # Progress bar
-        self.progress = ttk.Progressbar(self.root, length=440, mode="determinate",
+        self.progress = ttk.Progressbar(self.root, length=480, mode="determinate",
                                          style="dark.Horizontal.TProgressbar")
-        self.progress.pack(padx=40, pady=(0, 4))
+        self.progress.pack(padx=40, pady=(0, 6))
 
         # Info text
-        self.info_label = tk.Label(self.root, text="", font=("Segoe UI", 9),
-                                   bg=BG, fg="#aaaaaa", anchor="w")
+        self.info_label = tk.Label(self.root, text="", font=FONT_MUTED,
+                                   bg=BG, fg=MUTED, anchor="w")
         self.info_label.pack(fill="x", padx=40, pady=(0, 16))
 
         # Update notification frame (hidden by default)
@@ -118,16 +232,14 @@ class SetupWindow:
         btn_frame = tk.Frame(self.update_frame, bg=BG)
         btn_frame.pack()
 
-        self.dl_btn = tk.Button(btn_frame, text="Download Update",
-                                font=("Segoe UI", 10), bg=ACCENT, fg="white",
-                                relief="flat", padx=16, pady=4, cursor="hand2",
-                                command=self._on_download_update)
+        self.dl_btn = _hover_btn(btn_frame, "Download Update",
+                                 self._on_download_update, bg=ACCENT, fg="white",
+                                 font=("Segoe UI", 10), padx=16, pady=5)
         self.dl_btn.pack(side="left", padx=(0, 12))
 
-        self.cont_btn = tk.Button(btn_frame, text="Continue to App",
-                                  font=("Segoe UI", 10), bg="#333333", fg=FG,
-                                  relief="flat", padx=16, pady=4, cursor="hand2",
-                                  command=self._on_continue)
+        self.cont_btn = _hover_btn(btn_frame, "Continue to App",
+                                   self._on_continue, bg=PANEL, fg=FG,
+                                   font=("Segoe UI", 10), padx=16, pady=5)
         self.cont_btn.pack(side="left")
 
         self._update_info = {}
@@ -423,10 +535,11 @@ class UseCaseDialog:
 
     def __init__(self, parent):
         self.result: list[str] | None = None
+        self._closed = False
 
         self.top = tk.Toplevel(parent)
         self.top.title("What will you rename?")
-        self.top.geometry("540x480")
+        self.top.geometry("560x520")
         self.top.configure(bg=BG)
         self.top.resizable(False, False)
         self.top.transient(parent)
@@ -435,60 +548,87 @@ class UseCaseDialog:
 
         self._center(parent)
 
-        tk.Label(self.top, text="What do you plan to rename?", font=FONT_TITLE,
-                 bg=BG, fg=FG).pack(pady=(18, 2))
-        tk.Label(self.top, text="Select all that apply. This decides what you'll "
-                                "need to download once to get started.",
-                 font=("Segoe UI", 9), bg=BG, fg="#aaaaaa").pack(pady=(0, 12))
+        # Header
+        header = tk.Frame(self.top, bg=BG)
+        header.pack(fill="x", padx=28, pady=(22, 0))
+        tk.Label(header, text="What do you plan to rename?", font=FONT_TITLE,
+                 bg=BG, fg=FG).pack(anchor="w")
+        tk.Label(header, text="Select all that apply. This decides what gets "
+                              "downloaded once to get you started.",
+                 font=FONT_MUTED, bg=BG, fg=MUTED, anchor="w").pack(fill="x", pady=(4, 0))
+        tk.Frame(header, bg=ACCENT, height=2).pack(fill="x", pady=(12, 0))
+
+        # Row actions (Select all / Clear)
+        actions = tk.Frame(header, bg=BG)
+        actions.pack(fill="x", pady=(12, 4))
+        tk.Label(actions, text="", bg=BG).pack(side="left", expand=True)
+        for text, cmd, primary in (("Select all", self._select_all, False),
+                                   ("Clear", self._clear_all, False)):
+            _hover_btn(actions, text, cmd, bg=PANEL, fg=FG, font=FONT_SEMI,
+                       padx=12, pady=3).pack(side="left", padx=(8, 0))
 
         self._vars: dict[str, tk.BooleanVar] = {}
         container = tk.Frame(self.top, bg=BG)
-        container.pack(fill="x", padx=28, pady=(0, 4))
+        container.pack(fill="both", expand=True, padx=28, pady=(4, 0))
         for key, use in SETUP_USE_CASES.items():
             var = tk.BooleanVar(value=False)
             self._vars[key] = var
-            row = tk.Frame(container, bg=BAR_BG, highlightbackground="#444444",
+            row = tk.Frame(container, bg=PANEL, highlightbackground=BORDER,
                            highlightthickness=1, cursor="hand2")
-            row.pack(fill="x", pady=3)
-            cb = tk.Checkbutton(row, variable=var, bg=BAR_BG, fg=FG,
-                                activebackground=BAR_BG, activeforeground=FG,
-                                selectcolor=BG, highlightthickness=0)
-            cb.pack(side="left", padx=(6, 2), pady=8)
-            info = tk.Frame(row, bg=BAR_BG)
-            info.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=6)
-            tk.Label(info, text=use["label"], font=FONT_BOLD, bg=BAR_BG, fg=FG,
+            row.pack(fill="x", pady=4)
+            cb = tk.Checkbutton(row, variable=var, bg=PANEL, fg=FG,
+                                activebackground=PANEL, activeforeground=FG,
+                                selectcolor="#2d3a4f", highlightthickness=0,
+                                bd=0, cursor="hand2")
+            cb.pack(side="left", padx=(10, 6), pady=10)
+            info = tk.Frame(row, bg=PANEL)
+            info.pack(side="left", fill="x", expand=True, padx=(0, 10), pady=8)
+            tk.Label(info, text=use["label"], font=FONT_BOLD, bg=PANEL, fg=FG,
                      anchor="w").pack(fill="x")
-            tk.Label(info, text=use["desc"], font=("Segoe UI", 8), bg=BAR_BG,
-                     fg="#aaaaaa", anchor="w").pack(fill="x")
+            tk.Label(info, text=use["desc"], font=FONT_MUTED, bg=PANEL,
+                     fg=MUTED, anchor="w").pack(fill="x", pady=(1, 0))
 
-        btn_frame = tk.Frame(self.top, bg=BG)
-        btn_frame.pack(pady=(12, 16))
+            _hover_row(row)
+            for w in (row, cb, info, *info.winfo_children()):
+                w.bind("<Button-1>",
+                       lambda _e, v=var: (v.set(not v.get())))
 
-        self.cont_btn = tk.Button(btn_frame, text="Continue", font=("Segoe UI", 10, "bold"),
-                                  bg=ACCENT, fg="white", relief="flat", padx=18, pady=4,
-                                  cursor="hand2", command=self._on_continue, state="disabled")
-        self.cont_btn.pack(side="left", padx=(0, 10))
+        # Footer buttons
+        footer = tk.Frame(self.top, bg=BG)
+        footer.pack(fill="x", padx=28, pady=(10, 16))
+        self.cont_btn = _hover_btn(footer, "Continue", self._on_continue,
+                                   bg=ACCENT, fg="white", padx=26, pady=7,
+                                   disabled=True)
+        self.cont_btn.pack(side="left")
+        _hover_btn(footer, "Skip for now", self._on_skip, bg=PANEL, fg=FG,
+                   padx=16, pady=7).pack(side="left", padx=(10, 0))
 
-        tk.Button(btn_frame, text="Skip for now", font=("Segoe UI", 10),
-                  bg="#333333", fg=FG, relief="flat", padx=14, pady=4, cursor="hand2",
-                  command=self._on_skip).pack(side="left")
-
-        for key, var in self._vars.items():
+        for var in self._vars.values():
             var.trace_add("write", self._update_continue)
+        self._update_continue()
+
+    def _select_all(self):
+        for var in self._vars.values():
+            var.set(True)
+
+    def _clear_all(self):
+        for var in self._vars.values():
+            var.set(False)
 
     def _update_continue(self, *_):
-        self.cont_btn.config(state="normal" if any(v.get() for v in self._vars.values()) else "disabled")
+        state = "normal" if any(v.get() for v in self._vars.values()) else "disabled"
+        self.cont_btn.config(state=state)
 
     def _on_continue(self):
         chosen = [k for k, v in self._vars.items() if v.get()]
         if not chosen:
             return
         self.result = chosen
-        self.top.destroy()
+        _close_dialog(self)
 
     def _on_skip(self):
         self.result = None
-        self.top.destroy()
+        _close_dialog(self)
 
     def _center(self, parent):
         self.top.update_idletasks()
@@ -499,16 +639,24 @@ class UseCaseDialog:
         w = self.top.winfo_width()
         h = self.top.winfo_height()
         self.top.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
+        self.top.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
 
 
 def _plan_sizes(rec_models: dict[str, str]) -> dict[str, str]:
-    """Approximate one-time download size per dependency for the plan summary."""
+    """Approximate one-time download size per dependency for the plan summary.
+
+    Model rows show the full size range across the catalog alternatives,
+    because the exact size depends on which model the user picks next.
+    """
     sizes = {"ollama": "~1.5 GB", "ffmpeg": "~109 MB", "exiftool": "~10 MB",
              "whisper": "~74 MB"}
-    for kind, model in rec_models.items():
-        sizes[f"{kind}_model"] = next(
-            (m["size"] for m in MODEL_CATALOG if m["name"] == model), "?"
-        )
+    for kind in ("vision", "text"):
+        cands = [m["size_gb"] for m in MODEL_CATALOG if m["kind"] == kind]
+        if cands:
+            lo, hi = min(cands), max(cands)
+            sizes[f"{kind}_model"] = f"{lo:.1f}\u2013{hi:.1f} GB"
+        else:
+            sizes[f"{kind}_model"] = "?"
     return sizes
 
 
@@ -542,9 +690,10 @@ class PlanConfirmDialog:
 
     def __init__(self, parent, plan: list[dict]):
         self.result = False
+        self._closed = False
         self.top = tk.Toplevel(parent)
         self.top.title("One-time setup")
-        self.top.geometry("520x420")
+        self.top.geometry("560x460")
         self.top.configure(bg=BG)
         self.top.resizable(False, False)
         self.top.transient(parent)
@@ -553,50 +702,51 @@ class PlanConfirmDialog:
 
         self._center(parent)
 
-        tk.Label(self.top, text="You'll download this once", font=FONT_TITLE,
-                 bg=BG, fg=FG).pack(pady=(18, 2))
-        tk.Label(self.top, text="Everything below is installed locally and needed "
-                                "for the use cases you picked.",
-                 font=("Segoe UI", 9), bg=BG, fg="#aaaaaa").pack(pady=(0, 10))
+        header = tk.Frame(self.top, bg=BG)
+        header.pack(fill="x", padx=30, pady=(22, 0))
+        tk.Label(header, text="You'll download this once", font=FONT_TITLE,
+                 bg=BG, fg=FG).pack(anchor="w")
+        tk.Label(header, text="Everything below is installed locally and needed "
+                              "for the use cases you picked.",
+                 font=FONT_MUTED, bg=BG, fg=MUTED, anchor="w").pack(fill="x", pady=(4, 0))
+        tk.Frame(header, bg=ACCENT, height=2).pack(fill="x", pady=(12, 0))
 
         container = tk.Frame(self.top, bg=BG)
-        container.pack(fill="x", padx=28, pady=(0, 4))
+        container.pack(fill="both", expand=True, padx=30, pady=(14, 0))
 
         for item in plan:
-            row = tk.Frame(container, bg=BAR_BG, highlightbackground="#333333",
+            row = tk.Frame(container, bg=PANEL, highlightbackground=BORDER,
                            highlightthickness=1)
-            row.pack(fill="x", pady=2)
-            status_color = GREEN if item["status"] in ("ready", "installed") else "#f59e0b"
+            row.pack(fill="x", pady=3)
+            status_color = GREEN if item["status"] in ("ready", "installed") else AMBER
             badge = {"ready": "Found", "installed": "Installed", "download": "To download"}[item["status"]]
-            tk.Label(row, text=item["label"], font=FONT_BOLD, bg=BAR_BG, fg=FG,
-                     anchor="w", width=22).pack(side="left", padx=(10, 4), pady=6)
-            tk.Label(row, text=item["size"], font=("Segoe UI", 8), bg=BAR_BG,
-                     fg="#aaaaaa", anchor="w", width=8).pack(side="left", padx=(0, 4))
-            tk.Label(row, text=badge, font=("Segoe UI", 8, "bold"), bg=BAR_BG,
-                     fg=status_color, anchor="w", width=11).pack(side="left", padx=(0, 10))
+            tk.Label(row, text=item["label"], font=FONT_BOLD, bg=PANEL, fg=FG,
+                     anchor="w", width=24).pack(side="left", padx=(12, 6), pady=8)
+            tk.Label(row, text=item["size"], font=FONT_MUTED, bg=PANEL,
+                     fg=MUTED, anchor="e", width=12).pack(side="left", padx=(0, 6))
+            tk.Label(row, text=badge, font=("Segoe UI", 8, "bold"), bg=PANEL,
+                     fg=status_color, anchor="e", width=12).pack(side="right", padx=(0, 12))
 
-        total_txt = tk.Label(container, text="", font=("Segoe UI", 9, "bold"),
-                             bg=BG, fg=FG, anchor="e")
-        total_txt.pack(fill="x", padx=10, pady=(8, 0))
         sizes = [i["size"] for i in plan if i["status"] == "download"]
-        total_txt.config(text=f"New downloads: {', '.join(sizes) or 'none — everything found'}")
+        total = tk.Label(container, text="", font=FONT_SEMI, bg=BG, fg=FG, anchor="w")
+        total.pack(fill="x", pady=(12, 0))
+        total.config(text=(f"New downloads: {', '.join(sizes)}"
+                           if sizes else "Nothing to download — everything is already found"))
 
-        btn_frame = tk.Frame(self.top, bg=BG)
-        btn_frame.pack(pady=(12, 16))
-        tk.Button(btn_frame, text="Start", font=("Segoe UI", 10, "bold"),
-                  bg=ACCENT, fg="white", relief="flat", padx=18, pady=4, cursor="hand2",
-                  command=self._on_start).pack(side="left", padx=(0, 10))
-        tk.Button(btn_frame, text="Back", font=("Segoe UI", 10),
-                  bg="#333333", fg=FG, relief="flat", padx=14, pady=4, cursor="hand2",
-                  command=self._on_back).pack(side="left")
+        footer = tk.Frame(self.top, bg=BG)
+        footer.pack(fill="x", padx=30, pady=(8, 16))
+        _hover_btn(footer, "Start setup", self._on_start, bg=ACCENT, fg="white",
+                   padx=26, pady=7).pack(side="left")
+        _hover_btn(footer, "Back", self._on_back, bg=PANEL, fg=FG,
+                   padx=16, pady=7).pack(side="left", padx=(10, 0))
 
     def _on_start(self):
         self.result = True
-        self.top.destroy()
+        _close_dialog(self)
 
     def _on_back(self):
         self.result = False
-        self.top.destroy()
+        _close_dialog(self)
 
     def _center(self, parent):
         self.top.update_idletasks()
@@ -631,8 +781,11 @@ def _installed_models() -> set[str]:
 class ModelRecommendationDialog:
     """Choose vision and/or text models for the onboarding profile.
 
-    Shows recommended + alternatives with installed badges, and flags any
-    catalog entry that no longer exists on Ollama's registry.
+    The model list lives in a scrollable, resizable panel so every option and
+    the footer buttons are always reachable. Registry validation runs in a
+    background thread but results are applied through a main-thread queue
+    poll, so closing the dialog can never touch Tk from another thread or
+    block the wizard.
     """
 
     def __init__(self, parent, needs: set[str], installed: set[str],
@@ -640,118 +793,168 @@ class ModelRecommendationDialog:
         self.result: dict[str, str | None] = {"vision": None, "text": None}
         self.installed = installed
         self.recommended = recommended
-        self._valid: dict[str, bool | None] = {}
+        self._closed = False
         self._row_status: dict[str, tk.Widget] = {}
 
         self.top = tk.Toplevel(parent)
         self.top.title("Choose AI Models")
-        self.top.geometry("560x680")
+        sw = self.top.winfo_screenheight()
+        height = min(680, max(420, sw - 180))
+        self.top.geometry(f"600x{height}")
+        self.top.minsize(520, 380)
         self.top.configure(bg=BG)
-        self.top.resizable(False, False)
         self.top.transient(parent)
         self.top.grab_set()
         self.top.protocol("WM_DELETE_WINDOW", self._on_skip)
 
         self._center(parent)
 
-        tk.Label(self.top, text="Choose AI models", font=FONT_TITLE,
-                 bg=BG, fg=FG).pack(pady=(16, 2))
-        tk.Label(self.top, text="Recommended for your hardware; you can pick any "
-                                "installed or available alternative.",
-                 font=("Segoe UI", 9), bg=BG, fg="#aaaaaa").pack(pady=(0, 10))
+        # Header (fixed)
+        header = tk.Frame(self.top, bg=BG)
+        header.pack(fill="x", padx=28, pady=(20, 0))
+        tk.Label(header, text="Choose AI models", font=FONT_TITLE,
+                 bg=BG, fg=FG).pack(anchor="w")
+        tk.Label(header, text="Recommended for your hardware — you can pick any "
+                              "installed or available alternative.",
+                 font=FONT_MUTED, bg=BG, fg=MUTED, anchor="w").pack(fill="x", pady=(4, 0))
+        tk.Frame(header, bg=ACCENT, height=2).pack(fill="x", pady=(12, 0))
+
+        # Scrollable body
+        body = tk.Frame(self.top, bg=BG)
+        body.pack(fill="both", expand=True, padx=28, pady=(12, 0))
+        self._canvas = tk.Canvas(body, bg=BG, highlightthickness=0, bd=0)
+        scroll = tk.Scrollbar(body, orient="vertical", command=self._canvas.yview,
+                              bg=BORDER, troughcolor=BG, bd=0,
+                              highlightthickness=0, width=12)
+        self._inner = tk.Frame(self._canvas, bg=BG)
+        self._inner_id = self._canvas.create_window((0, 0), window=self._inner,
+                                                    anchor="nw")
+        self._canvas.configure(yscrollcommand=scroll.set)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        self._inner.bind(
+            "<Configure>",
+            lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfigure(self._inner_id, width=e.width))
+        self.top.bind(
+            "<MouseWheel>",
+            lambda e: self._canvas.yview_scroll(int(-e.delta / 120), "units"))
 
         self._vars: dict[str, tk.StringVar] = {}
-        body = tk.Frame(self.top, bg=BG)
-        body.pack(fill="both", expand=True, padx=26)
-
         kind_labels = {"vision": "Vision model (analyzes frames & photos)",
                        "text": "Text model (documents, spreadsheets, transcripts)"}
         for kind in ("vision", "text"):
             if f"{kind}_model" not in needs:
                 continue
-            tk.Label(body, text=kind_labels[kind], font=FONT_BOLD, bg=BG,
-                     fg=ACCENT, anchor="w").pack(fill="x", pady=(8, 2))
+            tk.Label(self._inner, text=kind_labels[kind], font=FONT_SEMI, bg=BG,
+                     fg=ACCENT, anchor="w").pack(fill="x", pady=(10, 4))
             self._vars[kind] = tk.StringVar(value=self.recommended.get(kind, ""))
             for m in MODEL_CATALOG:
                 if m["kind"] != kind:
                     continue
-                self._add_row(body, m, kind)
+                self._add_row(m, kind)
 
-        btn_frame = tk.Frame(self.top, bg=BG)
-        btn_frame.pack(pady=(10, 14))
-        self.dl_btn = tk.Button(btn_frame, text="Continue", font=("Segoe UI", 10, "bold"),
-                                bg=ACCENT, fg="white", relief="flat", padx=18, pady=4,
-                                cursor="hand2", command=self._on_confirm)
-        self.dl_btn.pack(side="left", padx=(0, 10))
-        tk.Button(btn_frame, text="Skip", font=("Segoe UI", 10),
-                  bg="#333333", fg=FG, relief="flat", padx=14, pady=4, cursor="hand2",
-                  command=self._on_skip).pack(side="left")
+        # Footer (fixed)
+        footer = tk.Frame(self.top, bg=BG)
+        footer.pack(fill="x", padx=28, pady=(10, 16))
+        note = tk.Label(footer, text="", font=FONT_MUTED, bg=BG, fg=MUTED, anchor="w")
+        note.pack(fill="x", pady=(0, 8))
+        note.config(text="Models marked ✖ no longer exist on Ollama's registry — pick another.")
+        self.dl_btn = _hover_btn(footer, "Continue", self._on_confirm, bg=ACCENT,
+                                 fg="white", padx=26, pady=7)
+        self.dl_btn.pack(side="left")
+        _hover_btn(footer, "Skip", self._on_skip, bg=PANEL, fg=FG,
+                   padx=16, pady=7).pack(side="left", padx=(10, 0))
 
         # Validate catalog tags against Ollama's registry in the background.
-        import threading as _t
+        self._valid_q: queue.Queue[tuple[str, bool | None] | None] = queue.Queue()
+        self._registry_done = False
         needed_kinds = [k for k in ("vision", "text") if f"{k}_model" in needs]
         target = [m["name"] for m in MODEL_CATALOG if m["kind"] in needed_kinds]
 
         def _check():
             for name in target:
-                self._valid[name] = validate_ollama_model(name)
-            self.top.after(0, self._apply_validity)
+                self._valid_q.put((name, validate_ollama_model(name)))
+            self._valid_q.put(None)
 
-        _t.Thread(target=_check, daemon=True).start()
+        if target:
+            threading.Thread(target=_check, daemon=True).start()
+            self.top.after(200, self._poll_validity)
 
-    def _add_row(self, parent, m, kind):
-        row = tk.Frame(parent, bg=BAR_BG, highlightbackground="#444444",
+    def _add_row(self, m, kind):
+        row = tk.Frame(self._inner, bg=PANEL, highlightbackground=BORDER,
                        highlightthickness=1, cursor="hand2")
-        row.pack(fill="x", pady=3)
+        row.pack(fill="x", pady=4)
         rb = tk.Radiobutton(row, variable=self._vars[kind], value=m["name"],
-                            bg=BAR_BG, fg=FG, selectcolor=BG,
-                            activebackground=BAR_BG, activeforeground=FG,
-                            indicatoron=False, width=2, anchor="w")
-        rb.pack(side="left", padx=(6, 0), pady=6)
+                            bg=PANEL, fg=FG, selectcolor="#2d3a4f",
+                            activebackground=PANEL, activeforeground=FG,
+                            highlightthickness=0, bd=0, cursor="hand2")
+        rb.pack(side="left", padx=(12, 4), pady=12)
 
-        info = tk.Frame(row, bg=BAR_BG)
-        info.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=6)
+        info = tk.Frame(row, bg=PANEL)
+        info.pack(side="left", fill="x", expand=True, padx=(0, 12), pady=8)
 
         installed = m["name"] in self.installed
         rec = (self.recommended.get(kind) == m["name"])
-        quality_color = GREEN if m["quality"] == "Best" else ACCENT if m["quality"] == "Good" else "#aaaaaa"
-        badge_txt = "  \u2713 Installed" if installed else ""
-        if rec:
-            badge_txt += "  \u2605 Recommended"
-        header_text = f'{m["label"]}  ({m["size"]})'
-        tk.Label(info, text=header_text, font=FONT_BOLD, bg=BAR_BG, fg=FG,
+        quality_color = GREEN if m["quality"] == "Best" else ACCENT if m["quality"] == "Good" else MUTED
+        header_text = f'{m["label"]}   ({m["size"]})'
+        tk.Label(info, text=header_text, font=FONT_BOLD, bg=PANEL, fg=FG,
                  anchor="w").pack(fill="x")
-        tk.Label(info, text=m["desc"], font=("Segoe UI", 8), bg=BAR_BG,
-                 fg="#aaaaaa", anchor="w", wraplength=440, justify="left").pack(fill="x")
+        tk.Label(info, text=m["desc"], font=FONT_MUTED, bg=PANEL,
+                 fg=MUTED, anchor="w", wraplength=470, justify="left").pack(fill="x", pady=(1, 0))
 
-        tags = tk.Frame(info, bg=BAR_BG)
-        tags.pack(fill="x", pady=(2, 0))
+        tags = tk.Frame(info, bg=PANEL)
+        tags.pack(fill="x", pady=(4, 0))
         for tag_text, color in [("Quality: " + m["quality"], quality_color),
-                                ("Speed: " + m["speed"], "#aaaaaa")]:
+                                ("Speed: " + m["speed"], MUTED)]:
             tk.Label(tags, text=tag_text, font=("Segoe UI", 8, "bold"),
-                     bg=BAR_BG, fg=color, anchor="w").pack(side="left", padx=(0, 12))
-        self._row_status[m["name"]] = tk.Label(tags, text=badge_txt,
-                                               font=("Segoe UI", 8, "bold"),
-                                               bg=BAR_BG, fg="#22c55e", anchor="w")
-        self._row_status[m["name"]].pack(side="left")
+                     bg=PANEL, fg=color, anchor="w").pack(side="left", padx=(0, 12))
+        badge_txt = ("  \u2713 Installed" if installed else
+                     "  \u2605 Recommended" if rec else "")
+        status = tk.Label(tags, text=badge_txt, font=("Segoe UI", 8, "bold"),
+                          bg=PANEL, fg=GREEN if installed else AMBER, anchor="w")
+        status.pack(side="left")
+        self._row_status[m["name"]] = status
 
-        for w in (row, info, tags):
-            for child in w.winfo_children():
-                child.bind("<Button-1>", lambda e, v=m["name"], k=kind: self._vars[k].set(v))
+        _hover_row(row)
+        for w in (row, info, tags, *tags.winfo_children(), *info.winfo_children()):
+            w.bind("<Button-1>", lambda e, v=m["name"], k=kind: self._vars[k].set(v))
 
-    def _apply_validity(self):
-        for name, status in self._row_status.items():
-            valid = self._valid.get(name)
-            if valid is False:
-                status.config(text="  \u2716 Not on Ollama registry", fg="#ef4444")
+    def _poll_validity(self):
+        """Drain the registry-check queue on the main thread (Tk-safe)."""
+        if self._closed:
+            return
+        try:
+            while True:
+                item = self._valid_q.get_nowait()
+                if item is None:
+                    self._registry_done = True
+                    return
+                name, valid = item
+                label = self._row_status.get(name)
+                if valid is False and label is not None:
+                    try:
+                        label.config(text="  \u2716 Not on Ollama registry", fg=RED)
+                    except tk.TclError:
+                        return
+        except queue.Empty:
+            pass
+        if not self._registry_done and not self._closed:
+            try:
+                self.top.after(200, self._poll_validity)
+            except tk.TclError:
+                return
 
     def _on_confirm(self):
         self.result = {k: v.get() or None for k, v in self._vars.items()}
-        self.top.destroy()
+        _close_dialog(self)
 
     def _on_skip(self):
         self.result = {"vision": None, "text": None}
-        self.top.destroy()
+        _close_dialog(self)
 
     def _center(self, parent):
         self.top.update_idletasks()
@@ -833,7 +1036,7 @@ def main():
 
         if not onboarded or force_setup:
             dlg = UseCaseDialog(win.root)
-            win.root.wait_window(dlg.top)
+            _show_modal(win, dlg)
             if dlg.result is None:
                 profile = []
                 save_setup_profile(profile=[], onboarded=True)
@@ -853,7 +1056,7 @@ def main():
         # Confirm the one-time download plan when onboarding / re-running setup
         if do_installs and (not onboarded or force_setup):
             dlg = PlanConfirmDialog(win.root, _build_plan(profile, needs, rec_models))
-            win.root.wait_window(dlg.top)
+            _show_modal(win, dlg)
             if not dlg.result:
                 save_setup_profile(profile=profile, onboarded=True)
                 _launch_app(win)
@@ -960,7 +1163,7 @@ def main():
             if not onboarded or force_setup:
                 dlg = ModelRecommendationDialog(win.root, needs,
                                                 _installed_models(), rec_models)
-                win.root.wait_window(dlg.top)
+                _show_modal(win, dlg)
                 model_choices = dlg.result or {"vision": None, "text": None}
             else:
                 model_choices = {
