@@ -70,7 +70,6 @@ from engine import (
     set_active_profile,
     setup_logging,
     stream_model_download,
-    switch_ai_provider,
     truncate_filename,
     validate_category,
     wipe_local_model,
@@ -80,6 +79,9 @@ from engine import (
     extract_audio_from_video,
     _has_audio_track,
     transcribe_audio,
+    load_setup_profile,
+    SETUP_USE_CASES,
+    MODEL_CATALOG,
 )
 
 _ICON_PATH = Path(sys._MEIPASS) / "icon.ico" if getattr(sys, "frozen", False) else Path(__file__).parent / "icon.ico"
@@ -97,7 +99,7 @@ _COMMIT_BEEP = "UklGRtIzAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0Ya4zAAAAAAEA
 if st.session_state.pop("_pending_rerun", False):
     st.rerun()
 
-# Hide Streamlit chrome + dark theme global styles
+# Hide Streamlit chrome + dark theme global styles + keyboard shortcuts
 st.markdown("""
 <style>
 #MainMenu {visibility: hidden;}
@@ -127,51 +129,7 @@ div[data-testid="stToast"] {
 div[data-testid="stStatus"] {
     border: 1px solid #27272A;
 }
-</style>
-<script>
-// Keyboard shortcuts
-document.addEventListener('keydown', function(e) {
-    // Ctrl+Enter: trigger Run AI Analysis
-    if (e.ctrlKey && e.key === 'Enter') {
-        e.preventDefault();
-        const btns = window.parent.document.querySelectorAll('[data-testid="stButton"] button');
-        for (const btn of btns) {
-            if (btn.textContent.includes('Run AI Analysis')) {
-                btn.click();
-                break;
-            }
-        }
-    }
-    // Ctrl+Shift+C: trigger Commit Selected
-    if (e.ctrlKey && e.shiftKey && e.key === 'C') {
-        e.preventDefault();
-        const btns = window.parent.document.querySelectorAll('[data-testid="stButton"] button');
-        for (const btn of btns) {
-            if (btn.textContent.includes('Commit Selected')) {
-                btn.click();
-                break;
-            }
-        }
-    }
-    // Escape: stop analysis
-    if (e.key === 'Escape') {
-        const btns = window.parent.document.querySelectorAll('[data-testid="stButton"] button');
-        for (const btn of btns) {
-            if (btn.textContent.includes('Stop Analysis')) {
-                btn.click();
-                break;
-            }
-        }
-    }
-});
-</script>
-""", unsafe_allow_html=True)
 
-st.title(":material/movie_edit: AI Media Renamer")
-
-# Global UI refinements for dark theme
-st.markdown("""
-<style>
 /* File uploader hover feedback */
 [data-testid="stFileUploader"] {
     transition: border-color 0.2s, background-color 0.2s;
@@ -218,7 +176,46 @@ st.markdown("""
     width: 100%;
 }
 </style>
+<script>
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    // Ctrl+Enter: trigger Run AI Analysis
+    if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault();
+        const btns = window.parent.document.querySelectorAll('[data-testid="stButton"] button');
+        for (const btn of btns) {
+            if (btn.textContent.includes('Run AI Analysis')) {
+                btn.click();
+                break;
+            }
+        }
+    }
+    // Ctrl+Shift+C: trigger Commit Selected
+    if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+        e.preventDefault();
+        const btns = window.parent.document.querySelectorAll('[data-testid="stButton"] button');
+        for (const btn of btns) {
+            if (btn.textContent.includes('Commit Selected')) {
+                btn.click();
+                break;
+            }
+        }
+    }
+    // Escape: stop analysis
+    if (e.key === 'Escape') {
+        const btns = window.parent.document.querySelectorAll('[data-testid="stButton"] button');
+        for (const btn of btns) {
+            if (btn.textContent.includes('Stop Analysis')) {
+                btn.click();
+                break;
+            }
+        }
+    }
+});
+</script>
 """, unsafe_allow_html=True)
+
+st.title(":material/movie_edit: AI Media Renamer")
 
 # -----------------------------------------------------------------------------
 # Session state initialisation
@@ -284,8 +281,14 @@ if "model_download_gen" not in st.session_state:
 if "analysis_errors" not in st.session_state:
     st.session_state.analysis_errors = []
 
+if "hw_fallback_files" not in st.session_state:
+    st.session_state.hw_fallback_files = []
+
 if "clear_counter" not in st.session_state:
     st.session_state.clear_counter = 0
+
+if "setup_profile" not in st.session_state:
+    st.session_state.setup_profile = []
 
 if "logger" not in st.session_state:
     st.session_state.logger = setup_logging()
@@ -304,38 +307,74 @@ CATEGORY_LIST = list(ALLOWED_CATEGORIES)
 # -----------------------------------------------------------------------------
 
 if st.session_state.env_check is None and not st.session_state.model_downloading:
-    st.session_state.env_check = check_environment()
+    setup_profile = load_setup_profile()
+    st.session_state.setup_profile = setup_profile.get("profile", [])
+    st.session_state.env_check = check_environment(st.session_state.setup_profile)
+
+# -----------------------------------------------------------------------------
+# Model download progress (fragment auto-refresh — no full-page flash)
+# -----------------------------------------------------------------------------
+
+@st.fragment(run_every="1s")
+def _download_model_fragment() -> None:
+    """Poll the Ollama pull stream in place. Only this fragment re-runs every
+    second, so the rest of the page stays static instead of flashing."""
+    if not st.session_state.get("model_downloading", False):
+        return
+    download_model = st.session_state.get("download_model_name", "qwen2.5vl:7b")
+    with st.status(f"Downloading {download_model}", expanded=True) as download_status:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        if st.button(":material/cancel: Cancel Download", key="cancel_download",
+                     help="Cancels UI polling — Ollama download continues in background"):
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+            st.rerun()
+
+        gen = st.session_state.get("model_download_gen")
+        if gen is None:
+            gen = stream_model_download(download_model)
+            st.session_state.model_download_gen = gen
+
+        try:
+            update = next(gen)
+        except StopIteration:
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+            st.rerun()
+
+        if update["status"] == "progress":
+            pct = update.get("percentage", 0) or 0
+            progress_bar.progress(int(pct) / 100.0)
+            completed_gb = (update.get("completed") or 0) / (1024 ** 3)
+            total_gb = (update.get("total") or 0) / (1024 ** 3)
+            status_text.text(f"Downloading: {completed_gb:.1f}GB / {total_gb:.1f}GB ({pct:.0f}%)")
+            st.session_state.model_download_gen = gen
+        elif update["status"] == "status":
+            status_text.text(f"{update['detail']}...")
+            st.session_state.model_download_gen = gen
+        elif update["status"] == "success":
+            progress_bar.progress(1.0)
+            status_text.success("Download complete! Model installed. Refreshing environment...")
+            download_status.update(label="Download complete", state="complete")
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+            st.session_state.env_check = None
+            st.rerun()
+        elif update["status"] == "error":
+            status_text.error(f"Download failed: {update['message']}")
+            st.session_state.model_downloading = False
+            st.session_state.model_download_gen = None
+            st.rerun()
+
+
+def _model_option_label(model: str, installed: set[str]) -> str:
+    """Dropdown label with an install-state marker for the given model."""
+    return f"{model}  (installed)" if model in installed else f"{model}  (not installed)"
 
 # -----------------------------------------------------------------------------
 # Sidebar: AI Provider & Environment
 # -----------------------------------------------------------------------------
-
-def _on_provider_switch(new_provider: str) -> None:
-    """Handle AI provider switch from the sidebar radio button.
-
-    Args:
-        new_provider: Identifier for the selected provider (e.g. "ollama", "gemini").
-    """
-    if new_provider != "ollama":
-        st.warning("Cloud providers are untested (no API keys available for testing). "
-                   "Select Local (Ollama) to proceed.")
-        st.session_state.provider_info = "ollama"
-        st.session_state.env_check = None
-        st.session_state.ollama_health = None
-        st.rerun()
-        return
-    api_key = load_api_key(new_provider) if new_provider != "ollama" else ""
-    result = switch_ai_provider(new_provider, api_key)
-    st.session_state.provider_info = new_provider
-    if not result["ok"]:
-        if result.get("require_download"):
-            st.warning("Model not found locally. Use the download button below.")
-        else:
-            st.warning(result["message"])
-    st.session_state.env_check = None
-    st.session_state.ollama_health = None
-    st.rerun()
-
 
 def _on_api_key_change() -> None:
     """Save the API key entered in the sidebar text input to the system keychain."""
@@ -356,76 +395,150 @@ def _on_model_change() -> None:
     save_config()
 
 
+def _on_text_model_change() -> None:
+    """Persist the selected text model to config when its dropdown changes."""
+    model = st.session_state.get("text_model_ollama", "")
+    config["model"]["text_model"] = model
+    save_config()
+
+
+def _spawn_setup_wizard() -> None:
+    """Re-open the bootstrap setup wizard (Tk) in a separate process."""
+    import subprocess
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        if getattr(sys, "frozen", False):
+            subprocess.Popen([sys.executable, "--setup"], creationflags=flags)
+        else:
+            subprocess.Popen(
+                [sys.executable, str(Path(__file__).parent / "bootstrap.py"), "--setup"],
+                creationflags=flags,
+            )
+    except Exception as exc:  # pragma: no cover - subprocess spawn failure
+        st.error(f"Could not open setup wizard: {exc}")
+
+
 with st.sidebar:
     st.header(":material/smart_toy: AI Provider")
 
     analysis_active = st.session_state.get("analysis_in_progress", False)
 
+    # Only the local engine is currently selectable; cloud providers are
+    # implemented but disabled (no API keys for testing) — see audit.md §2.
     all_providers = list_providers()
-    current_prov = st.session_state.provider_info
-    prov_labels = {"ollama": "Local (Ollama)", "gemini": "Cloud (Gemini)",
-                   "openai": "Cloud (OpenAI)", "anthropic": "Cloud (Anthropic)",
-                   "groq": "Cloud (Groq)", "openrouter": "Cloud (OpenRouter)"}
-    default_label = prov_labels.get(current_prov, "Local (Ollama)")
-    default_idx = list(prov_labels.values()).index(default_label) if default_label in prov_labels.values() else 0
+    if st.session_state.provider_info != "ollama":
+        st.caption(f"Previously configured provider '{st.session_state.provider_info}' "
+                   "is not available — using Local (Ollama).")
+        st.session_state.provider_info = "ollama"
 
     chosen = st.radio(
         "Engine",
-        list(prov_labels.values()),
-        index=default_idx,
+        ["Local (Ollama)"],
+        index=0,
         key="provider_radio",
-        help="Local mode uses Ollama. Cloud modes use remote APIs via stored API keys.",
+        help="Local mode uses Ollama. Cloud modes are not yet available.",
     )
-    new_provider = {v: k for k, v in prov_labels.items()}[chosen]
+    new_provider = "ollama"
 
-    if new_provider != st.session_state.provider_info:
-        _on_provider_switch(new_provider)
+    cloud_names = {
+        "gemini": "Gemini", "openai": "OpenAI", "anthropic": "Anthropic",
+        "groq": "Groq", "openrouter": "OpenRouter",
+    }
+    pending = [cloud_names.get(p, p) for p in all_providers if p != "ollama"]
+    st.caption(f"Cloud providers (coming soon): {', '.join(pending)}")
 
     if analysis_active:
         st.caption("Analysis in progress — settings locked")
-        st.caption(f"Provider: {current_prov.title()}")
+        st.caption(f"Provider: {st.session_state.provider_info.title()}")
         st.caption(f"Model: {config['model']['name']}")
     else:
-        # Model dropdown
+        # Model dropdown (installed + catalog alternatives, marked by install state)
         p = get_provider(new_provider)
         models = p.available_models()
+        installed = set(models)
         model_key = f"model_{new_provider}"
-        if models:
-            cur_val = st.session_state.get(model_key, p.model or models[0])
+        vision_options = list(models)
+        for m in MODEL_CATALOG:
+            if m["kind"] == "vision" and m["name"] not in vision_options:
+                vision_options.append(m["name"])
+
+        def _fmt_model(name: str) -> str:
+            return _model_option_label(name, installed)
+
+        if vision_options:
+            cur_val = st.session_state.get(model_key, p.model or vision_options[0])
             if new_provider == "ollama" and cur_val and not _is_vision_model(cur_val):
-                vl_first = next((m for m in models if _is_vision_model(m)), None)
+                vl_first = next((m for m in vision_options if _is_vision_model(m)), None)
                 if vl_first:
                     cur_val = vl_first
                     config["model"]["providers"].setdefault("ollama", {})["selected_model"] = vl_first
                     config["model"]["name"] = vl_first
                     save_config()
-            m_idx = models.index(cur_val) if cur_val in models else 0
-            st.selectbox("Model", models, index=m_idx, key=model_key, on_change=_on_model_change)
+            m_idx = vision_options.index(cur_val) if cur_val in vision_options else 0
+            st.selectbox("Model", vision_options, index=m_idx, key=model_key,
+                         on_change=_on_model_change, format_func=_fmt_model)
+            if new_provider == "ollama" and cur_val not in installed:
+                if st.button(f":material/download: Download {cur_val}",
+                             key="download_vision_model_btn",
+                             help="Downloads the selected model via Ollama."):
+                    st.session_state.download_model_name = cur_val
+                    st.session_state.model_downloading = True
+                    st.rerun()
         else:
             st.caption("No models available.")
+
+        # Text model for documents & audio (text-only analysis)
+        if new_provider == "ollama":
+            text_models = [m for m in models if not _is_vision_model(m)]
+            text_cur = config["model"].get("text_model", "")
+            if text_cur and text_cur not in text_models:
+                text_models = [text_cur] + text_models
+            for m in MODEL_CATALOG:
+                if m["kind"] == "text" and m["name"] not in text_models:
+                    text_models.append(m["name"])
+            if text_models:
+                t_idx = text_models.index(text_cur) if text_cur in text_models else 0
+                st.selectbox(
+                    "Text model (documents & audio)",
+                    text_models,
+                    index=t_idx,
+                    key="text_model_ollama",
+                    on_change=_on_text_model_change,
+                    format_func=_fmt_model,
+                    help="Used for text-only analysis of documents and audio transcripts. "
+                         "A small non-vision model (e.g. qwen2.5:3b) is much faster on CPU.",
+                )
+                text_target = text_cur if text_cur in text_models else text_models[0]
+                if text_target not in installed:
+                    if st.button(":material/download: Download this text model", type="secondary",
+                                 key="download_text_model",
+                                 help=f"Download '{text_target}' via Ollama."):
+                        st.session_state.download_model_name = text_target
+                        st.session_state.model_downloading = True
+                        st.rerun()
+                if text_cur and _is_vision_model(text_cur):
+                    st.caption(":material/warning: Current text model is a vision model — "
+                               "install a small text model for faster analysis "
+                               "(`ollama pull qwen2.5:3b`).")
+            else:
+                st.caption("No text models installed — add one via `ollama pull qwen2.5:3b`.")
 
         # Warn if selected model is not vision-capable
         if new_provider == "ollama" and models:
             cur_val = st.session_state.get(model_key, p.model or models[0])
             if cur_val and not _is_vision_model(cur_val):
-                st.caption("\u26a0\ufe0f This model may not support vision analysis.")
+                st.caption(":material/warning: This model may not support vision analysis.")
 
-        # Ollama health status
+        # Ollama health status (refreshed via the "Refresh Status" button below)
         if new_provider == "ollama":
             health = st.session_state.get("ollama_health")
             if health is None:
                 health = check_ollama_health()
                 st.session_state.ollama_health = health
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                if health["connected"]:
-                    st.markdown(f"\u2705 **Ollama** — {health['model_count']} models")
-                else:
-                    st.markdown("\u274c **Ollama** — disconnected")
-            with col2:
-                if st.button(":material/refresh: Refresh Ollama status", key="refresh_ollama"):
-                    st.session_state.ollama_health = None
-                    st.rerun()
+            if health["connected"]:
+                st.markdown(f":material/check_circle: **Ollama** — {health['model_count']} models")
+            else:
+                st.markdown(":material/error: **Ollama** — disconnected")
 
         # API key (cloud providers only)
         if new_provider != "ollama":
@@ -437,7 +550,7 @@ with st.sidebar:
                 on_change=_on_api_key_change,
             )
             if api_key:
-                st.caption("\u2713 Key saved in system keychain")
+                st.caption(":material/check: Key saved in system keychain")
 
 
     st.space()
@@ -447,7 +560,8 @@ with st.sidebar:
     if env:
         if new_provider == "ollama":
             for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool"),
-                               ("ollama_running", "Ollama Daemon"), ("model_available", "Vision Model")]:
+                               ("ollama_running", "Ollama Daemon"), ("model_available", "Vision Model"),
+                               ("text_model_available", "Text Model")]:
                 ok = env.get(key, False)
                 status = "green" if ok else "red"
                 st.badge(label, color=status)
@@ -457,11 +571,20 @@ with st.sidebar:
                 names = ", ".join(vision_models[:3])
                 if len(vision_models) > 3:
                     names += f" (+{len(vision_models) - 3} more)"
-                st.caption(f"Installed: {names}")
+                st.caption(f"Vision: {names}")
             elif not env.get("ollama_running"):
                 st.error("Ollama is not running. Start Ollama and click Refresh.")
             elif not env.get("model_available"):
                 st.info("No vision model installed yet.")
+
+            text_models = env.get("text_models", [])
+            if text_models:
+                tnames = ", ".join(text_models[:3])
+                if len(text_models) > 3:
+                    tnames += f" (+{len(text_models) - 3} more)"
+                st.caption(f"Text: {tnames}")
+            elif env.get("ollama_running"):
+                st.caption("Text model not installed — `ollama pull qwen2.5:3b`")
         else:
             for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool")]:
                 ok = env.get(key, False)
@@ -492,26 +615,6 @@ with st.sidebar:
 
     st.space()
 
-    if st.button(":material/delete_sweep: Reset App and Settings", key="sidebar_reset",
-                 help="Resets everything: pipeline state, staged files, extracted frames, "
-                      "analysis progress, analytics logs, and output directory setting."):
-        temp_dir = st.session_state.get("temp_dir")
-        if temp_dir:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        reset_keys = ["base64_cache", "text_cache", "audio_transcription_cache", "staged_assets", "analysis_done", "uploaded_files",
-                      "temp_dir", "output_dir", "logger", "analysis_in_progress",
-                      "analysis_index", "analysis_aborted", "clear_counter",
-                      "analysis_errors"]
-        for key in reset_keys:
-            st.session_state.pop(key, None)
-        for h in logging.getLogger('video_renamer').handlers[:]:
-            h.close()
-            logging.getLogger('video_renamer').removeHandler(h)
-        for log_path in LOG_DIR.glob("renamer_*.jsonl"):
-            log_path.unlink(missing_ok=True)
-        load_log_entries.clear()
-        st.rerun()
-
     if new_provider == "ollama" and env and env.get("ollama_running") and not env.get("model_available"):
         if st.button(":material/download: Download Vision Model", type="primary", key="download_model"):
             st.session_state.model_downloading = True
@@ -528,70 +631,22 @@ if env and env.get("errors"):
     for err in env["errors"]:
         if "FFmpeg" in err or "ExifTool" in err:
             critical = True
-            st.error(err, icon="\u274c")
+            st.error(err, icon=":material/error:")
     if critical:
         st.stop()
 
 if st.session_state.model_downloading:
-    download_model = st.session_state.get("download_model_name", "qwen2.5vl:7b")
-    with st.status(f"Downloading {download_model}", expanded=True) as download_status:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        st.caption("Model download progress updates every few seconds.")
-        if st.button(":material/cancel: Cancel Download", key="cancel_download",
-                     help="Cancels UI polling — Ollama download continues in background"):
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-            st.rerun()
-
-        gen = st.session_state.model_download_gen
-        if gen is None:
-            gen = stream_model_download(download_model)
-            st.session_state.model_download_gen = gen
-
-        try:
-            update = next(gen)
-        except StopIteration:
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-            st.rerun()
-
-        if update["status"] == "progress":
-            pct = update.get("percentage", 0) or 0
-            progress_bar.progress(int(pct) / 100.0)
-            completed_gb = (update.get("completed") or 0) / (1024 ** 3)
-            total_gb = (update.get("total") or 0) / (1024 ** 3)
-            status_text.text(f"Downloading: {completed_gb:.1f}GB / {total_gb:.1f}GB ({pct:.0f}%)")
-            st.session_state.model_download_gen = gen
-            st.rerun()
-        elif update["status"] == "status":
-            status_text.text(f"{update['detail']}...")
-            st.session_state.model_download_gen = gen
-            st.rerun()
-        elif update["status"] == "success":
-            progress_bar.progress(1.0)
-            status_text.success("Download complete! Model installed. Refreshing environment...")
-            download_status.update(label="Download complete", state="complete")
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-            st.session_state.env_check = None
-            st.rerun()
-        elif update["status"] == "error":
-            status_text.error(f"Download failed: {update['message']}")
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-
-    if st.session_state.model_downloading:
-        st.stop()
+    _download_model_fragment()
+    st.stop()
 
 if st.session_state.provider_info == "ollama" and env and not env.get("ollama_running"):
     st.warning("Ollama is not running. Please start the Ollama application, "
-               "then click 'Refresh Status' in the sidebar.", icon="\u26a0\ufe0f")
+               "then click 'Refresh Status' in the sidebar.", icon=":material/warning:")
 
 if st.session_state.provider_info != "ollama":
     stored = load_api_key(st.session_state.provider_info)
     if not stored:
-        st.warning(f"Enter your {st.session_state.provider_info} API key in the sidebar.", icon="\u26a0\ufe0f")
+        st.warning(f"Enter your {st.session_state.provider_info} API key in the sidebar.", icon=":material/warning:")
 
 # -----------------------------------------------------------------------------
 # Helper: load log data for analytics
@@ -621,6 +676,101 @@ def load_log_entries() -> list[dict[str, Any]]:
     return entries
 
 # -----------------------------------------------------------------------------
+# Confirmation dialogs for destructive actions
+# -----------------------------------------------------------------------------
+
+def _reset_app_settings() -> None:
+    """Clear pipeline state, temp files, analytics logs, and output dir setting."""
+    temp_dir = st.session_state.get("temp_dir")
+    if temp_dir:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    reset_keys = ["base64_cache", "text_cache", "audio_transcription_cache", "staged_assets", "analysis_done", "uploaded_files",
+                  "temp_dir", "output_dir", "logger", "analysis_in_progress",
+                  "analysis_index", "analysis_aborted", "clear_counter",
+                  "analysis_errors", "hw_fallback_files"]
+    for key in reset_keys:
+        st.session_state.pop(key, None)
+    for h in logging.getLogger('video_renamer').handlers[:]:
+        h.close()
+        logging.getLogger('video_renamer').removeHandler(h)
+    for log_path in LOG_DIR.glob("renamer_*.jsonl"):
+        log_path.unlink(missing_ok=True)
+    load_log_entries.clear()
+
+
+@st.dialog("Reset App and Settings", icon=":material/delete_sweep:")
+def confirm_reset() -> None:
+    """Confirm dialog: wipe pipeline state, staged files, logs, and output dir."""
+    st.write("This clears pipeline state, staged files, analysis progress, "
+             "analytics logs, and the output directory setting. This cannot be undone.")
+    with st.container(horizontal=True):
+        if st.button("Cancel", key="reset_dlg_cancel"):
+            st.rerun()
+        if st.button("Yes, reset everything", type="primary", key="reset_dlg_confirm"):
+            _reset_app_settings()
+            st.rerun()
+
+
+@st.dialog("Clear analytics logs", icon=":material/delete_sweep:")
+def confirm_clear_logs() -> None:
+    """Confirm dialog: delete all analytics/commit history log entries."""
+    st.write("Delete all analytics log entries? Commit history and dashboard stats will be cleared.")
+    with st.container(horizontal=True):
+        if st.button("Cancel", key="clear_logs_dlg_cancel"):
+            st.rerun()
+        if st.button("Yes, clear logs", type="primary", key="clear_logs_dlg_confirm"):
+            for h in logging.getLogger('video_renamer').handlers[:]:
+                h.close()
+                logging.getLogger('video_renamer').removeHandler(h)
+            for log_path in LOG_DIR.glob("renamer_*.jsonl"):
+                log_path.unlink(missing_ok=True)
+            load_log_entries.clear()
+            st.rerun()
+
+
+@st.dialog("Delete saved session", icon=":material/delete:")
+def confirm_delete_session(path: str, label: str) -> None:
+    """Confirm dialog: remove a saved session file."""
+    st.write(f"Delete saved session **{label}**? This cannot be undone.")
+    with st.container(horizontal=True):
+        if st.button("Cancel", key="del_session_dlg_cancel"):
+            st.rerun()
+        if st.button("Delete session", type="primary", key="del_session_dlg_confirm"):
+            delete_session(path)
+            st.toast("Session deleted.")
+            st.rerun()
+
+
+@st.dialog("Commit selected assets", icon=":material/send:")
+def confirm_commit(count: int, metadata_only: bool) -> None:
+    """Confirm dialog: commit the selected staged assets."""
+    if metadata_only:
+        st.write(f"Write metadata tags to **{count}** selected asset(s) in place? "
+                 "Original filenames are preserved.")
+    else:
+        st.write(f"Rename and tag **{count}** selected asset(s)? This moves files and "
+                 "writes metadata — it cannot be undone from the UI.")
+    with st.container(horizontal=True):
+        if st.button("Cancel", key="commit_dlg_cancel"):
+            st.rerun()
+        if st.button("Yes, commit", type="primary", key="commit_dlg_confirm"):
+            st.session_state.commit_confirmed = True
+            st.rerun()
+
+
+@st.dialog("Undo last commit", icon=":material/undo:")
+def confirm_undo() -> None:
+    """Confirm dialog: roll back the most recent commit batch."""
+    st.write("Move the files from the last commit back to their original locations "
+             "and remove the metadata tags?")
+    with st.container(horizontal=True):
+        if st.button("Cancel", key="undo_dlg_cancel"):
+            st.rerun()
+        if st.button("Yes, undo last commit", type="primary", key="undo_dlg_confirm"):
+            st.session_state.undo_requested = True
+            st.rerun()
+
+# -----------------------------------------------------------------------------
 # Tab 1: Upload & Analyze
 # -----------------------------------------------------------------------------
 
@@ -636,7 +786,7 @@ with tab_upload:
     if st.session_state.provider_info == "ollama" and env and not env.get("model_available"):
         st.info("Qwen2.5-VL model is not installed. "
                 "Use the download button in the sidebar to install it before uploading files.",
-                icon="\u26a0\ufe0f")
+                icon=":material/warning:")
         uploaded_files = None
     else:
         uploaded_files = st.file_uploader(
@@ -705,6 +855,7 @@ with tab_upload:
             st.session_state.base64_cache = {}
             st.session_state.text_cache = {}
             st.session_state.audio_transcription_cache = {}
+            st.session_state.hw_fallback_files = []
 
     # Clear All button — always visible when files or staged assets exist
     if st.session_state.get("uploaded_files") or st.session_state.staged_assets:
@@ -714,12 +865,27 @@ with tab_upload:
                 shutil.rmtree(temp_dir, ignore_errors=True)
             for s in list_sessions():
                 delete_session(s["path"])
-            for key in ["uploaded_files", "base64_cache", "text_cache", "staged_assets", "temp_dir", "analysis_errors"]:
+            for key in ["uploaded_files", "base64_cache", "text_cache", "staged_assets",
+                        "temp_dir", "analysis_errors", "hw_fallback_files"]:
                 st.session_state.pop(key, None)
             st.session_state.analysis_done = False
             st.session_state.analysis_in_progress = False
             st.session_state.clear_counter += 1
             st.rerun()
+
+    # Empty-state onboarding hint (nothing uploaded, nothing staged yet)
+    if not st.session_state.get("uploaded_files") and not st.session_state.staged_assets:
+        st.space()
+        step_col1, step_col2, step_col3 = st.columns(3)
+        with step_col1:
+            st.markdown(":material/upload_file: **Step 1 — Upload**")
+            st.caption("Add video, image, document, or audio files using the picker above.")
+        with step_col2:
+            st.markdown(":material/auto_awesome: **Step 2 — Analyze**")
+            st.caption("Run AI analysis to generate filenames, categories, and tags.")
+        with step_col3:
+            st.markdown(":material/check_circle: **Step 3 — Review & commit**")
+            st.caption("Edit the staging table, then commit the changes to your output folder.")
 
     # Session persistence — save / restore
     has_work = bool(st.session_state.get("staged_assets")) or bool(st.session_state.get("uploaded_files"))
@@ -784,16 +950,25 @@ with tab_upload:
                     del_chosen = st.selectbox("Delete session", del_options, key="session_delete_picker")
                     if st.button(":material/delete: Delete", key="delete_session", type="secondary"):
                         idx = del_options.index(del_chosen)
-                        delete_session(saved[idx]["path"])
-                        st.toast("Session deleted.")
-                        st.rerun()
+                        confirm_delete_session(saved[idx]["path"], del_chosen)
                 else:
-                    st.caption("")
+                    st.space()
 
     # ------------------------------------------------------------------
     # Phase 2: Per-asset rerun loop (one AI call per script execution)
     # Uses st.fragment to isolate reruns — only the analysis area re-renders
     # ------------------------------------------------------------------
+    def _render_hw_fallback_warning() -> None:
+        """Show a durable notice when files had to fall back to CPU decoding."""
+        fnames = st.session_state.get("hw_fallback_files", [])
+        if not fnames:
+            return
+        shown = ", ".join(fnames[:3])
+        if len(fnames) > 3:
+            shown += f" and {len(fnames) - 3} more"
+        st.warning(f"GPU decoding failed for {len(fnames)} file(s) — fell back to CPU "
+                   f"({shown}). Extraction succeeded but analysis may be slower.")
+
     if st.session_state.analysis_in_progress:
 
         @st.fragment
@@ -801,7 +976,8 @@ with tab_upload:
             """Run all remaining AI analysis steps in a single execution within a Streamlit fragment."""
             b64_items = list(st.session_state.get("base64_cache", {}).items())
             text_items = list(st.session_state.get("text_cache", {}).items())
-            audio_items = list(st.session_state.get("audio_transcription_cache", {}).items())
+            audio_items = [(n, d) for n, d in st.session_state.get("audio_transcription_cache", {}).items()
+                           if Path(n).suffix.lower() in AUDIO_EXTENSIONS]
             all_items = [(n, "image", d) for n, d in b64_items] + [(n, "text", d) for n, d in text_items] + [(n, "audio", d) for n, d in audio_items]
             total = len(all_items)
             idx = st.session_state.analysis_index
@@ -819,6 +995,7 @@ with tab_upload:
                 progress_bar.progress((idx + 1) / total, text=f"Analyzing {name} ({idx+1}/{total})")
 
                 if file_type in ("text", "audio"):
+                    prov.text_model = config["model"].get("text_model", "")
                     ai_result = prov.analyze_text(data, verbose=False)
                 else:
                     audio_ctx = st.session_state.get("audio_transcription_cache", {}).get(name, "")
@@ -895,6 +1072,7 @@ with tab_upload:
         n = len(st.session_state.staged_assets)
         if n:
             st.success(f"Analysis complete: {n} asset{'s' if n != 1 else ''} ready for review below.")
+        _render_hw_fallback_warning()
 
     # ------------------------------------------------------------------
     # AI Prompt Profile (before analysis, changeable per run)
@@ -999,6 +1177,7 @@ with tab_upload:
             try:
                 hw_accel = detect_hw_accel()
                 st.session_state.hw_accel = hw_accel
+                st.session_state.hw_fallback_files = []
                 if hw_accel:
                     st.info(f"Hardware Acceleration: FFmpeg will use '{hw_accel}'")
                 else:
@@ -1020,6 +1199,7 @@ with tab_upload:
                 if cached_count:
                     st.caption(f"{cached_count} file(s) already cached, extracting {len(uncached)} new...")
                 with ThreadPoolExecutor(max_workers=EXTRACTION_WORKERS) as executor:
+                    fallback_log: dict[str, bool] = {}
                     future_map = {}
                     for fp in uncached:
                         if fp.suffix.lower() in doc_exts:
@@ -1027,7 +1207,7 @@ with tab_upload:
                         elif fp.suffix.lower() in audio_exts:
                             future_map[executor.submit(transcribe_audio, fp)] = fp
                         else:
-                            future_map[executor.submit(process_asset_to_base64, fp, hw_accel)] = fp
+                            future_map[executor.submit(process_asset_to_base64, fp, hw_accel, fallback_log)] = fp
                     done_count = 0
                     extract_total = max(len(uncached), 1)
                     for future in as_completed(future_map):
@@ -1048,6 +1228,9 @@ with tab_upload:
                             done_count / extract_total,
                             text=f"Extracted {done_count}/{extract_total}"
                         )
+
+                if fallback_log:
+                    st.session_state.hw_fallback_files = list(fallback_log)
 
                 if not base64_results and not text_results:
                     st.error("No files could be extracted. Aborting.")
@@ -1103,8 +1286,8 @@ with tab_upload:
 
         col_filter, _ = st.columns([3, 2])
         with col_filter:
-            st.text_input("\U0001f50d", placeholder="Filter assets...", key="staging_filter",
-                          label_visibility="collapsed", on_change=lambda: None)
+            st.text_input("Filter assets", placeholder="Filter assets...", key="staging_filter",
+                          label_visibility="collapsed", icon=":material/search:")
 
         staged_raw = st.session_state.staged_assets
         filter_text = st.session_state.get("staging_filter", "").lower().strip()
@@ -1232,19 +1415,33 @@ with tab_upload:
 
         # Bulk category assignment
         sel_count = int(edited_df["select"].sum())
-        bulk_category = st.selectbox(
-            "Apply category to selected",
-            [""] + sorted(CATEGORY_LIST) + ["custom"],
-            key="bulk_category_sel"
-        )
-        if bulk_category == "custom":
-            custom_cat = st.text_input("Custom category name", key="bulk_custom_cat")
-            effective_category = custom_cat.strip()
-        else:
-            effective_category = bulk_category
+        st.markdown("**Bulk category**")
+        bulk_col_cat, bulk_col_btn = st.columns([3, 1])
+        with bulk_col_cat:
+            bulk_category = st.selectbox(
+                "Apply category to selected",
+                [""] + sorted(CATEGORY_LIST) + ["custom"],
+                key="bulk_category_sel",
+                label_visibility="collapsed",
+                help="Choose a category to apply to every selected asset.",
+            )
+            if bulk_category == "custom":
+                custom_cat = st.text_input("Custom category name", key="bulk_custom_cat",
+                                           label_visibility="collapsed",
+                                           placeholder="Enter a new category name")
+                effective_category = custom_cat.strip()
+            else:
+                effective_category = bulk_category
+        with bulk_col_btn:
+            st.button(":material/check: Apply", type="secondary", key="bulk_apply_btn",
+                      disabled=sel_count == 0 or not effective_category)
 
-        disabled = sel_count == 0 or not effective_category
-        st.button(":material/check: Apply", key="bulk_apply_btn", disabled=disabled)
+        if sel_count:
+            preview_cat = effective_category or "—"
+            st.caption(f"{sel_count} asset{'s' if sel_count != 1 else ''} selected — "
+                       f"apply '{preview_cat}' to all selected rows.")
+        else:
+            st.caption("Select assets using the checkbox column above.")
 
         if st.session_state.get("bulk_apply_btn") and effective_category:
             selected = edited_df[edited_df["select"]]
@@ -1258,9 +1455,6 @@ with tab_upload:
             new_rating = edited_df.iloc[i]["rating"]
             if new_rating != asset.get("rating", ""):
                 asset["rating"] = new_rating
-
-        if sel_count == 0:
-            st.caption("Select assets using the checkbox column above.")
 
         # Re-analyze button for selected rows
         ra_disabled = sel_count == 0
@@ -1390,6 +1584,13 @@ with tab_upload:
                 st.caption("Preview only — no files modified.")
 
         if commit_btn:
+            selected = edited_df[edited_df["select"]]
+            if selected.empty:
+                st.warning("No assets selected. Check the checkbox next to assets to commit.")
+            else:
+                confirm_commit(len(selected), metadata_only)
+
+        if st.session_state.pop("commit_confirmed", False):
             try:
                 selected = edited_df[edited_df["select"]]
                 if selected.empty:
@@ -1514,30 +1715,7 @@ with tab_analytics:
     with st.container(horizontal=True):
         st.subheader(":material/analytics: Analytics Dashboard")
         if st.button(":material/delete_sweep: Clear Logs", type="secondary", key="clear_logs"):
-            for h in logging.getLogger('video_renamer').handlers[:]:
-                h.close()
-                logging.getLogger('video_renamer').removeHandler(h)
-            for log_path in LOG_DIR.glob("renamer_*.jsonl"):
-                log_path.unlink(missing_ok=True)
-            load_log_entries.clear()
-            st.rerun()
-        if st.button(":material/delete_sweep: Reset App and Settings", type="secondary", key="analytics_reset"):
-            temp_dir = st.session_state.get("temp_dir")
-            if temp_dir:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            reset_keys = ["base64_cache", "audio_transcription_cache", "staged_assets", "analysis_done", "uploaded_files",
-                          "temp_dir", "output_dir", "logger", "analysis_in_progress",
-                          "analysis_index", "analysis_aborted", "clear_counter",
-                          "analysis_errors"]
-            for key in reset_keys:
-                st.session_state.pop(key, None)
-            for h in logging.getLogger('video_renamer').handlers[:]:
-                h.close()
-                logging.getLogger('video_renamer').removeHandler(h)
-            for log_path in LOG_DIR.glob("renamer_*.jsonl"):
-                log_path.unlink(missing_ok=True)
-            load_log_entries.clear()
-            st.rerun()
+            confirm_clear_logs()
 
     entries = load_log_entries()
     if not entries:
@@ -1564,11 +1742,13 @@ with tab_analytics:
             st.caption(f"Last commit: {n_files} files at {ts}")
             if st.button(":material/undo: Undo Last Commit", type="secondary",
                          help="Moves files back to original locations and removes metadata tags."):
+                confirm_undo()
+            if st.session_state.pop("undo_requested", False):
                 with st.spinner("Rolling back..."):
                     result = rollback_last_batch()
+                load_log_entries.clear()
                 if result["ok"]:
                     st.success(f"Restored {result['restored']} files.")
-                    load_log_entries.clear()
                     st.rerun()
                 else:
                     st.warning(f"Restored {result['restored']}, failed {result['failed']}. "
@@ -1804,32 +1984,27 @@ with tab_config:
     st.subheader(":material/label: Categories")
     st.caption(f"{len(ALLOWED_CATEGORIES)} categories configured")
 
-    cat_cols = st.columns([4, 1])
-    with cat_cols[1]:
-        if st.button(":material/add: Add Category", key="btn_add_category"):
-            st.session_state.setdefault("edit_categories", list(ALLOWED_CATEGORIES))
-            st.session_state.edit_categories.append("")
-            st.rerun()
-
     edit_cats = st.session_state.get("edit_categories", list(ALLOWED_CATEGORIES))
-    new_cats = []
-    cols_per_row = 4
-    for i in range(0, len(edit_cats), cols_per_row):
-        row = st.columns(cols_per_row)
-        for j, col in enumerate(row):
-            idx = i + j
-            if idx >= len(edit_cats):
-                break
-            with col:
-                c1, c2 = st.columns([4, 1])
-                with c1:
-                    new_val = st.text_input(f"Cat {idx+1}", value=edit_cats[idx],
-                                            key=f"cat_{idx}", label_visibility="collapsed")
-                    new_cats.append(new_val)
-                with c2:
-                    if st.button(":material/close: Remove", key=f"cat_del_{idx}"):
-                        new_cats.pop()
-                        continue
+    cat_df = pd.DataFrame({"Category": edit_cats})
+    edited = st.data_editor(
+        cat_df,
+        num_rows="dynamic",
+        hide_index=True,
+        height=360,
+        width="stretch",
+        key="category_editor",
+        column_config={
+            "Category": st.column_config.TextColumn(
+                "Category",
+                width="stretch",
+                max_chars=80,
+            ),
+        },
+    )
+    new_cats = ["" if pd.isna(c) else str(c).strip() for c in edited["Category"].tolist()]
+    st.session_state["edit_categories"] = new_cats
+
+    st.caption("Add a row with the '+' button. Select rows and use 'Delete row(s)' to remove them.")
 
     with st.container(horizontal=True):
         if st.button(":material/save: Save Categories", type="primary", key="btn_save_cats"):
@@ -1844,15 +2019,15 @@ with tab_config:
                 save_config()
                 reload_config()
                 st.session_state.pop("edit_categories", None)
+                st.session_state.pop("category_editor", None)
                 st.success(f"Saved {len(cleaned)} categories.")
                 log_event(logger, "INFO", "categories_updated",
                           details={"count": len(cleaned)})
                 st.rerun()
         if st.button(":material/restart_alt: Reset", key="btn_reset_cats"):
             st.session_state.pop("edit_categories", None)
+            st.session_state.pop("category_editor", None)
             st.rerun()
-
-    st.session_state["edit_categories"] = new_cats
 
     st.space()
 
@@ -1917,6 +2092,34 @@ with tab_config:
                 st.rerun()
             else:
                 st.error(result.get("message", "Failed to wipe model."))
+
+    st.space()
+
+    # -- Setup & onboarding profile --
+    with st.expander("Setup & onboarding", expanded=False):
+        setup_profile = st.session_state.get("setup_profile", [])
+        if setup_profile:
+            labels = ", ".join(SETUP_USE_CASES.get(k, {}).get("label", k) for k in setup_profile)
+            st.caption(f"Using the app for: **{labels}**")
+        else:
+            st.caption("No onboarding profile saved — the media toolchain checks are active.")
+        st.caption("Re-running setup lets you change what you rename and download "
+                   "the right models and tools for it.")
+        if st.button(":material/settings_suggest: Re-run setup wizard", key="rerun_setup",
+                     help="Opens the one-time setup wizard. Complete it and a fresh app "
+                          "window opens with the new configuration."):
+            _spawn_setup_wizard()
+            st.toast("Setup wizard opened.")
+
+    st.space()
+
+    # -- Reset app state and settings (single home for this action) --
+    with st.expander("Reset app state and settings", expanded=False):
+        st.warning("Clears pipeline state, staged files, analysis progress, "
+                   "analytics logs, and the output directory setting. This cannot be undone.")
+        if st.button(":material/delete_sweep: Reset App and Settings", type="secondary",
+                     key="config_reset"):
+            confirm_reset()
 
     st.space()
 

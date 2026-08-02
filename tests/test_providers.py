@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from engine import (
+    TEXT_MODEL_NAME,
     AIProvider,
     AnthropicProvider,
     GeminiProvider,
@@ -189,6 +190,68 @@ class TestOllamaProvider:
     def test_model_property(self):
         self.prov.model = "test-model"
         assert self.prov.model == "test-model"
+
+    def test_text_model_default(self):
+        assert self.prov.text_model == TEXT_MODEL_NAME
+
+    @patch("engine.ollama.generate")
+    def test_analyze_text_uses_text_model(self, mock_gen):
+        payload = ('{"new_filename": "report_summary", "topic": "report", "description": "summary", '
+                   '"tags": ["report"], "overall_visual_summary": "Report summary", '
+                   '"suggested_category": "documents_broll"}')
+        mock_gen.return_value = {"response": payload}
+        self.prov.text_model = "qwen2.5:3b"
+        result = self.prov.analyze_text("Some document text")
+        assert result["ok"] is True
+        assert mock_gen.call_args.kwargs["model"] == "qwen2.5:3b"
+        assert "images" not in mock_gen.call_args.kwargs
+
+    @patch("engine.ollama.generate")
+    def test_analyze_text_falls_back_to_vision_model(self, mock_gen):
+        payload = ('{"new_filename": "report_summary", "topic": "report", "description": "summary", '
+                   '"tags": ["report"], "overall_visual_summary": "Report summary", '
+                   '"suggested_category": "documents_broll"}')
+        mock_gen.return_value = {"response": payload}
+        self.prov.text_model = ""
+        result = self.prov.analyze_text("Some document text")
+        assert result["ok"] is True
+        assert mock_gen.call_args.kwargs["model"] == self.prov._model
+
+    @patch("engine.ollama.generate")
+    def test_analyze_sends_vision_model_for_images(self, mock_gen):
+        payload = ('{"new_filename": "sunset_beach", "topic": "beach", "description": "sunset", '
+                   '"tags": ["sunset", "beach"], "overall_visual_summary": "A beautiful sunset.", '
+                   '"suggested_category": "landscapes_broll"}')
+        mock_gen.return_value = {"response": payload}
+        self.prov.text_model = "qwen2.5:3b"
+        result = self.prov.analyze("fake_base64")
+        assert result["ok"] is True
+        assert mock_gen.call_args.kwargs["model"] == self.prov._model
+        assert "images" in mock_gen.call_args.kwargs
+
+    def test_analyze_document_with_ai_uses_config_text_model(self, monkeypatch):
+        import engine as engine_mod
+
+        calls = {}
+
+        class FakeProv:
+            def __init__(self):
+                self.model = ""
+                self.text_model = ""
+
+            def analyze_text(self, text, verbose=False):
+                calls["model"] = self.model
+                calls["text_model"] = self.text_model
+                return {"ok": True, "data": {"new_filename": "x"}}
+
+        monkeypatch.setattr(engine_mod, "get_provider", lambda name: FakeProv())
+        monkeypatch.setitem(engine_mod.config, "model", {
+            "name": "vision-model", "text_model": "tiny-text",
+            "temperature": 0.15, "num_ctx": 8192, "keep_alive": "1h",
+        })
+        engine_mod.analyze_document_with_ai("doc text")
+        assert calls["model"] == "vision-model"
+        assert calls["text_model"] == "tiny-text"
 
     def test_api_key_property(self):
         self.prov.api_key = "test-key"

@@ -169,6 +169,7 @@
   ],
   "model": {
     "name": "qwen2.5vl:7b",
+    "text_model": "qwen2.5:3b",
     "temperature": 0.15,
     "num_ctx": 8192,
     "keep_alive": "1h",

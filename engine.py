@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import datetime
+import functools
 import hashlib
 import json
 import logging
@@ -177,6 +178,7 @@ AUDIO_EXTENSIONS = config.get('audio_extensions', (
     '.wma', '.opus', '.aiff', '.alac', '.ape', '.wv',
 ))
 MODEL_NAME = config['model']['name']
+TEXT_MODEL_NAME = config['model'].get('text_model', 'qwen2.5:3b')
 MODEL_TEMPERATURE = config['model']['temperature']
 MODEL_NUM_CTX = config['model']['num_ctx']
 MODEL_KEEP_ALIVE = config['model']['keep_alive']
@@ -234,7 +236,229 @@ def reload_config() -> None:
         "short": "{topic}_{description}",
         "editorial": "{date}_{topic}"
     })
-    DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}")
+DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}")
+
+# -----------------------------------------------------------------------------
+# 1b. SETUP / ONBOARDING (use-case → one-time dependency matrix)
+# -----------------------------------------------------------------------------
+
+USER_DATA_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "ai-media-renamer"
+
+# Use-case keys map to the external tools + model kinds they require. Kept in
+# engine.py so both bootstrap.py (setup wizard) and app.py (env checks) share
+# a single source of truth.
+SETUP_USE_CASES: dict[str, dict[str, Any]] = {
+    "videos": {
+        "label": "Videos",
+        "desc": "MP4, MOV, MKV, AVI \u2014 scene analysis with audio-track context",
+        "needs": {"ffmpeg", "exiftool", "vision_model", "whisper"},
+    },
+    "photos": {
+        "label": "Photos",
+        "desc": "JPG, PNG, WEBP, GIF \u2014 visual analysis and tagging",
+        "needs": {"ffmpeg", "exiftool", "vision_model"},
+    },
+    "documents": {
+        "label": "Documents",
+        "desc": "PDF, DOCX, TXT, MD, RTF \u2014 content-based renaming",
+        "needs": {"text_model"},
+    },
+    "spreadsheets": {
+        "label": "Spreadsheets",
+        "desc": "XLSX, CSV \u2014 data-aware renaming",
+        "needs": {"text_model"},
+    },
+    "audio": {
+        "label": "Audio",
+        "desc": "MP3, WAV, FLAC \u2014 transcription + content renaming",
+        "needs": {"exiftool", "text_model", "whisper"},
+    },
+}
+
+SETUP_DEPENDENCIES: dict[str, dict[str, Any]] = {
+    "ollama": {
+        "label": "Ollama runtime",
+        "desc": "Runs your AI models locally \u2014 required for every use case.",
+        "always": True,
+    },
+    "ffmpeg": {
+        "label": "FFmpeg",
+        "desc": "Extracts video frames and downscales images.",
+    },
+    "exiftool": {
+        "label": "ExifTool",
+        "desc": "Writes metadata tags (needed for PDF metadata too).",
+    },
+    "vision_model": {
+        "label": "Vision AI model",
+        "desc": "Analyzes video frames and photos.",
+    },
+    "text_model": {
+        "label": "Text AI model",
+        "desc": "Analyzes documents, spreadsheets, and transcripts.",
+    },
+    "whisper": {
+        "label": "Whisper (speech-to-text)",
+        "desc": "Transcribes audio tracks and audio files.",
+    },
+}
+
+# Model catalog shared by the setup wizard and the in-app model dropdowns.
+# `kind` selects the category; recommended_* flags pick a default per hardware.
+MODEL_CATALOG: list[dict[str, Any]] = [
+    # ---- vision models ----
+    {
+        "name": "qwen2.5vl:7b", "label": "Qwen 2.5 VL 7B", "kind": "vision",
+        "size": "6.0 GB", "size_gb": 6.0, "quality": "Best", "speed": "Moderate",
+        "desc": "Best quality for structured JSON extraction and visual analysis.",
+        "recommended_gpu": True,
+    },
+    {
+        "name": "qwen2.5vl:3b", "label": "Qwen 2.5 VL 3B", "kind": "vision",
+        "size": "3.2 GB", "size_gb": 3.2, "quality": "Good", "speed": "Fast",
+        "desc": "Lighter model \u2014 good quality, faster on CPU or low VRAM.",
+        "recommended_cpu": True,
+    },
+    {
+        "name": "qwen3-vl:4b", "label": "Qwen 3 VL 4B", "kind": "vision",
+        "size": "~3 GB", "size_gb": 3.0, "quality": "Good", "speed": "Fast",
+        "desc": "Newer architecture with improved reasoning.",
+    },
+    {
+        "name": "moondream:latest", "label": "Moondream 2", "kind": "vision",
+        "size": "1.8 GB", "size_gb": 1.8, "quality": "Basic", "speed": "Very fast",
+        "desc": "Smallest option \u2014 basic visual understanding for very low VRAM.",
+    },
+    # ---- text models ----
+    {
+        "name": "qwen2.5:3b", "label": "Qwen 2.5 3B", "kind": "text",
+        "size": "1.9 GB", "size_gb": 1.9, "quality": "Good", "speed": "Fast",
+        "desc": "Recommended text model \u2014 fast on CPU, great for documents and transcripts.",
+        "recommended_cpu": True, "recommended_gpu": True,
+    },
+    {
+        "name": "qwen2.5:7b", "label": "Qwen 2.5 7B", "kind": "text",
+        "size": "4.7 GB", "size_gb": 4.7, "quality": "Best", "speed": "Moderate",
+        "desc": "Highest text quality \u2014 slower on CPU.",
+        "recommended_gpu": True,
+    },
+    {
+        "name": "qwen2.5:1.5b", "label": "Qwen 2.5 1.5B", "kind": "text",
+        "size": "986 MB", "size_gb": 0.99, "quality": "Basic", "speed": "Very fast",
+        "desc": "Lightest option for very old hardware.",
+    },
+]
+
+
+def use_cases_needs(profile: list[str]) -> set[str]:
+    """Return the set of dependencies required for the given use cases."""
+    needs: set[str] = set()
+    for key in profile:
+        needs |= SETUP_USE_CASES.get(key, {}).get("needs", set())
+    return needs
+
+
+def _has_gpu() -> bool:
+    """Cheap GPU detection for setup recommendations (works before FFmpeg exists)."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=5, creationflags=_NO_WINDOW,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return True
+    except Exception:
+        pass
+    if sys.platform == "win32":
+        import ctypes
+        for dll in ("amdx64.dll", "atiadlxx.dll"):
+            try:
+                ctypes.windll.LoadLibrary(dll)
+                return True
+            except Exception:
+                continue
+    return False
+
+
+def recommended_models(profile: list[str]) -> dict[str, str]:
+    """Pick default vision/text models for a use-case profile + detected hardware.
+
+    Returns:
+        Dict with optional 'vision' and 'text' model names.
+    """
+    needs = use_cases_needs(profile)
+    has_gpu = _has_gpu()
+    out: dict[str, str] = {}
+    for kind in ("vision", "text"):
+        if f"{kind}_model" not in needs:
+            continue
+        cands = [m for m in MODEL_CATALOG if m["kind"] == kind]
+        preferred = next(
+            (m for m in cands if m.get("recommended_gpu" if has_gpu else "recommended_cpu")),
+            None,
+        )
+        out[kind] = (preferred or cands[0])["name"]
+    return out
+
+
+@functools.lru_cache(maxsize=128)
+def _model_tag_exists(name: str, tag: str) -> bool | None:
+    """True/False if the tag exists in Ollama's registry, None if offline."""
+    try:
+        resp = requests.get(
+            f"https://registry.ollama.ai/v2/library/{name}/tags/list", timeout=10
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        tags = [t.get("name", t) if isinstance(t, dict) else t for t in data.get("tags", [])]
+        return tag in tags
+    except Exception:
+        return None
+
+
+def validate_ollama_model(model_name: str) -> bool | None:
+    """Confirm a model tag exists on Ollama's registry (None when offline)."""
+    name, _, tag = model_name.partition(":")
+    return _model_tag_exists(name, tag or "latest")
+
+
+def pre_download_whisper(model_size: str = "base") -> bool:
+    """Pre-download a faster-whisper model so the first transcription is instant."""
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(repo_id=f"Systran/faster-whisper-{model_size}")
+        return True
+    except Exception:
+        return False
+
+
+def load_setup_profile() -> dict[str, Any]:
+    """Load the persisted onboarding profile from user data (%APPDATA%)."""
+    default: dict[str, Any] = {"onboarded": False, "profile": [], "setup_version": VERSION}
+    try:
+        data = json.loads((USER_DATA_DIR / "setup.json").read_text(encoding="utf-8"))
+        data.setdefault("onboarded", False)
+        data.setdefault("profile", [])
+        data.setdefault("setup_version", VERSION)
+        return data
+    except Exception:
+        return default
+
+
+def save_setup_profile(profile: list[str] | None = None, onboarded: bool = True) -> dict[str, Any]:
+    """Persist the onboarding profile to user data so it survives EXE restarts."""
+    data = load_setup_profile()
+    if profile is not None:
+        data["profile"] = list(profile)
+    data["onboarded"] = onboarded
+    data["setup_version"] = VERSION
+    try:
+        USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        (USER_DATA_DIR / "setup.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return data
     PROMPT_PROFILES = get_profile_labels()
     CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
 
@@ -469,7 +693,7 @@ def get_video_duration(video_path: str | Path) -> float:
     return duration
 
 
-def process_video_to_base64(video_path: str | Path, hw_accel: str | None) -> str | None:
+def _extract_frame_to_base64(video_path: str | Path, hw_accel: str | None) -> str | None:
     """Extract the midpoint frame of a video and return as base64 JPEG.
 
     Args:
@@ -503,6 +727,32 @@ def process_video_to_base64(video_path: str | Path, hw_accel: str | None) -> str
         return None
 
 
+def process_video_to_base64(video_path: str | Path, hw_accel: str | None,
+                            fallback_log: dict[str, bool] | None = None) -> str | None:
+    """Extract the midpoint frame of a video, falling back to CPU on failure.
+
+    If hardware-accelerated decoding is requested but fails, retries the
+    extraction with software decoding and records the file name in
+    ``fallback_log`` so callers can notify the user about the degradation.
+
+    Args:
+        video_path: Path to the video file.
+        hw_accel: Hardware accelerator name or None for software decoding.
+        fallback_log: Optional dict; file names that needed CPU fallback are
+            recorded here (name -> True).
+
+    Returns:
+        Base64-encoded JPEG string, or None on failure.
+    """
+    if hw_accel:
+        result = _extract_frame_to_base64(video_path, hw_accel)
+        if result is not None:
+            return result
+        if fallback_log is not None:
+            fallback_log[Path(video_path).name] = True
+    return _extract_frame_to_base64(video_path, None)
+
+
 def process_image_to_base64(image_path: str | Path, max_edge: int = IMAGE_PREVIEW_MAX_EDGE) -> str | None:
     """Downscale an image and return as base64 JPEG.
 
@@ -532,18 +782,21 @@ def process_image_to_base64(image_path: str | Path, max_edge: int = IMAGE_PREVIE
         return None
 
 
-def process_asset_to_base64(file_path: Path, hw_accel: str | None) -> str | None:
+def process_asset_to_base64(file_path: Path, hw_accel: str | None,
+                            fallback_log: dict[str, bool] | None = None) -> str | None:
     """Route a media file to the appropriate base64 encoder.
 
     Args:
         file_path: Path to the video or image file.
         hw_accel: Hardware accelerator name or None.
+        fallback_log: Optional dict forwarded to ``process_video_to_base64``
+            to record files that fell back to CPU decoding.
 
     Returns:
         Base64-encoded JPEG string, or None on failure.
     """
     if file_path.suffix.lower() in VIDEO_EXTENSIONS:
-        return process_video_to_base64(file_path, hw_accel)
+        return process_video_to_base64(file_path, hw_accel, fallback_log)
     return process_image_to_base64(file_path)
 
 
@@ -1068,9 +1321,10 @@ def _is_vision_model(name: str) -> bool:
 
 class AIProvider(ABC):
     def __init__(self) -> None:
-        """Initialize default model and API key slots."""
+        """Initialize default model, text model, and API key slots."""
         self._model = ""
         self._api_key = ""
+        self.text_model = TEXT_MODEL_NAME
 
     @abstractmethod
     def analyze(self, base64_img: str, verbose: bool = False,
@@ -1225,10 +1479,11 @@ class OllamaProvider(AIProvider):
         """
         result: dict[str, Any] = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
         last_exc = None
+        model = self.text_model or self._model
         for attempt in range(self._retries):
             try:
                 response = ollama.generate(
-                    model=self._model,
+                    model=model,
                     prompt=prompt,
                     keep_alive=MODEL_KEEP_ALIVE,
                     options={"temperature": MODEL_TEMPERATURE, "num_ctx": MODEL_NUM_CTX}
@@ -1611,6 +1866,7 @@ def analyze_document_with_ai(text_content: str, verbose: bool = False) -> dict[s
     """
     provider = get_provider("ollama")
     provider.model = config["model"]["name"]
+    provider.text_model = config["model"].get("text_model", TEXT_MODEL_NAME)
     return provider.analyze_text(text_content, verbose=verbose)
 
 
@@ -2445,23 +2701,31 @@ def check_ollama_health() -> dict[str, Any]:
         }
 
 
-def check_environment() -> dict[str, Any]:
+def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
     """Verify all required tools and services are available.
+
+    Args:
+        profile: Use-case keys (from SETUP_USE_CASES). When provided, only the
+            dependencies that profile actually needs are treated as critical —
+            e.g. a documents-only user is not blocked by a missing FFmpeg.
 
     Returns:
         Dict with availability flags for ffmpeg, exiftool, Ollama, and error list.
     """
+    profile = profile or []
+    needs = use_cases_needs(profile) if profile else {"ffmpeg", "exiftool"}
     ffmpeg_path = _resolve_binary_path("ffmpeg")
     exiftool_path = _resolve_binary_path("exiftool")
     ollama_running = False
     model_available = False
     vision_models: list[str] = []
+    text_models: list[str] = []
     errors = []
 
-    if not ffmpeg_path:
+    if not ffmpeg_path and "ffmpeg" in needs:
         errors.append("FFmpeg not found. Install FFmpeg and add it to your PATH.")
 
-    if not exiftool_path:
+    if not exiftool_path and "exiftool" in needs:
         errors.append("ExifTool not found. Install ExifTool and add it to your PATH.")
 
     try:
@@ -2478,6 +2742,11 @@ def check_environment() -> dict[str, Any]:
             if _is_vision_model(name):
                 vision_models.append(name)
                 model_available = True
+            else:
+                text_models.append(name)
+        # A documents-only profile can run on a text model alone.
+        if not model_available and profile and models and "vision_model" not in needs:
+            model_available = True
     except Exception:
         ollama_running = False
         errors.append("Ollama is not running. Start Ollama and try again.")
@@ -2490,6 +2759,8 @@ def check_environment() -> dict[str, Any]:
         "ollama_running": ollama_running,
         "model_available": model_available,
         "vision_models": vision_models,
+        "text_models": text_models,
+        "text_model_available": bool(text_models),
         "cloud_configured": cloud_configured,
         "errors": errors,
     }

@@ -1,9 +1,11 @@
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 import zipfile
 from pathlib import Path
@@ -15,15 +17,25 @@ if getattr(sys, "frozen", False) and sys.stdout is None:
 if getattr(sys, "frozen", False) and sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
 
+import ollama
 import requests
 
 from engine import (
+    MODEL_CATALOG,
+    SETUP_DEPENDENCIES,
+    SETUP_USE_CASES,
     VERSION,
-    _is_vision_model,
     _resolve_binary_path,
     check_for_updates,
+    config,
     download_file,
+    load_setup_profile,
+    pre_download_whisper,
+    recommended_models,
+    save_setup_profile,
     stream_model_download,
+    use_cases_needs,
+    validate_ollama_model,
     wait_for_ollama_service,
 )
 
@@ -43,15 +55,116 @@ CACHE_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
 BIN_DIR = CACHE_DIR / "bin"
 OLLAMA_INSTALLER_CACHE = CACHE_DIR / "cache"
 
-# ---------- theme colors ----------
-BG = "#1e1e1e"
-FG = "#e0e0e0"
-ACCENT = "#3b82f6"
-GREEN = "#22c55e"
-BAR_BG = "#333333"
+# ---------- theme colors (modern dark) ----------
+BG = "#14161c"
+PANEL = "#1f232c"
+PANEL_HOVER = "#272c37"
+BORDER = "#333a47"
+FG = "#e8eaf0"
+MUTED = "#9aa3b2"
+ACCENT = "#4f8cff"
+ACCENT_HOVER = "#3a74e8"
+GREEN = "#34d399"
+RED = "#f87171"
+AMBER = "#fbbf24"
 FONT = ("Segoe UI", 10)
 FONT_BOLD = ("Segoe UI", 10, "bold")
-FONT_TITLE = ("Segoe UI", 14, "bold")
+FONT_SEMI = ("Segoe UI", 9, "bold")
+FONT_TITLE = ("Segoe UI", 15, "bold")
+FONT_MUTED = ("Segoe UI", 9)
+BAR_BG = PANEL  # kept as alias for any remaining callers
+
+
+def _hover_btn(parent, text, command, *, bg=None, fg="white", font=None,
+               padx=20, pady=6, width=None, disabled=False, cursor="hand2"):
+    """Modern flat button with hover states."""
+    bg = bg or ACCENT
+    font = font or ("Segoe UI", 10, "bold")
+    btn = tk.Button(parent, text=text, font=font, bg=bg, fg=fg, relief="flat",
+                    padx=padx, pady=pady, cursor=cursor, command=command,
+                    activebackground=bg, activeforeground=fg, bd=0,
+                    highlightthickness=0, disabledforeground="#8a93a3")
+    if width:
+        btn.config(width=width)
+    if disabled:
+        btn.config(state="disabled")
+
+    def _on_enter(_e):
+        if str(btn.cget("state")) == "normal":
+            btn.config(bg=ACCENT_HOVER if bg == ACCENT else PANEL_HOVER)
+
+    def _on_leave(_e):
+        if str(btn.cget("state")) == "normal":
+            btn.config(bg=bg)
+
+    btn.bind("<Enter>", _on_enter)
+    btn.bind("<Leave>", _on_leave)
+    return btn
+
+
+def _hover_row(row, normal_bg=PANEL, hover_bg=PANEL_HOVER,
+               border=BORDER, border_hover=ACCENT):
+    """Add hover feedback to a clickable row (binds all children too)."""
+
+    def _set(bg, bord, *_):
+        for w in (row, *row.winfo_children()):
+            try:
+                if str(w.cget("bg")) != "systemTransparent":
+                    w.config(bg=bg)
+            except tk.TclError:
+                pass
+        try:
+            row.config(highlightbackground=bord)
+        except tk.TclError:
+            pass
+
+    row.bind("<Enter>", lambda e: _set(hover_bg, border_hover))
+    row.bind("<Leave>", lambda e: _set(normal_bg, border))
+    for child in row.winfo_children():
+        child.bind("<Enter>", lambda e: _set(hover_bg, border_hover))
+        child.bind("<Leave>", lambda e: _set(normal_bg, border))
+
+
+def _bind_wheel(widget):
+    """Wire mouse-wheel scrolling onto a widget and all its children."""
+    widget.bind_all("<MouseWheel>",
+                    lambda e: widget.yview_scroll(int(-e.delta / 120), "units")
+                    if widget.winfo_exists() else None)
+    widget.bind_all("<Button-4>", lambda e: widget.yview_scroll(-1, "units"))
+    widget.bind_all("<Button-5>", lambda e: widget.yview_scroll(1, "units"))
+
+
+def _show_modal(win, dlg):
+    """Run a modal Toplevel without nesting an event loop.
+
+    A plain update() loop is immune to the Windows tkinter hang that occurs
+    when a grab-holding Toplevel is destroyed inside wait_window()'s nested
+    loop, so closing a dialog can never freeze the wizard.
+    """
+    while True:
+        try:
+            if not dlg.top.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        try:
+            win.root.update()
+        except tk.TclError:
+            return
+        time.sleep(0.005)
+
+
+def _close_dialog(dlg):
+    """Destroy a dialog safely: release any grab, then destroy."""
+    dlg._closed = True
+    try:
+        dlg.top.grab_release()
+    except tk.TclError:
+        pass
+    try:
+        dlg.top.destroy()
+    except tk.TclError:
+        pass
 
 
 class SetupWindow:
@@ -61,7 +174,7 @@ class SetupWindow:
             print("tkinter not available — running in headless mode.")
             return
         self.root.title("AI Media Renamer — Setup")
-        self.root.geometry("520x320")
+        self.root.geometry("560x380")
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -70,30 +183,41 @@ class SetupWindow:
         except Exception:
             pass
 
+        # Modern progress-bar style (accent fill, rounded, dark track)
+        try:
+            style = ttk.Style(self.root)
+            style.theme_use("clam")
+            style.configure(
+                "dark.Horizontal.TProgressbar", troughcolor="#262b35",
+                background=ACCENT, bordercolor=BG, lightcolor=ACCENT,
+                darkcolor=ACCENT, thickness=8)
+        except Exception:
+            pass
+
         self._center_window()
 
-        # Title
-        title = tk.Label(self.root, text="AI Media Renamer", font=FONT_TITLE,
-                         bg=BG, fg=FG)
-        title.pack(pady=(20, 4))
-
-        self.version_label = tk.Label(self.root, text=f"{VERSION}",
-                                      font=("Segoe UI", 9), bg=BG, fg="#888888")
-        self.version_label.pack(pady=(0, 16))
+        # Title + accent rule
+        header = tk.Frame(self.root, bg=BG)
+        header.pack(fill="x", padx=40, pady=(24, 0))
+        tk.Label(header, text="AI Media Renamer", font=("Segoe UI", 17, "bold"),
+                 bg=BG, fg=FG).pack(anchor="w")
+        tk.Label(header, text="Setting up your local AI workspace…",
+                 font=FONT_MUTED, bg=BG, fg=MUTED, anchor="w").pack(fill="x", pady=(2, 0))
+        tk.Frame(header, bg=ACCENT, height=2).pack(fill="x", pady=(12, 0))
 
         # Status step label
         self.step_label = tk.Label(self.root, text="", font=FONT_BOLD,
                                    bg=BG, fg=FG, anchor="w")
-        self.step_label.pack(fill="x", padx=40, pady=(0, 4))
+        self.step_label.pack(fill="x", padx=40, pady=(16, 4))
 
         # Progress bar
-        self.progress = ttk.Progressbar(self.root, length=440, mode="determinate",
+        self.progress = ttk.Progressbar(self.root, length=480, mode="determinate",
                                          style="dark.Horizontal.TProgressbar")
-        self.progress.pack(padx=40, pady=(0, 4))
+        self.progress.pack(padx=40, pady=(0, 6))
 
         # Info text
-        self.info_label = tk.Label(self.root, text="", font=("Segoe UI", 9),
-                                   bg=BG, fg="#aaaaaa", anchor="w")
+        self.info_label = tk.Label(self.root, text="", font=FONT_MUTED,
+                                   bg=BG, fg=MUTED, anchor="w")
         self.info_label.pack(fill="x", padx=40, pady=(0, 16))
 
         # Update notification frame (hidden by default)
@@ -108,16 +232,14 @@ class SetupWindow:
         btn_frame = tk.Frame(self.update_frame, bg=BG)
         btn_frame.pack()
 
-        self.dl_btn = tk.Button(btn_frame, text="Download Update",
-                                font=("Segoe UI", 10), bg=ACCENT, fg="white",
-                                relief="flat", padx=16, pady=4, cursor="hand2",
-                                command=self._on_download_update)
+        self.dl_btn = _hover_btn(btn_frame, "Download Update",
+                                 self._on_download_update, bg=ACCENT, fg="white",
+                                 font=("Segoe UI", 10), padx=16, pady=5)
         self.dl_btn.pack(side="left", padx=(0, 12))
 
-        self.cont_btn = tk.Button(btn_frame, text="Continue to App",
-                                  font=("Segoe UI", 10), bg="#333333", fg=FG,
-                                  relief="flat", padx=16, pady=4, cursor="hand2",
-                                  command=self._on_continue)
+        self.cont_btn = _hover_btn(btn_frame, "Continue to App",
+                                   self._on_continue, bg=PANEL, fg=FG,
+                                   font=("Segoe UI", 10), padx=16, pady=5)
         self.cont_btn.pack(side="left")
 
         self._update_info = {}
@@ -408,56 +530,16 @@ def _log(msg):
         pass
 
 
-MODEL_CATALOG = [
-    {
-        "name": "qwen2.5vl:7b",
-        "label": "Qwen 2.5 VL 7B",
-        "size": "6.0 GB",
-        "quality": "Best",
-        "speed": "Moderate",
-        "desc": "Recommended. Best quality for structured JSON extraction and visual analysis.",
-        "recommended": True,
-    },
-    {
-        "name": "qwen2.5vl:3b",
-        "label": "Qwen 2.5 VL 3B",
-        "size": "3.2 GB",
-        "quality": "Good",
-        "speed": "Fast",
-        "desc": "Lighter model. Good quality, faster analysis. Suitable for 4-6 GB VRAM.",
-        "recommended": False,
-    },
-    {
-        "name": "qwen3-vl:4b",
-        "label": "Qwen 3 VL 4B",
-        "size": "~3 GB",
-        "quality": "Good",
-        "speed": "Fast",
-        "desc": "Newer architecture. Good quality with improved reasoning. 4+ GB VRAM.",
-        "recommended": False,
-    },
-    {
-        "name": "moondream:latest",
-        "label": "Moondream 2",
-        "size": "1.8 GB",
-        "quality": "Basic",
-        "speed": "Very fast",
-        "desc": "Smallest option. Basic visual understanding. For very low VRAM (2 GB).",
-        "recommended": False,
-    },
-]
+class UseCaseDialog:
+    """First-run questionnaire: multi-select what the user plans to rename."""
 
-
-class ModelSelectionDialog:
-    """Tkinter modal dialog for choosing an AI model during first-time setup."""
-
-    def __init__(self, parent, already_installed: bool = False):
-        self.result: str | None = None
-        self.already_installed = already_installed
+    def __init__(self, parent):
+        self.result: list[str] | None = None
+        self._closed = False
 
         self.top = tk.Toplevel(parent)
-        self.top.title("Select AI Model")
-        self.top.geometry("520x480")
+        self.top.title("What will you rename?")
+        self.top.geometry("560x520")
         self.top.configure(bg=BG)
         self.top.resizable(False, False)
         self.top.transient(parent)
@@ -466,71 +548,205 @@ class ModelSelectionDialog:
 
         self._center(parent)
 
-        heading = "AI Model Already Installed" if already_installed else "Choose an AI Model"
-        tk.Label(self.top, text=heading, font=FONT_TITLE, bg=BG, fg=FG).pack(pady=(18, 2))
+        # Header
+        header = tk.Frame(self.top, bg=BG)
+        header.pack(fill="x", padx=28, pady=(22, 0))
+        tk.Label(header, text="What do you plan to rename?", font=FONT_TITLE,
+                 bg=BG, fg=FG).pack(anchor="w")
+        tk.Label(header, text="Select all that apply. This decides what gets "
+                              "downloaded once to get you started.",
+                 font=FONT_MUTED, bg=BG, fg=MUTED, anchor="w").pack(fill="x", pady=(4, 0))
+        tk.Frame(header, bg=ACCENT, height=2).pack(fill="x", pady=(12, 0))
 
-        sub = "A vision model was found. You can switch or keep the current one."
-        if not already_installed:
-            sub = "Select a model to download. Larger models produce better results."
-        tk.Label(self.top, text=sub, font=("Segoe UI", 9), bg=BG, fg="#aaaaaa").pack(pady=(0, 10))
+        # Row actions (Select all / Clear)
+        actions = tk.Frame(header, bg=BG)
+        actions.pack(fill="x", pady=(12, 4))
+        tk.Label(actions, text="", bg=BG).pack(side="left", expand=True)
+        for text, cmd, primary in (("Select all", self._select_all, False),
+                                   ("Clear", self._clear_all, False)):
+            _hover_btn(actions, text, cmd, bg=PANEL, fg=FG, font=FONT_SEMI,
+                       padx=12, pady=3).pack(side="left", padx=(8, 0))
 
-        self._var = tk.StringVar(value="qwen2.5vl:7b")
+        self._vars: dict[str, tk.BooleanVar] = {}
+        container = tk.Frame(self.top, bg=BG)
+        container.pack(fill="both", expand=True, padx=28, pady=(4, 0))
+        for key, use in SETUP_USE_CASES.items():
+            var = tk.BooleanVar(value=False)
+            self._vars[key] = var
+            row = tk.Frame(container, bg=PANEL, highlightbackground=BORDER,
+                           highlightthickness=1, cursor="hand2")
+            row.pack(fill="x", pady=4)
+            cb = tk.Checkbutton(row, variable=var, bg=PANEL, fg=FG,
+                                activebackground=PANEL, activeforeground=FG,
+                                selectcolor="#2d3a4f", highlightthickness=0,
+                                bd=0, cursor="hand2")
+            cb.pack(side="left", padx=(10, 6), pady=10)
+            info = tk.Frame(row, bg=PANEL)
+            info.pack(side="left", fill="x", expand=True, padx=(0, 10), pady=8)
+            tk.Label(info, text=use["label"], font=FONT_BOLD, bg=PANEL, fg=FG,
+                     anchor="w").pack(fill="x")
+            tk.Label(info, text=use["desc"], font=FONT_MUTED, bg=PANEL,
+                     fg=MUTED, anchor="w").pack(fill="x", pady=(1, 0))
+
+            _hover_row(row)
+            for w in (row, cb, info, *info.winfo_children()):
+                w.bind("<Button-1>",
+                       lambda _e, v=var: (v.set(not v.get())))
+
+        # Footer buttons
+        footer = tk.Frame(self.top, bg=BG)
+        footer.pack(fill="x", padx=28, pady=(10, 16))
+        self.cont_btn = _hover_btn(footer, "Continue", self._on_continue,
+                                   bg=ACCENT, fg="white", padx=26, pady=7,
+                                   disabled=True)
+        self.cont_btn.pack(side="left")
+        _hover_btn(footer, "Skip for now", self._on_skip, bg=PANEL, fg=FG,
+                   padx=16, pady=7).pack(side="left", padx=(10, 0))
+
+        for var in self._vars.values():
+            var.trace_add("write", self._update_continue)
+        self._update_continue()
+
+    def _select_all(self):
+        for var in self._vars.values():
+            var.set(True)
+
+    def _clear_all(self):
+        for var in self._vars.values():
+            var.set(False)
+
+    def _update_continue(self, *_):
+        state = "normal" if any(v.get() for v in self._vars.values()) else "disabled"
+        self.cont_btn.config(state=state)
+
+    def _on_continue(self):
+        chosen = [k for k, v in self._vars.items() if v.get()]
+        if not chosen:
+            return
+        self.result = chosen
+        _close_dialog(self)
+
+    def _on_skip(self):
+        self.result = None
+        _close_dialog(self)
+
+    def _center(self, parent):
+        self.top.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_x()
+        py = parent.winfo_y()
+        w = self.top.winfo_width()
+        h = self.top.winfo_height()
+        self.top.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
+        self.top.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
+
+
+def _plan_sizes(rec_models: dict[str, str]) -> dict[str, str]:
+    """Approximate one-time download size per dependency for the plan summary.
+
+    Model rows show the full size range across the catalog alternatives,
+    because the exact size depends on which model the user picks next.
+    """
+    sizes = {"ollama": "~1.5 GB", "ffmpeg": "~109 MB", "exiftool": "~10 MB",
+             "whisper": "~74 MB"}
+    for kind in ("vision", "text"):
+        cands = [m["size_gb"] for m in MODEL_CATALOG if m["kind"] == kind]
+        if cands:
+            lo, hi = min(cands), max(cands)
+            sizes[f"{kind}_model"] = f"{lo:.1f}\u2013{hi:.1f} GB"
+        else:
+            sizes[f"{kind}_model"] = "?"
+    return sizes
+
+
+def _build_plan(profile: list[str], needs: set[str], rec_models: dict[str, str]) -> list[dict]:
+    """Build the 'you will download once' plan for the chosen use cases."""
+    sizes = _plan_sizes(rec_models)
+    installed = _installed_models()
+    plan: list[dict] = []
+    plan.append({"label": SETUP_DEPENDENCIES["ollama"]["label"], "size": sizes["ollama"],
+                 "desc": SETUP_DEPENDENCIES["ollama"]["desc"],
+                 "status": "ready" if _ollama_binary() else "download"})
+    for key in ("exiftool", "ffmpeg"):
+        if key in needs:
+            status = "ready" if _resolve_binary_path(key) else "download"
+            plan.append({"label": SETUP_DEPENDENCIES[key]["label"], "size": sizes[key],
+                         "desc": SETUP_DEPENDENCIES[key]["desc"], "status": status})
+    for key in ("vision_model", "text_model"):
+        if key in needs:
+            model = rec_models.get(key.replace("_model", ""), "")
+            status = "installed" if model in installed else "download"
+            plan.append({"label": SETUP_DEPENDENCIES[key]["label"], "size": sizes[key],
+                         "desc": SETUP_DEPENDENCIES[key]["desc"], "status": status})
+    if "whisper" in needs:
+        plan.append({"label": SETUP_DEPENDENCIES["whisper"]["label"], "size": sizes["whisper"],
+                     "desc": SETUP_DEPENDENCIES["whisper"]["desc"], "status": "download"})
+    return plan
+
+
+class PlanConfirmDialog:
+    """Confirmation dialog listing what the setup will download once."""
+
+    def __init__(self, parent, plan: list[dict]):
+        self.result = False
+        self._closed = False
+        self.top = tk.Toplevel(parent)
+        self.top.title("One-time setup")
+        self.top.geometry("560x460")
+        self.top.configure(bg=BG)
+        self.top.resizable(False, False)
+        self.top.transient(parent)
+        self.top.grab_set()
+        self.top.protocol("WM_DELETE_WINDOW", self._on_back)
+
+        self._center(parent)
+
+        header = tk.Frame(self.top, bg=BG)
+        header.pack(fill="x", padx=30, pady=(22, 0))
+        tk.Label(header, text="You'll download this once", font=FONT_TITLE,
+                 bg=BG, fg=FG).pack(anchor="w")
+        tk.Label(header, text="Everything below is installed locally and needed "
+                              "for the use cases you picked.",
+                 font=FONT_MUTED, bg=BG, fg=MUTED, anchor="w").pack(fill="x", pady=(4, 0))
+        tk.Frame(header, bg=ACCENT, height=2).pack(fill="x", pady=(12, 0))
 
         container = tk.Frame(self.top, bg=BG)
-        container.pack(fill="x", padx=30, pady=(0, 6))
+        container.pack(fill="both", expand=True, padx=30, pady=(14, 0))
 
-        for m in MODEL_CATALOG:
-            self._add_option(container, m)
+        for item in plan:
+            row = tk.Frame(container, bg=PANEL, highlightbackground=BORDER,
+                           highlightthickness=1)
+            row.pack(fill="x", pady=3)
+            status_color = GREEN if item["status"] in ("ready", "installed") else AMBER
+            badge = {"ready": "Found", "installed": "Installed", "download": "To download"}[item["status"]]
+            tk.Label(row, text=item["label"], font=FONT_BOLD, bg=PANEL, fg=FG,
+                     anchor="w", width=24).pack(side="left", padx=(12, 6), pady=8)
+            tk.Label(row, text=item["size"], font=FONT_MUTED, bg=PANEL,
+                     fg=MUTED, anchor="e", width=12).pack(side="left", padx=(0, 6))
+            tk.Label(row, text=badge, font=("Segoe UI", 8, "bold"), bg=PANEL,
+                     fg=status_color, anchor="e", width=12).pack(side="right", padx=(0, 12))
 
-        btn_frame = tk.Frame(self.top, bg=BG)
-        btn_frame.pack(pady=(8, 16))
+        sizes = [i["size"] for i in plan if i["status"] == "download"]
+        total = tk.Label(container, text="", font=FONT_SEMI, bg=BG, fg=FG, anchor="w")
+        total.pack(fill="x", pady=(12, 0))
+        total.config(text=(f"New downloads: {', '.join(sizes)}"
+                           if sizes else "Nothing to download — everything is already found"))
 
-        if already_installed:
-            tk.Button(btn_frame, text="Keep Current", font=("Segoe UI", 10),
-                      bg="#333333", fg=FG, relief="flat", padx=14, pady=4,
-                      cursor="hand2", command=self._on_skip).pack(side="left", padx=(0, 10))
+        footer = tk.Frame(self.top, bg=BG)
+        footer.pack(fill="x", padx=30, pady=(8, 16))
+        _hover_btn(footer, "Start setup", self._on_start, bg=ACCENT, fg="white",
+                   padx=26, pady=7).pack(side="left")
+        _hover_btn(footer, "Back", self._on_back, bg=PANEL, fg=FG,
+                   padx=16, pady=7).pack(side="left", padx=(10, 0))
 
-        tk.Button(btn_frame, text="Download" if not already_installed else "Switch Model",
-                  font=("Segoe UI", 10, "bold"), bg=ACCENT, fg="white",
-                  relief="flat", padx=14, pady=4, cursor="hand2",
-                  command=self._on_confirm).pack(side="left")
+    def _on_start(self):
+        self.result = True
+        _close_dialog(self)
 
-    def _add_option(self, parent, m):
-        row = tk.Frame(parent, bg=BAR_BG, highlightbackground="#444444",
-                       highlightthickness=1, cursor="hand2")
-        row.pack(fill="x", pady=3)
-
-        rb = tk.Radiobutton(row, variable=self._var, value=m["name"],
-                            bg=BAR_BG, fg=FG, selectcolor=BG,
-                            activebackground=BAR_BG, activeforeground=FG,
-                            indicatoron=False, width=2, anchor="w")
-        rb.pack(side="left", padx=(6, 0), pady=6)
-
-        info = tk.Frame(row, bg=BAR_BG)
-        info.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=6)
-
-        badge = f"  \u2605 Recommended" if m["recommended"] else ""
-        quality_color = GREEN if m["quality"] == "Best" else ACCENT if m["quality"] == "Good" else "#aaaaaa"
-
-        header_text = f'{m["label"]}  ({m["size"]})'
-        tk.Label(info, text=header_text, font=FONT_BOLD, bg=BAR_BG, fg=FG,
-                 anchor="w").pack(fill="x")
-        tk.Label(info, text=m["desc"], font=("Segoe UI", 8), bg=BAR_BG,
-                 fg="#aaaaaa", anchor="w", wraplength=380, justify="left").pack(fill="x")
-
-        tags = tk.Frame(info, bg=BAR_BG)
-        tags.pack(fill="x", pady=(2, 0))
-        for tag_text, color in [("Quality: " + m["quality"], quality_color),
-                                ("Speed: " + m["speed"], "#aaaaaa")]:
-            tk.Label(tags, text=tag_text, font=("Segoe UI", 8, "bold"),
-                     bg=BAR_BG, fg=color, anchor="w").pack(side="left", padx=(0, 12))
-        if badge:
-            tk.Label(tags, text=badge, font=("Segoe UI", 8, "bold"),
-                     bg=BAR_BG, fg="#f59e0b", anchor="w").pack(side="left")
-
-        for w in (row, info, tags):
-            for child in w.winfo_children():
-                child.bind("<Button-1>", lambda e, v=m["name"]: self._var.set(v))
+    def _on_back(self):
+        self.result = False
+        _close_dialog(self)
 
     def _center(self, parent):
         self.top.update_idletasks()
@@ -542,13 +758,226 @@ class ModelSelectionDialog:
         h = self.top.winfo_height()
         self.top.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
 
+
+def _installed_models() -> set[str]:
+    """Return the set of model names currently installed in Ollama."""
+    try:
+        tags = ollama.list()
+        out = set()
+        for m in tags.get("models", []):
+            if isinstance(m, dict):
+                name = m.get("name", "")
+            elif hasattr(m, "model"):
+                name = m.model
+            else:
+                name = str(m)
+            if name:
+                out.add(name)
+        return out
+    except Exception:
+        return set()
+
+
+class ModelRecommendationDialog:
+    """Choose vision and/or text models for the onboarding profile.
+
+    The model list lives in a scrollable, resizable panel so every option and
+    the footer buttons are always reachable. Registry validation runs in a
+    background thread but results are applied through a main-thread queue
+    poll, so closing the dialog can never touch Tk from another thread or
+    block the wizard.
+    """
+
+    def __init__(self, parent, needs: set[str], installed: set[str],
+                 recommended: dict[str, str]):
+        self.result: dict[str, str | None] = {"vision": None, "text": None}
+        self.installed = installed
+        self.recommended = recommended
+        self._closed = False
+        self._row_status: dict[str, tk.Widget] = {}
+
+        self.top = tk.Toplevel(parent)
+        self.top.title("Choose AI Models")
+        sw = self.top.winfo_screenheight()
+        height = min(680, max(420, sw - 180))
+        self.top.geometry(f"600x{height}")
+        self.top.minsize(520, 380)
+        self.top.configure(bg=BG)
+        self.top.transient(parent)
+        self.top.grab_set()
+        self.top.protocol("WM_DELETE_WINDOW", self._on_skip)
+
+        self._center(parent)
+
+        # Header (fixed)
+        header = tk.Frame(self.top, bg=BG)
+        header.pack(fill="x", padx=28, pady=(20, 0))
+        tk.Label(header, text="Choose AI models", font=FONT_TITLE,
+                 bg=BG, fg=FG).pack(anchor="w")
+        tk.Label(header, text="Recommended for your hardware — you can pick any "
+                              "installed or available alternative.",
+                 font=FONT_MUTED, bg=BG, fg=MUTED, anchor="w").pack(fill="x", pady=(4, 0))
+        tk.Frame(header, bg=ACCENT, height=2).pack(fill="x", pady=(12, 0))
+
+        # Scrollable body
+        body = tk.Frame(self.top, bg=BG)
+        body.pack(fill="both", expand=True, padx=28, pady=(12, 0))
+        self._canvas = tk.Canvas(body, bg=BG, highlightthickness=0, bd=0)
+        scroll = tk.Scrollbar(body, orient="vertical", command=self._canvas.yview,
+                              bg=BORDER, troughcolor=BG, bd=0,
+                              highlightthickness=0, width=12)
+        self._inner = tk.Frame(self._canvas, bg=BG)
+        self._inner_id = self._canvas.create_window((0, 0), window=self._inner,
+                                                    anchor="nw")
+        self._canvas.configure(yscrollcommand=scroll.set)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        self._inner.bind(
+            "<Configure>",
+            lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfigure(self._inner_id, width=e.width))
+        self.top.bind(
+            "<MouseWheel>",
+            lambda e: self._canvas.yview_scroll(int(-e.delta / 120), "units"))
+
+        self._vars: dict[str, tk.StringVar] = {}
+        kind_labels = {"vision": "Vision model (analyzes frames & photos)",
+                       "text": "Text model (documents, spreadsheets, transcripts)"}
+        for kind in ("vision", "text"):
+            if f"{kind}_model" not in needs:
+                continue
+            tk.Label(self._inner, text=kind_labels[kind], font=FONT_SEMI, bg=BG,
+                     fg=ACCENT, anchor="w").pack(fill="x", pady=(10, 4))
+            self._vars[kind] = tk.StringVar(value=self.recommended.get(kind, ""))
+            for m in MODEL_CATALOG:
+                if m["kind"] != kind:
+                    continue
+                self._add_row(m, kind)
+
+        # Footer (fixed)
+        footer = tk.Frame(self.top, bg=BG)
+        footer.pack(fill="x", padx=28, pady=(10, 16))
+        note = tk.Label(footer, text="", font=FONT_MUTED, bg=BG, fg=MUTED, anchor="w")
+        note.pack(fill="x", pady=(0, 8))
+        note.config(text="Models marked ✖ no longer exist on Ollama's registry — pick another.")
+        self.dl_btn = _hover_btn(footer, "Continue", self._on_confirm, bg=ACCENT,
+                                 fg="white", padx=26, pady=7)
+        self.dl_btn.pack(side="left")
+        _hover_btn(footer, "Skip", self._on_skip, bg=PANEL, fg=FG,
+                   padx=16, pady=7).pack(side="left", padx=(10, 0))
+
+        # Validate catalog tags against Ollama's registry in the background.
+        self._valid_q: queue.Queue[tuple[str, bool | None] | None] = queue.Queue()
+        self._registry_done = False
+        needed_kinds = [k for k in ("vision", "text") if f"{k}_model" in needs]
+        target = [m["name"] for m in MODEL_CATALOG if m["kind"] in needed_kinds]
+
+        def _check():
+            for name in target:
+                self._valid_q.put((name, validate_ollama_model(name)))
+            self._valid_q.put(None)
+
+        if target:
+            threading.Thread(target=_check, daemon=True).start()
+            self.top.after(200, self._poll_validity)
+
+    def _add_row(self, m, kind):
+        row = tk.Frame(self._inner, bg=PANEL, highlightbackground=BORDER,
+                       highlightthickness=1, cursor="hand2")
+        row.pack(fill="x", pady=4)
+        rb = tk.Radiobutton(row, variable=self._vars[kind], value=m["name"],
+                            bg=PANEL, fg=FG, selectcolor="#2d3a4f",
+                            activebackground=PANEL, activeforeground=FG,
+                            highlightthickness=0, bd=0, cursor="hand2")
+        rb.pack(side="left", padx=(12, 4), pady=12)
+
+        info = tk.Frame(row, bg=PANEL)
+        info.pack(side="left", fill="x", expand=True, padx=(0, 12), pady=8)
+
+        installed = m["name"] in self.installed
+        rec = (self.recommended.get(kind) == m["name"])
+        quality_color = GREEN if m["quality"] == "Best" else ACCENT if m["quality"] == "Good" else MUTED
+        header_text = f'{m["label"]}   ({m["size"]})'
+        tk.Label(info, text=header_text, font=FONT_BOLD, bg=PANEL, fg=FG,
+                 anchor="w").pack(fill="x")
+        tk.Label(info, text=m["desc"], font=FONT_MUTED, bg=PANEL,
+                 fg=MUTED, anchor="w", wraplength=470, justify="left").pack(fill="x", pady=(1, 0))
+
+        tags = tk.Frame(info, bg=PANEL)
+        tags.pack(fill="x", pady=(4, 0))
+        for tag_text, color in [("Quality: " + m["quality"], quality_color),
+                                ("Speed: " + m["speed"], MUTED)]:
+            tk.Label(tags, text=tag_text, font=("Segoe UI", 8, "bold"),
+                     bg=PANEL, fg=color, anchor="w").pack(side="left", padx=(0, 12))
+        badge_txt = ("  \u2713 Installed" if installed else
+                     "  \u2605 Recommended" if rec else "")
+        status = tk.Label(tags, text=badge_txt, font=("Segoe UI", 8, "bold"),
+                          bg=PANEL, fg=GREEN if installed else AMBER, anchor="w")
+        status.pack(side="left")
+        self._row_status[m["name"]] = status
+
+        _hover_row(row)
+        for w in (row, info, tags, *tags.winfo_children(), *info.winfo_children()):
+            w.bind("<Button-1>", lambda e, v=m["name"], k=kind: self._vars[k].set(v))
+
+    def _poll_validity(self):
+        """Drain the registry-check queue on the main thread (Tk-safe)."""
+        if self._closed:
+            return
+        try:
+            while True:
+                item = self._valid_q.get_nowait()
+                if item is None:
+                    self._registry_done = True
+                    return
+                name, valid = item
+                label = self._row_status.get(name)
+                if valid is False and label is not None:
+                    try:
+                        label.config(text="  \u2716 Not on Ollama registry", fg=RED)
+                    except tk.TclError:
+                        return
+        except queue.Empty:
+            pass
+        if not self._registry_done and not self._closed:
+            try:
+                self.top.after(200, self._poll_validity)
+            except tk.TclError:
+                return
+
     def _on_confirm(self):
-        self.result = self._var.get()
-        self.top.destroy()
+        self.result = {k: v.get() or None for k, v in self._vars.items()}
+        _close_dialog(self)
 
     def _on_skip(self):
-        self.result = None
-        self.top.destroy()
+        self.result = {"vision": None, "text": None}
+        _close_dialog(self)
+
+    def _center(self, parent):
+        self.top.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_x()
+        py = parent.winfo_y()
+        w = self.top.winfo_width()
+        h = self.top.winfo_height()
+        self.top.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
+
+
+def _ollama_binary() -> str | None:
+    """Locate the ollama executable, including the default install path
+    that a just-finished silent installer won't expose via PATH yet."""
+    found = shutil.which("ollama")
+    if found:
+        return found
+    default_path = (Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+                    / "Programs" / "Ollama" / "ollama.exe")
+    if default_path.exists():
+        return str(default_path)
+    return None
 
 
 def main():
@@ -597,47 +1026,52 @@ def main():
         _headless_run()
         return
 
+    force_setup = "--setup" in sys.argv
+
     try:
-        # ---- Step 1: ExifTool ----
-        if _resolve_binary_path("exiftool"):
-            win.set_step(1, "\u2713 Checking ExifTool... found")
-            win.set_progress(100)
-            win.set_info("")
-        else:
-            _install_exiftool(win)
-            _add_to_user_path(BIN_DIR)
-        win.update()
+        # ---- Onboarding questionnaire (first run, or explicit --setup) ----
+        profile_data = load_setup_profile()
+        onboarded = profile_data.get("onboarded", False)
+        profile = profile_data.get("profile", [])
 
-        # ---- Step 2: FFmpeg ----
-        if _resolve_binary_path("ffmpeg"):
-            win.set_step(2, "\u2713 Checking FFmpeg... found")
-            win.set_progress(100)
-            win.set_info("")
-        else:
-            _install_ffmpeg(win)
-            _add_to_user_path(BIN_DIR)
-        win.update()
+        if not onboarded or force_setup:
+            dlg = UseCaseDialog(win.root)
+            _show_modal(win, dlg)
+            if dlg.result is None:
+                profile = []
+                save_setup_profile(profile=[], onboarded=True)
+            else:
+                profile = dlg.result
 
-        # ---- Step 3: Ollama ----
-        def _ollama_binary():
-            """Locate the ollama executable, including the default install path
-            that a just-finished silent installer won't expose via PATH yet."""
-            found = shutil.which("ollama")
-            if found:
-                return found
-            default_path = (Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-                            / "Programs" / "Ollama" / "ollama.exe")
-            if default_path.exists():
-                return str(default_path)
-            return None
+        needs = use_cases_needs(profile) if profile else {"ffmpeg", "exiftool"}
+        rec_models = recommended_models(profile) if profile else {}
+        do_installs = bool(profile)
 
+        # Skipped onboarding (empty profile): don't force any downloads —
+        # launch the app; env checks + in-app download buttons cover the rest.
+        if not do_installs:
+            _launch_app(win)
+            return
+
+        # Confirm the one-time download plan when onboarding / re-running setup
+        if do_installs and (not onboarded or force_setup):
+            dlg = PlanConfirmDialog(win.root, _build_plan(profile, needs, rec_models))
+            _show_modal(win, dlg)
+            if not dlg.result:
+                save_setup_profile(profile=profile, onboarded=True)
+                _launch_app(win)
+                return
+
+        step = 1
+
+        # ---- Step: Ollama (always required) ----
         ollama_binary = _ollama_binary()
         installer_path = OLLAMA_INSTALLER_CACHE / "OllamaSetup.exe"
 
         if not ollama_binary:
             if not installer_path.exists():
                 url = "https://ollama.com/download/OllamaSetup.exe"
-                win.set_step(3, "\u27f3 Downloading Ollama installer...")
+                win.set_step(step, "\u27f3 Downloading Ollama installer...")
                 win.set_progress(0)
                 win.set_info("Downloading...")
                 win.update()
@@ -646,7 +1080,7 @@ def main():
                     _progress_callback(d, t, win, "Ollama installer")
 
                 download_file(url, installer_path, progress_callback=cb)
-            win.set_step(3, "\u27f3 Installing Ollama...")
+            win.set_step(step, "\u27f3 Installing Ollama...")
             win.set_progress(50)
             win.set_info("Running silent installer (this may take a moment)...")
             win.update()
@@ -662,11 +1096,11 @@ def main():
             pass
 
         if ollama_running:
-            win.set_step(3, "\u2713 Checking Ollama... running")
+            win.set_step(step, "\u2713 Checking Ollama... running")
             win.set_progress(100)
             win.set_info("")
         elif ollama_binary:
-            win.set_step(3, "\u27f3 Starting Ollama service...")
+            win.set_step(step, "\u27f3 Starting Ollama service...")
             win.set_progress(50)
             win.set_info("Launching Ollama in background...")
             win.update()
@@ -676,93 +1110,117 @@ def main():
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             if wait_for_ollama_service(timeout=30):
-                win.set_step(3, "\u2713 Checking Ollama... running")
+                win.set_step(step, "\u2713 Checking Ollama... running")
                 win.set_progress(100)
                 win.set_info("")
             else:
-                win.set_step(3, "\u26a0 Ollama service did not start")
+                win.set_step(step, "\u26a0 Ollama service did not start")
                 win.set_progress(100)
                 win.set_info("Please start Ollama manually and restart this app.")
                 win.wait_for_user()
                 win.close()
                 return
         else:
-            win.set_step(3, "\u26a0 Ollama not found")
+            win.set_step(step, "\u26a0 Ollama not found")
             win.set_progress(100)
             win.set_info("Ollama installation may have failed. Please install manually from ollama.com.")
             win.wait_for_user()
             win.close()
             return
         win.update()
+        step += 1
 
-        # ---- Step 4: AI Model ----
-        selected_model = "qwen2.5vl:7b"
+        # ---- Step: ExifTool (only when the profile needs it) ----
+        if "exiftool" in needs:
+            if _resolve_binary_path("exiftool"):
+                win.set_step(step, "\u2713 Checking ExifTool... found")
+                win.set_progress(100)
+                win.set_info("")
+            else:
+                _install_exiftool(win)
+                _add_to_user_path(BIN_DIR)
+            win.update()
+            step += 1
 
-        def _vision_model_installed():
-            try:
-                import ollama as _ollama
-                tags = _ollama.list()
-                for m in tags.get("models", []):
-                    if isinstance(m, dict):
-                        name = m.get("name", "")
-                    elif hasattr(m, "model"):
-                        name = m.model
-                    else:
-                        name = str(m)
-                    if name and _is_vision_model(name):
-                        return True
-            except Exception:
-                pass
-            return False
+        # ---- Step: FFmpeg (only when the profile needs it) ----
+        if "ffmpeg" in needs:
+            if _resolve_binary_path("ffmpeg"):
+                win.set_step(step, "\u2713 Checking FFmpeg... found")
+                win.set_progress(100)
+                win.set_info("")
+            else:
+                _install_ffmpeg(win)
+                _add_to_user_path(BIN_DIR)
+            win.update()
+            step += 1
 
-        already_installed = _vision_model_installed()
+        # ---- Step: AI models (vision and/or text for the profile) ----
+        needs_vision = "vision_model" in needs
+        needs_text = "text_model" in needs
+        model_choices: dict[str, str | None] = {"vision": None, "text": None}
 
-        if already_installed:
-            win.set_step(4, "\u2713 AI model found")
+        if needs_vision or needs_text:
+            if not onboarded or force_setup:
+                dlg = ModelRecommendationDialog(win.root, needs,
+                                                _installed_models(), rec_models)
+                _show_modal(win, dlg)
+                model_choices = dlg.result or {"vision": None, "text": None}
+            else:
+                model_choices = {
+                    "vision": config.get("model", {}).get("name") if needs_vision else None,
+                    "text": config.get("model", {}).get("text_model") if needs_text else None,
+                }
+
+            for kind in ("vision", "text"):
+                model = model_choices.get(kind)
+                if not model:
+                    continue
+                if model not in _installed_models():
+                    _stream_model_with_progress(win, step, f"Downloading {model}...", model)
+                else:
+                    win.set_step(step, f"\u2713 {kind.title()} model \u2014 ready")
+                    win.set_progress(100)
+                    win.set_info("")
+                    win.update()
+                step += 1
+
+            os.environ["SELECTED_MODEL"] = (model_choices.get("vision")
+                                            or config.get("model", {}).get("name", "qwen2.5vl:7b"))
+            win.update()
+
+        # ---- Step: Whisper (speech-to-text, when the profile needs it) ----
+        if "whisper" in needs:
+            win.set_step(step, "\u27f3 Preparing Whisper (speech-to-text)...")
+            win.set_progress(50)
+            win.set_info("Downloading speech-to-text model (~74 MB)...")
+            win.update()
+            pre_download_whisper("base")
+            win.set_step(step, "\u2713 Whisper \u2014 ready")
             win.set_progress(100)
             win.set_info("")
             win.update()
+            step += 1
 
-            dlg = ModelSelectionDialog(win.root, already_installed=True)
-            win.root.wait_window(dlg.top)
+        # ---- Persist the onboarding profile ----
+        if not onboarded or force_setup:
+            save_setup_profile(profile=profile, onboarded=True)
 
-            if dlg.result:
-                selected_model = dlg.result
-                _log(f"User chose to switch to model: {selected_model}")
-                _stream_model_with_progress(win, 4,
-                                            f"Downloading {selected_model}...",
-                                            selected_model)
-            else:
-                _log("User kept current model")
-        else:
-            dlg = ModelSelectionDialog(win.root, already_installed=False)
-            win.root.wait_window(dlg.top)
-
-            selected_model = dlg.result or "qwen2.5vl:7b"
-            _log(f"User selected model: {selected_model}")
-            _stream_model_with_progress(win, 4,
-                                        f"Downloading {selected_model}...",
-                                        selected_model)
-
-        os.environ["SELECTED_MODEL"] = selected_model
-        win.update()
-
-        # ---- Step 5: Update check ----
+        # ---- Step: Update check ----
         update_info = check_for_updates()
         if update_info.get("ok") and update_info.get("update_available"):
-            win.set_step(5, "\u26a0 Update available")
+            win.set_step(step, "\u26a0 Update available")
             win.set_progress(100)
             win.set_info("")
             win.show_update(update_info)
             win.update()
             win.wait_for_user()
         else:
-            win.set_step(5, "\u2713 Checking for updates... up to date")
+            win.set_step(step, "\u2713 Checking for updates... up to date")
             win.set_progress(100)
             win.set_info("")
         win.update()
 
-        # ---- Step 6: Launch ----
+        # ---- Step: Launch ----
         _launch_app(win)
 
     except Exception as exc:
