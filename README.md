@@ -1,60 +1,106 @@
 <div align="center">
 
-# AI Media Renamer
+![AI Media Renamer](assets/header.png)
 
-**Turn messy media folders into a well-organized library — automatically.**
+# Your media library, organized by AI. In minutes, not weekends.
 
-Drop in your videos, images, documents, or audio files, let AI look at each one, and get back neatly renamed files with descriptive filenames, proper categories, and searchable metadata. Works with DaVinci Resolve, Premiere Pro, and Windows Explorer.
+**Stop hunting through "final_v3_ACTUAL.mp4".**
+
+AI Media Renamer looks at every video, photo, document, and audio file you throw at it — understands what's actually inside — then renames, categories, and tags everything so your library finally makes sense. It runs **100% on your own machine**. No cloud, no uploads, no subscriptions.
 
 </div>
 
 ---
 
-## Download
+## Why you'll love it
 
-Grab the latest `AIMediaRenamer.exe` from the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest). No installation needed — download, double-click, and the app sets itself up. It will auto-download any missing dependencies on first launch.
+**You lose hours every week to a messy media library.** Downloads folder full of `IMG_5821.jpg` and `Recording_004.m4a`. A freelance folder where every edit is `final_final_v2_really.mp4`. Your DaVinci or Premiere timeline is chaos because nothing has a name you can find.
 
----
+This is the tool that fixes it.
 
-## What It Does
-
-1. **You upload or point to a folder** — videos, images, documents, audio — whatever you've got
-2. **AI analyzes each file** — identifies the content, suggests a filename, category, and tags
-3. **Review and tweak** — edit names, assign categories, add tags in a spreadsheet-like table
-4. **Commit** — files are renamed, and metadata is written directly into the file headers so your editing software can read it
-
----
-
-## Quick Start
-
-### EXE (Recommended)
-
-1. Download `AIMediaRenamer.exe` from [Releases](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest)
-2. Double-click to launch — dependencies auto-install on first run
-3. Upload files, run analysis, review, commit
-
-### From Source
-
-1. Install prerequisites: [Ollama](https://ollama.com) + vision model (`ollama pull qwen2.5vl:7b`), [ExifTool 12+](https://exiftool.org), [FFmpeg 6+](https://ffmpeg.org)
-2. `pip install -r requirements.txt`
-3. `streamlit run app.py`
-
-### Docker
-
-Run `docker compose up` for a fully containerized setup (includes Ollama + GPU passthrough).
+- **Drop in your mess → get back order.** One click starts the AI. It watches every frame, reads every document, transcribes every voice note, and figures out what each file is.
+- **Names you'd actually search for.** `IMG_5821.jpg` becomes `quran_carving_ornate_detail.jpg`. `Recording_004.m4a` becomes `voice_note_team_standup_notes.m4a`.
+- **Metadata written *into* the file — not a spreadsheet you'll ignore.** DaVinci Resolve, Premiere Pro, and Windows Explorer read it natively. Search "drone" and everything drone-related shows up.
+- **Private by design.** Everything runs locally with Ollama. Your family videos and client work never leave your computer.
+- **Safe.** Nothing is touched until you hit Commit, and one click on **Undo** reverses the whole batch.
 
 ---
 
-## Documentation
+## What it looks like
 
-For detailed technical docs, CLI flags, config reference, system requirements, and feature details, see [README_TECH.md](README_TECH.md).
+<div align="center">
+
+![AI picks a name, category, and tags for every file](assets/screenshot-staging.png)
+
+*AI reviews every file and proposes a filename, category, and searchable tags — all in one editable table.*
+
+![Track how much of your library you've tamed](assets/screenshot-dashboard.png)
+
+*A live dashboard shows what's been organized, how much storage is tidied, and a full commit history.*
+
+![A setup wizard that reads the room](assets/screenshot-wizard.png)
+
+*A first-run wizard asks what you organize (videos, photos, docs, audio…) and sets up exactly what you need.*
+
+</div>
 
 ---
 
-## Support
+## What it handles
 
-If this tool helps you stay organized and saves you time, consider supporting further development.
+| | What the AI does for it |
+|---|---|
+| 🎬 **Videos** | Watches a frame, reads the audio track, names the shot (`beach_sunset_drone_pan`) |
+| 📷 **Photos** | Understands the subject, adds tags Explorer can search |
+| 📄 **Documents** | Reads PDF, DOCX, XLSX, TXT, MD, RTF and names them by content |
+| 🎧 **Audio** | Transcribes voice notes locally, names them from what was said |
+| ♻️ **Duplicates** | Spots near-identical photos, videos, and audio before they double your clutter |
 
-Your support helps cover API testing, new features, and maintenance.
+---
+
+## Getting started (60 seconds)
+
+1. Download `AIMediaRenamer.exe` from the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest) — no installation, no accounts.
+2. Double-click. It sets up its own AI engine on first launch (a guided wizard walks you through it).
+3. Drop in your files → **Run AI Analysis** → review → **Commit**.
+
+That's it. A folder that took an afternoon to organize by hand is done while you make tea.
+
+> Prefer the command line or Docker? Want the full feature list, CLI flags, and system requirements? See [README_TECH.md](README_TECH.md).
+
+---
+
+## Who it's for
+
+- **Content creators & editors** — whose drives are full of untitled exports.
+- **Photographers** — drowning in `DSC_####` files that all look alike.
+- **Freelancers & small studios** — needing client work organized and taggable.
+- **Anyone with a chaotic downloads folder** — you know who you are.
+
+---
+
+## Roadmap — we're just getting started
+
+- [ ] **Security hardening pass** — supply-chain audit, secrets handling, server exposure controls
+- [ ] More AI models, cloud providers, and language support
+- [ ] Auto-sorting into category folders
+- [ ] Bulk import from cloud drives
+- [ ] And whatever the community asks for next
+
+---
+
+## Support the project
+
+If this saves you a weekend a month, consider supporting development — it funds new features, testing, and the coffee that powers them.
 
 *Donation links coming soon.*
+
+---
+
+<div align="center">
+
+**Made with ❤️ from Tanzania by [Abdul Musawwir](https://github.com/Abdulmusawwir)**
+
+Free forever · Open source · Runs on your machine, not ours
+
+</div>

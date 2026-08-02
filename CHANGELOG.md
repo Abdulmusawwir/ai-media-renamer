@@ -3,6 +3,7 @@
 ## [v1.6.0] — 2026-08-02
 
 ### New Features
+- **Marketing-focused README:** Rewrote `README.md` as a user-first pitch — problem framing, benefit-led copy, screenshots, who-it's-for, and roadmap. Added a branded header banner (`assets/header.png` + `assets/header.svg`) and UI previews (`assets/screenshot-staging.png`, `assets/screenshot-dashboard.png`, `assets/screenshot-wizard.png`). Technical depth now lives in `README_TECH.md`.
 - **First-run onboarding wizard:** Use-case questionnaire (videos / photos / documents / spreadsheets / audio) → dependency + model install plan → Ollama registry-validated model picker. Profile persists to `%APPDATA%\ai-media-renamer\setup.json`. "Skip" launches the app without installing. `--setup` re-runs the wizard.
 - **In-app model download:** sidebar dropdowns list all catalog models with `(installed)` / `(not installed)` markers and per-model download buttons with live progress; Configuration tab "Setup & onboarding" re-launches the wizard.
 - **Separate text model for documents & audio:** `config.model.text_model` (default `qwen2.5:3b`); document/audio prompts no longer go through the big vision model. Sidebar text-model selector (non-vision models only, download button). `check_environment()` reports `text_models` / `text_model_available`.

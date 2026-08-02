@@ -2,7 +2,9 @@
 
 Automatically organize, rename, and tag video, image, document, and audio assets using AI. 8 prompt profiles for different use cases. Comes with both a **CLI** and a **Streamlit web app**.
 
-> For a plain-language overview, see [README.md](README.md)
+> This is the deep-dive reference: full feature list, CLI flags, config reference, module map, metadata tables, and system requirements.
+>
+> For the plain-language pitch, screenshots, and quick start, see [README.md](README.md).
 
 ### Download the EXE
 
