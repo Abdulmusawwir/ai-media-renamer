@@ -535,6 +535,14 @@ class TestLlamaCppProvider:
         # llama-server does not authenticate; a placeholder satisfies the client.
         assert self.prov._api_key == "local"
 
+    @patch("engine.load_api_key")
+    def test_get_provider_preserves_local_key(self, mock_key):
+        # get_provider() must NOT overwrite the local placeholder with a keyring
+        # lookup, or analyze() fails with api_key_missing (verified bug).
+        prov = get_provider("llamacpp")
+        assert prov.api_key == "local"
+        mock_key.assert_not_called()
+
     @patch("engine.openai.OpenAI")
     def test_available_models_down_returns_empty(self, mock_openai):
         mock_openai.side_effect = Exception("connection refused")

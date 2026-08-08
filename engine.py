@@ -1851,14 +1851,16 @@ def get_provider(name: str) -> AIProvider:
     if not cls:
         raise ValueError(f"Unknown provider: {name}")
     inst = cls()
-    if name != "ollama":
+    local_runtime = name in ("ollama", "llamacpp")
+    if not local_runtime:
+        # llama.cpp needs no credentials — keep the provider's placeholder key.
         inst.api_key = load_api_key(name)
     pconf = config.get("model", {}).get("providers", {}).get(name, {})
     valid_models = pconf.get("models", [])
     saved_model = pconf.get("selected_model", "")
-    if saved_model and (name == "ollama" or saved_model in valid_models):
+    if saved_model and (local_runtime or saved_model in valid_models):
         inst.model = saved_model
-    elif name != "ollama" and valid_models:
+    elif not local_runtime and valid_models:
         inst.model = valid_models[0]
     return inst
 
