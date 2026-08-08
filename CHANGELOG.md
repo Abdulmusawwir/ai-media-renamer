@@ -1,5 +1,17 @@
 # Changelog
 
+## [v1.6.2] — 2026-08-08
+
+### New
+- **llama.cpp is now the default local AI runtime for new installs:** the desktop setup wizard downloads the `llama-server` runtime (~18 MB) plus a GGUF vision or text model, configures the app, and starts the daemon automatically — no manual setup. If Ollama is already installed, it's detected and reused and you're never asked to install llama.cpp too. Both runtimes stay supported.
+- **GGUF model selection in the wizard:** GPU machines are recommended a 7B vision model (Qwen2-VL 7B Q4_K_M + mmproj), CPU machines a lighter 2B vision model, and document/audio workflows a compact text model (Qwen2.5-3B). Verified HuggingFace download URLs with an `hf-mirror.com` fallback.
+- **In-app engine switch boots llama.cpp:** switching the engine radio to "Local (llama.cpp)" starts the server if it was installed but idle.
+
+### Code Quality
+- **21 new tests** (GGUF catalog, model recommendations, runtime URL resolution, config wiring, wizard plan runtime-awareness, server lifecycle, OpenAI-compatible text/override paths); 290 total, all passing. Ruff clean (pre-existing baseline only).
+
+---
+
 ## [v1.6.1] — 2026-08-08
 
 ### Fixed

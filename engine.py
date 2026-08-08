@@ -21,7 +21,7 @@ import openai
 import requests
 from pydantic import BaseModel, ValidationError
 
-VERSION = "v1.6.1"
+VERSION = "v1.6.2"
 
 
 class AssetAnalysisResponse(BaseModel):
