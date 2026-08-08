@@ -1,6 +1,11 @@
 # shadcn/ui-inspired dark theme for AI Media Renamer
 # Zinc palette with Inter font
 
+[client]
+# Hide the Run/Deploy toolbar so it never flashes before CSS injection
+# strips the Streamlit chrome in the packaged app.
+toolbarMode = "minimal"
+
 [theme]
 base = "dark"
 primaryColor = "#A1A1AA"
