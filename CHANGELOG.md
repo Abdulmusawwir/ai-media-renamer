@@ -1,5 +1,21 @@
 # Changelog
 
+## [v1.6.1] — 2026-08-08
+
+### Fixed
+- **Honest model status:** `OllamaProvider.available_models()` no longer falls back to the config catalog, so models can't show as "(installed)" while the Ollama daemon is down. Download buttons now appear for every model that isn't actually installed (reported in v1.6.0 first-run).
+- **Wizard buttons always reachable:** the use-case questionnaire and the one-time download plan dialogs are now resizable with a screen-clamped height and a scrollable list, so the Continue/Cancel (and Start setup/Back) buttons can never be pushed off-screen. Enter/Escape keys work.
+- **In-app dependency setup:** when FFmpeg/ExifTool are missing or the local runtime is down, the app now surfaces a "Setup incomplete — open setup wizard" button that re-runs `bootstrap --setup`, instead of leaving you with red badges and no way forward.
+- **No Streamlit chrome flash:** `[client] toolbarMode = "minimal"` in `.streamlit/config.toml` stops the Run/Deploy toolbar from flashing before the CSS injection strips it.
+
+### New
+- **llama.cpp runtime fallback:** a local `llama-server` (OpenAI-compatible, `localhost:8080`) is auto-detected and appears as a "Local (llama.cpp)" engine option when Ollama is absent — vision and text analysis route through the same provider interface (`LlamaCppProvider`). Ollama remains the bundled default; llama.cpp is for users who run it. Override the endpoint with `LLAMACPP_BASE_URL` or `model.llamacpp.base_url`.
+
+### Code Quality
+- **7 new tests** (provider registry, llama.cpp provider + detection); 269 total, all passing. Ruff clean (29 pre-existing baseline).
+
+---
+
 ## [v1.6.0] — 2026-08-02
 
 ### New Features

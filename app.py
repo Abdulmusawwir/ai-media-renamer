@@ -70,6 +70,7 @@ from engine import (
     set_active_profile,
     setup_logging,
     stream_model_download,
+    switch_ai_provider,
     truncate_filename,
     validate_category,
     wipe_local_model,
@@ -423,28 +424,45 @@ with st.sidebar:
 
     analysis_active = st.session_state.get("analysis_in_progress", False)
 
-    # Only the local engine is currently selectable; cloud providers are
+    # Only local runtimes are currently selectable; cloud providers are
     # implemented but disabled (no API keys for testing) — see audit.md §2.
     all_providers = list_providers()
-    if st.session_state.provider_info != "ollama":
+    _local_providers = {"ollama", "llamacpp"}
+    if st.session_state.provider_info not in _local_providers:
         st.caption(f"Previously configured provider '{st.session_state.provider_info}' "
                    "is not available — using Local (Ollama).")
         st.session_state.provider_info = "ollama"
 
+    env_now = st.session_state.env_check
+    llamacpp_visible = bool(env_now and env_now.get("llamacpp_running"))
+
+    engine_labels = ["Local (Ollama)"]
+    engine_ids = ["ollama"]
+    if llamacpp_visible:
+        engine_labels.append("Local (llama.cpp)")
+        engine_ids.append("llamacpp")
+    default_idx = engine_ids.index(st.session_state.provider_info) \
+        if st.session_state.provider_info in engine_ids else 0
     chosen = st.radio(
         "Engine",
-        ["Local (Ollama)"],
-        index=0,
+        engine_labels,
+        index=default_idx,
         key="provider_radio",
-        help="Local mode uses Ollama. Cloud modes are not yet available.",
+        help="Local modes use an on-device LLM server. Cloud modes are not yet available.",
     )
-    new_provider = "ollama"
+    new_provider = engine_ids[engine_labels.index(chosen)]
+
+    # Persist the engine switch so analysis uses the same provider. Skipped
+    # while analysis runs so a mid-run radio click cannot break the rerun loop.
+    if not analysis_active and new_provider != st.session_state.provider_info:
+        switch_ai_provider(new_provider)
+        st.session_state.provider_info = new_provider
 
     cloud_names = {
         "gemini": "Gemini", "openai": "OpenAI", "anthropic": "Anthropic",
         "groq": "Groq", "openrouter": "OpenRouter",
     }
-    pending = [cloud_names.get(p, p) for p in all_providers if p != "ollama"]
+    pending = [cloud_names.get(p, p) for p in all_providers if p not in _local_providers]
     st.caption(f"Cloud providers (coming soon): {', '.join(pending)}")
 
     if analysis_active:
@@ -541,7 +559,7 @@ with st.sidebar:
                 st.markdown(":material/error: **Ollama** — disconnected")
 
         # API key (cloud providers only)
-        if new_provider != "ollama":
+        if new_provider not in ("ollama", "llamacpp"):
             api_key = load_api_key(new_provider)
             st.text_input(
                 "API Key", type="password", key=f"api_key_{new_provider}",
@@ -585,6 +603,25 @@ with st.sidebar:
                 st.caption(f"Text: {tnames}")
             elif env.get("ollama_running"):
                 st.caption("Text model not installed — `ollama pull qwen2.5:3b`")
+        elif new_provider == "llamacpp":
+            for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool"),
+                               ("llamacpp_running", "llama.cpp Server"), ("model_available", "Vision Model")]:
+                ok = env.get(key, False)
+                status = "green" if ok else "red"
+                st.badge(label, color=status)
+
+            vision_models = env.get("vision_models", [])
+            if vision_models:
+                names = ", ".join(vision_models[:3])
+                if len(vision_models) > 3:
+                    names += f" (+{len(vision_models) - 3} more)"
+                st.caption(f"Vision: {names}")
+            elif not env.get("llamacpp_running"):
+                st.error("llama.cpp server is not running at localhost:8080. "
+                         "Start `llama-server` and click Refresh.")
+            elif not env.get("model_available"):
+                st.info("No vision model loaded in llama.cpp. "
+                        "Run `llama-server -m your-vision-model.gguf --mmproj mmproj.gguf`.")
         else:
             for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool")]:
                 ok = env.get(key, False)
@@ -626,24 +663,53 @@ with st.sidebar:
 
 env = st.session_state.env_check
 
+_local_provider_ids = ("ollama", "llamacpp")
+
+
+def _setup_cta() -> None:
+    """Render a one-click path back into the desktop setup wizard."""
+    with st.expander("Setup incomplete — install missing components"):
+        st.write("The desktop setup wizard downloads and configures everything "
+                 "locally (Ollama or llama.cpp, FFmpeg, ExifTool, models) once.")
+        if st.button(":material/settings: Open setup wizard", type="primary",
+                     key="setup_cta_button", use_container_width=True):
+            _spawn_setup_wizard()
+        st.caption("You can also re-run setup anytime from the "
+                   "Configuration tab → Setup & onboarding.")
+
+
 if env and env.get("errors"):
     critical = False
     for err in env["errors"]:
         if "FFmpeg" in err or "ExifTool" in err:
             critical = True
-            st.error(err, icon=":material/error:")
     if critical:
+        st.error("Missing required tools — FFmpeg and/or ExifTool were not found. "
+                 "Setup is incomplete.", icon=":material/error:")
+        _setup_cta()
         st.stop()
 
 if st.session_state.model_downloading:
     _download_model_fragment()
     st.stop()
 
-if st.session_state.provider_info == "ollama" and env and not env.get("ollama_running"):
-    st.warning("Ollama is not running. Please start the Ollama application, "
-               "then click 'Refresh Status' in the sidebar.", icon=":material/warning:")
+if st.session_state.provider_info in _local_provider_ids:
+    nfoe_id = "llamacpp_running" if st.session_state.provider_info == "llamacpp" else "ollama_running"
+    if env and not env.get(nfoe_id):
+        if st.session_state.provider_info == "llamacpp":
+            st.warning("llama.cpp server is not reachable at localhost:8080. "
+                       "Start `llama-server` with your model, or use the setup "
+                       "wizard to install Ollama instead.", icon=":material/warning:")
+        else:
+            st.warning("Ollama is not running. Start the Ollama application, then "
+                       "click 'Refresh Status' in the sidebar — or open the setup "
+                       "wizard below if it isn't installed yet.", icon=":material/warning:")
+        if st.button("Open setup wizard", key="_setup_cta_warn"):
+            _spawn_setup_wizard()
+    elif st.session_state.provider_info == "llamacpp":
+        st.caption(":material/check: llama.cpp server detected at localhost:8080")
 
-if st.session_state.provider_info != "ollama":
+if st.session_state.provider_info not in _local_provider_ids:
     stored = load_api_key(st.session_state.provider_info)
     if not stored:
         st.warning(f"Enter your {st.session_state.provider_info} API key in the sidebar.", icon=":material/warning:")
@@ -783,9 +849,10 @@ tab_upload, tab_analytics, tab_config = st.tabs([
 with tab_upload:
     st.subheader(":material/upload: Upload files")
 
-    if st.session_state.provider_info == "ollama" and env and not env.get("model_available"):
-        st.info("Qwen2.5-VL model is not installed. "
-                "Use the download button in the sidebar to install it before uploading files.",
+    if st.session_state.provider_info in _local_provider_ids and env and not env.get("model_available"):
+        st.info("No vision model is available on the selected engine. "
+                "Use the download button in the sidebar (Ollama) or load a "
+                "vision GGUF in llama.cpp before uploading files.",
                 icon=":material/warning:")
         uploaded_files = None
     else:

@@ -8,9 +8,11 @@ from engine import (
     AnthropicProvider,
     GeminiProvider,
     GroqProvider,
+    LlamaCppProvider,
     OllamaProvider,
     OpenAIProvider,
     OpenRouterProvider,
+    _llamacpp_server_running,
     delete_api_key,
     get_provider,
     list_providers,
@@ -24,7 +26,7 @@ from engine import (
 # ---------------------------------------------------------------------------
 
 class TestProviderRegistry:
-    def test_list_includes_all_six(self):
+    def test_list_includes_all_seven(self):
         names = list_providers()
         assert "ollama" in names
         assert "gemini" in names
@@ -32,6 +34,7 @@ class TestProviderRegistry:
         assert "anthropic" in names
         assert "groq" in names
         assert "openrouter" in names
+        assert "llamacpp" in names
 
     def test_get_ollama(self):
         prov = get_provider("ollama")
@@ -58,6 +61,11 @@ class TestProviderRegistry:
         prov = get_provider("openrouter")
         assert isinstance(prov, OpenRouterProvider)
         assert "openrouter.ai" in prov._base_url
+
+    def test_get_llamacpp(self):
+        prov = get_provider("llamacpp")
+        assert isinstance(prov, LlamaCppProvider)
+        assert prov._base_url.endswith("/v1")
 
     def test_get_unknown_provider(self):
         with pytest.raises(ValueError, match="Unknown provider"):
@@ -182,10 +190,12 @@ class TestOllamaProvider:
         assert len(models) == 3
 
     @patch("engine.ollama.list")
-    def test_available_models_fallback(self, mock_list):
+    def test_available_models_down_returns_empty(self, mock_list):
+        # Critical: when the daemon is down we must NOT fall back to the config
+        # catalog, or every catalog model falsely shows as "installed".
         mock_list.side_effect = Exception("Down")
         models = self.prov.available_models()
-        assert isinstance(models, list)
+        assert models == []
 
     def test_model_property(self):
         self.prov.model = "test-model"
@@ -504,6 +514,63 @@ class TestOpenRouterProvider:
         result = self.prov.analyze("fake_base64")
         assert result["ok"] is True
         assert result["data"]["new_filename"] == "sunset_ai"
+
+
+# ---------------------------------------------------------------------------
+# LlamaCppProvider (local llama.cpp llama-server runtime fallback)
+# ---------------------------------------------------------------------------
+
+class TestLlamaCppProvider:
+    def setup_method(self):
+        self.prov = LlamaCppProvider()
+
+    def test_inherits_from_openai(self):
+        assert isinstance(self.prov, OpenAIProvider)
+
+    def test_base_url_points_at_local_server(self):
+        assert self.prov._base_url.startswith("http")
+        assert self.prov._base_url.endswith("/v1")
+
+    def test_dummy_api_key_set(self):
+        # llama-server does not authenticate; a placeholder satisfies the client.
+        assert self.prov._api_key == "local"
+
+    @patch("engine.openai.OpenAI")
+    def test_available_models_down_returns_empty(self, mock_openai):
+        mock_openai.side_effect = Exception("connection refused")
+        assert self.prov.available_models() == []
+
+    @patch("engine.openai.OpenAI")
+    def test_available_models_lists_loaded_models(self, mock_openai):
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        m1 = MagicMock()
+        m1.id = "qwen3-vl:14b"
+        m2 = MagicMock()
+        m2.id = "llama-3.2:3b"
+        resp = MagicMock()
+        resp.data = [m1, m2]
+        mock_client.models.list.return_value = resp
+        models = self.prov.available_models()
+        assert "qwen3-vl:14b" in models
+        assert "llama-3.2:3b" in models
+
+
+class TestLlamaCppDetection:
+    @patch("engine.requests.get")
+    def test_server_running(self, mock_get):
+        mock_get.return_value.status_code = 200
+        assert _llamacpp_server_running() is True
+
+    @patch("engine.requests.get")
+    def test_server_down(self, mock_get):
+        mock_get.side_effect = ConnectionError("refused")
+        assert _llamacpp_server_running() is False
+
+    @patch("engine.requests.get")
+    def test_non_200(self, mock_get):
+        mock_get.return_value.status_code = 503
+        assert _llamacpp_server_running() is False
 
 
 # ---------------------------------------------------------------------------

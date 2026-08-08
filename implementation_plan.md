@@ -844,3 +844,5 @@ Phase AG: 18.3                   → ExifTool batching — v1.5.0
 Phase AH: 19.1, 19.2, 19.3      → Audio transcription pipeline — v1.5.0
 Phase AI: 20.1–20.5             → Security checkup & enhancements — PENDING (only remaining work)
 ```
+
+> **v1.6.1 (2026-08-08)** — shipped separately ahead of Phase AI as a release-hardening pass: honest model install status (no config-catalog fallback in `available_models()`), wizard use-case/plan dialogs made resizable + scrollable so footer buttons are always reachable, in-app "open setup wizard" CTA when dependencies are missing, `[client] toolbarMode = "minimal"` to kill the Streamlit chrome flash, and a llama.cpp runtime fallback (`LlamaCppProvider`, auto-detected `llamacpp_running`). See CHANGELOG v1.6.1 and audit.md §1.

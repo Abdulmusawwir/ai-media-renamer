@@ -1541,7 +1541,10 @@ class OllamaProvider(AIProvider):
                     models.append(name)
             return models
         except Exception:
-            return config.get("model", {}).get("providers", {}).get("ollama", {}).get("models", [])
+            # Only report models that actually exist on the server. Falling back
+            # to the config catalog here made every catalog entry look
+            # "installed" when the daemon was down (see audit.md §1).
+            return []
 
 
 class GeminiProvider(AIProvider):
@@ -1775,6 +1778,53 @@ class OpenRouterProvider(OpenAIProvider):
         return config.get("model", {}).get("providers", {}).get("openrouter", {}).get("models", [])
 
 
+LLAMACPP_DEFAULT_URL = "http://localhost:8080"
+
+
+def _llamacpp_base_url() -> str:
+    """Return the OpenAI-compatible base URL for a local llama.cpp server.
+
+    Reads ``LLAMACPP_BASE_URL`` from the environment (or config) so a
+    non-default port/host is supported; defaults to ``127.0.0.1:8080``.
+    """
+    env_url = os.environ.get("LLAMACPP_BASE_URL", "").strip()
+    if env_url:
+        return env_url.rstrip("/") + "/v1"
+    cfg_url = config.get("model", {}).get("llamacpp", {}).get("base_url", "")
+    if cfg_url:
+        return cfg_url.rstrip("/") + "/v1"
+    return LLAMACPP_DEFAULT_URL + "/v1"
+
+
+class LlamaCppProvider(OpenAIProvider):
+    """Runtime provider for a local llama.cpp ``llama-server``.
+
+    Uses the same OpenAI-compatible surface as ``OpenAIProvider`` pointed at
+    the local server. A dummy API key satisfies the OpenAI client; llama-server
+    does not authenticate. ``available_models()`` lists only the models the
+    running server has loaded, mirroring Ollama's honest reporting.
+    """
+
+    def __init__(self) -> None:
+        """Point an OpenAI-compatible client at the local llama-server."""
+        super().__init__(base_url=_llamacpp_base_url())
+        self._api_key = "local"
+        self._model = MODEL_NAME
+
+    def available_models(self) -> list[str]:
+        """List models advertised by the running llama-server.
+
+        Returns:
+            List of model name strings, or [] if the server is unreachable.
+        """
+        try:
+            client = self._make_client()
+            resp = client.models.list()
+            return [m.id for m in getattr(resp, "data", [])]
+        except Exception:
+            return []
+
+
 def register_provider(name: str, cls: type[AIProvider]) -> None:
     """Register a provider class in the global provider registry.
 
@@ -1824,6 +1874,7 @@ register_provider("openai", OpenAIProvider)
 register_provider("anthropic", AnthropicProvider)
 register_provider("groq", GroqProvider)
 register_provider("openrouter", OpenRouterProvider)
+register_provider("llamacpp", LlamaCppProvider)
 
 
 def analyze_asset_with_ai(
@@ -2701,6 +2752,23 @@ def check_ollama_health() -> dict[str, Any]:
         }
 
 
+def _llamacpp_server_running() -> bool:
+    """Return True if a local llama.cpp ``llama-server`` answers on its API port."""
+    import urllib.parse
+    base = _llamacpp_base_url()
+    try:
+        host_port = base.split("/v1")[0]
+        parsed = urllib.parse.urlsplit(host_port)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 8080
+        scheme = parsed.scheme or "http"
+        url = f"{scheme}://{host}:{port}"
+        resp = requests.get(f"{url}/v1/models", timeout=2)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
 def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
     """Verify all required tools and services are available.
 
@@ -2751,12 +2819,27 @@ def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
         ollama_running = False
         errors.append("Ollama is not running. Start Ollama and try again.")
 
-    cloud_configured = CURRENT_PROVIDER != "ollama"
+    # Fallback runtime: a local llama.cpp llama-server (OpenAI-compatible).
+    llamacpp_running = _llamacpp_server_running()
+    if not ollama_running and llamacpp_running:
+        provider = get_provider("llamacpp")
+        local_models = provider.available_models()
+        for name in local_models:
+            if _is_vision_model(name):
+                vision_models.append(name)
+                model_available = True
+            else:
+                text_models.append(name)
+        if not model_available and profile and local_models and "vision_model" not in needs:
+            model_available = True
+
+    cloud_configured = CURRENT_PROVIDER not in ("ollama", "llamacpp")
 
     return {
         "ffmpeg": bool(ffmpeg_path),
         "exiftool": bool(exiftool_path),
         "ollama_running": ollama_running,
+        "llamacpp_running": llamacpp_running,
         "model_available": model_available,
         "vision_models": vision_models,
         "text_models": text_models,
@@ -2922,6 +3005,9 @@ def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[st
         CURRENT_API_KEY = api_key
         save_api_key(new_provider, api_key)
         provider.api_key = api_key
+    elif new_provider == "llamacpp":
+        # Local llama-server needs no credentials; keep the provider default.
+        CURRENT_API_KEY = None
     elif new_provider != "ollama":
         stored = load_api_key(new_provider)
         CURRENT_API_KEY = stored
@@ -2932,8 +3018,18 @@ def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[st
     config["model"]["last_provider"] = new_provider
     save_config()
 
-    if new_provider != "ollama":
+    if new_provider not in ("ollama", "llamacpp"):
         return {"ok": True, "message": f"Switched to {new_provider}. Local model weights released from RAM/VRAM."}
+
+    if new_provider == "llamacpp":
+        env = check_environment()
+        if not env["llamacpp_running"]:
+            return {"ok": False, "require_download": False,
+                    "message": "llama.cpp server is not running at localhost:8080."}
+        if not env["model_available"]:
+            return {"ok": False, "require_download": False,
+                    "message": "No vision model available. Load a vision GGUF in llama-server."}
+        return {"ok": True, "message": "Switched to local llama.cpp."}
 
     env = check_environment()
     if not env["ollama_running"]:

@@ -539,9 +539,12 @@ class UseCaseDialog:
 
         self.top = tk.Toplevel(parent)
         self.top.title("What will you rename?")
-        self.top.geometry("560x520")
+        sw = self.top.winfo_screenheight()
+        height = min(560, max(420, sw - 160))
+        self.top.geometry(f"600x{height}")
+        self.top.minsize(520, 400)
         self.top.configure(bg=BG)
-        self.top.resizable(False, False)
+        self.top.resizable(True, True)
         self.top.transient(parent)
         self.top.grab_set()
         self.top.protocol("WM_DELETE_WINDOW", self._on_skip)
@@ -567,13 +570,35 @@ class UseCaseDialog:
             _hover_btn(actions, text, cmd, bg=PANEL, fg=FG, font=FONT_SEMI,
                        padx=12, pady=3).pack(side="left", padx=(8, 0))
 
+        # Scrollable body so every option stays reachable on short screens
+        body = tk.Frame(self.top, bg=BG)
+        body.pack(fill="both", expand=True, padx=28, pady=(4, 0))
+        self._canvas = tk.Canvas(body, bg=BG, highlightthickness=0, bd=0)
+        scroll = tk.Scrollbar(body, orient="vertical", command=self._canvas.yview,
+                              bg=BORDER, troughcolor=BG, bd=0,
+                              highlightthickness=0, width=12)
+        self._inner = tk.Frame(self._canvas, bg=BG)
+        self._inner_id = self._canvas.create_window((0, 0), window=self._inner,
+                                                    anchor="nw")
+        self._canvas.configure(yscrollcommand=scroll.set)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        self._inner.bind(
+            "<Configure>",
+            lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfigure(self._inner_id, width=e.width))
+        self.top.bind(
+            "<MouseWheel>",
+            lambda e: self._canvas.yview_scroll(int(-e.delta / 120), "units"))
+
         self._vars: dict[str, tk.BooleanVar] = {}
-        container = tk.Frame(self.top, bg=BG)
-        container.pack(fill="both", expand=True, padx=28, pady=(4, 0))
         for key, use in SETUP_USE_CASES.items():
             var = tk.BooleanVar(value=False)
             self._vars[key] = var
-            row = tk.Frame(container, bg=PANEL, highlightbackground=BORDER,
+            row = tk.Frame(self._inner, bg=PANEL, highlightbackground=BORDER,
                            highlightthickness=1, cursor="hand2")
             row.pack(fill="x", pady=4)
             cb = tk.Checkbutton(row, variable=var, bg=PANEL, fg=FG,
@@ -586,22 +611,24 @@ class UseCaseDialog:
             tk.Label(info, text=use["label"], font=FONT_BOLD, bg=PANEL, fg=FG,
                      anchor="w").pack(fill="x")
             tk.Label(info, text=use["desc"], font=FONT_MUTED, bg=PANEL,
-                     fg=MUTED, anchor="w").pack(fill="x", pady=(1, 0))
+                     fg=MUTED, anchor="w", wraplength=470, justify="left").pack(fill="x", pady=(1, 0))
 
             _hover_row(row)
             for w in (row, cb, info, *info.winfo_children()):
                 w.bind("<Button-1>",
                        lambda _e, v=var: (v.set(not v.get())))
 
-        # Footer buttons
+        # Footer buttons (pinned, always visible)
         footer = tk.Frame(self.top, bg=BG)
         footer.pack(fill="x", padx=28, pady=(10, 16))
         self.cont_btn = _hover_btn(footer, "Continue", self._on_continue,
                                    bg=ACCENT, fg="white", padx=26, pady=7,
                                    disabled=True)
         self.cont_btn.pack(side="left")
-        _hover_btn(footer, "Skip for now", self._on_skip, bg=PANEL, fg=FG,
+        _hover_btn(footer, "Cancel for now", self._on_skip, bg=PANEL, fg=FG,
                    padx=16, pady=7).pack(side="left", padx=(10, 0))
+        self.top.bind("<Return>", lambda e: self._on_continue())
+        self.top.bind("<Escape>", lambda e: self._on_skip())
 
         for var in self._vars.values():
             var.trace_add("write", self._update_continue)
@@ -693,9 +720,12 @@ class PlanConfirmDialog:
         self._closed = False
         self.top = tk.Toplevel(parent)
         self.top.title("One-time setup")
-        self.top.geometry("560x460")
+        sw = self.top.winfo_screenheight()
+        height = min(460, max(320, sw - 200))
+        self.top.geometry(f"600x{height}")
+        self.top.minsize(520, 320)
         self.top.configure(bg=BG)
-        self.top.resizable(False, False)
+        self.top.resizable(True, True)
         self.top.transient(parent)
         self.top.grab_set()
         self.top.protocol("WM_DELETE_WINDOW", self._on_back)
@@ -711,11 +741,32 @@ class PlanConfirmDialog:
                  font=FONT_MUTED, bg=BG, fg=MUTED, anchor="w").pack(fill="x", pady=(4, 0))
         tk.Frame(header, bg=ACCENT, height=2).pack(fill="x", pady=(12, 0))
 
-        container = tk.Frame(self.top, bg=BG)
-        container.pack(fill="both", expand=True, padx=30, pady=(14, 0))
+        # Scrollable body so long plans never push the buttons off-screen
+        body = tk.Frame(self.top, bg=BG)
+        body.pack(fill="both", expand=True, padx=30, pady=(14, 0))
+        self._canvas = tk.Canvas(body, bg=BG, highlightthickness=0, bd=0)
+        scroll = tk.Scrollbar(body, orient="vertical", command=self._canvas.yview,
+                              bg=BORDER, troughcolor=BG, bd=0,
+                              highlightthickness=0, width=12)
+        self._inner = tk.Frame(self._canvas, bg=BG)
+        self._inner_id = self._canvas.create_window((0, 0), window=self._inner,
+                                                    anchor="nw")
+        self._canvas.configure(yscrollcommand=scroll.set)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        self._inner.bind(
+            "<Configure>",
+            lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfigure(self._inner_id, width=e.width))
+        self.top.bind(
+            "<MouseWheel>",
+            lambda e: self._canvas.yview_scroll(int(-e.delta / 120), "units"))
 
         for item in plan:
-            row = tk.Frame(container, bg=PANEL, highlightbackground=BORDER,
+            row = tk.Frame(self._inner, bg=PANEL, highlightbackground=BORDER,
                            highlightthickness=1)
             row.pack(fill="x", pady=3)
             status_color = GREEN if item["status"] in ("ready", "installed") else AMBER
@@ -728,17 +779,20 @@ class PlanConfirmDialog:
                      fg=status_color, anchor="e", width=12).pack(side="right", padx=(0, 12))
 
         sizes = [i["size"] for i in plan if i["status"] == "download"]
-        total = tk.Label(container, text="", font=FONT_SEMI, bg=BG, fg=FG, anchor="w")
+        total = tk.Label(self._inner, text="", font=FONT_SEMI, bg=BG, fg=FG, anchor="w")
         total.pack(fill="x", pady=(12, 0))
         total.config(text=(f"New downloads: {', '.join(sizes)}"
                            if sizes else "Nothing to download — everything is already found"))
 
+        # Footer buttons (pinned, always visible)
         footer = tk.Frame(self.top, bg=BG)
         footer.pack(fill="x", padx=30, pady=(8, 16))
         _hover_btn(footer, "Start setup", self._on_start, bg=ACCENT, fg="white",
                    padx=26, pady=7).pack(side="left")
         _hover_btn(footer, "Back", self._on_back, bg=PANEL, fg=FG,
                    padx=16, pady=7).pack(side="left", padx=(10, 0))
+        self.top.bind("<Return>", lambda e: self._on_start())
+        self.top.bind("<Escape>", lambda e: self._on_back())
 
     def _on_start(self):
         self.result = True
