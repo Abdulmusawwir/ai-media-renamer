@@ -21,16 +21,23 @@ import ollama
 import requests
 
 from engine import (
+    LLAMACPP_GGUF_CATALOG,
     MODEL_CATALOG,
     SETUP_DEPENDENCIES,
     SETUP_USE_CASES,
     VERSION,
+    _llamacpp_gguf_paths,
+    _llamacpp_runtime_urls,
+    _llamacpp_server_running,
     _resolve_binary_path,
     check_for_updates,
     config,
+    configure_llamacpp_install,
     download_file,
+    ensure_llamacpp_server,
     load_setup_profile,
     pre_download_whisper,
+    recommended_llamacpp_models,
     recommended_models,
     save_setup_profile,
     stream_model_download,
@@ -54,6 +61,8 @@ APP_PATH = BASE_DIR / "app.py"
 CACHE_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "ai-media-renamer"
 BIN_DIR = CACHE_DIR / "bin"
 OLLAMA_INSTALLER_CACHE = CACHE_DIR / "cache"
+LLAMACPP_ZIP_CACHE = CACHE_DIR / "cache" / "llamacpp.zip"
+LLAMACPP_EXE = BIN_DIR / "llama-server.exe"
 
 # ---------- theme colors (modern dark) ----------
 BG = "#14161c"
@@ -491,6 +500,154 @@ def _install_ffmpeg(win) -> None:
         time.sleep(5)
 
 
+def _install_llamacpp_runtime(win, step: int) -> None:
+    """Download and install the llama.cpp ``llama-server`` binary (Windows CPU).
+
+    The runtime zip is a small (~18 MB) CPU build that bundles the server
+    executable; it becomes the default AI runtime for fresh setups that do not
+    already have Ollama installed.
+    """
+    win.set_step(step, "\u27f3 Downloading llama.cpp runtime...")
+    win.set_progress(0)
+    win.set_info("Downloading...")
+    win.update()
+
+    last_err = None
+    for url in _llamacpp_runtime_urls():
+        try:
+            LLAMACPP_ZIP_CACHE.unlink(missing_ok=True)
+            download_file(url, LLAMACPP_ZIP_CACHE,
+                          progress_callback=lambda d, t: _progress_callback(d, t, win, "llama.cpp"))
+            if not _is_valid_zip(LLAMACPP_ZIP_CACHE):
+                raise RuntimeError("downloaded file is not a valid ZIP archive")
+            extract_dir = CACHE_DIR / "llamacpp_extracted"
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(LLAMACPP_ZIP_CACHE, "r") as zf:
+                zf.extractall(extract_dir)
+
+            exe_src = next((f for f in extract_dir.rglob("llama-server.exe")), None)
+            if exe_src is None:
+                raise RuntimeError("llama-server.exe not found inside archive")
+            BIN_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(exe_src, LLAMACPP_EXE)
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            LLAMACPP_ZIP_CACHE.unlink(missing_ok=True)
+            _add_to_user_path(BIN_DIR)
+            win.set_step(step, "\u2713 Checking llama.cpp... ready")
+            win.set_progress(100)
+            win.set_info("")
+            win.update()
+            return
+        except Exception as exc:
+            last_err = exc
+            continue
+
+    win.set_step(step, "\u2716 llama.cpp download failed")
+    win.set_progress(0)
+    win.set_info(f"Automatic download failed: {last_err}. "
+                 "Install llama-server manually and retry.")
+    win.update()
+    import time
+    time.sleep(5)
+
+
+def _download_hf_with_mirror(url: str, dest: Path, win, label: str) -> None:
+    """Download a HuggingFace file, falling back to the hf-mirror.com host."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    last_err = None
+    for host in ("huggingface.co", "hf-mirror.com"):
+        if host == "hf-mirror.com":
+            candidate = url.replace("huggingface.co", "hf-mirror.com")
+        else:
+            candidate = url
+        if candidate == url and host == "hf-mirror.com":
+            continue
+        try:
+            dest.unlink(missing_ok=True)
+            download_file(candidate, dest,
+                          progress_callback=lambda d, t: _progress_callback(d, t, win, label))
+            return
+        except Exception as exc:
+            last_err = exc
+            continue
+    raise RuntimeError(f"Download failed for {label}: {last_err}")
+
+
+def _pick_llamacpp_model(kind: str, rec: dict[str, str]) -> dict:
+    """Select a GGUF catalog entry for a kind, honouring the recommendation."""
+    rec_name = rec.get(kind, "")
+    for m in LLAMACPP_GGUF_CATALOG:
+        if m["kind"] == kind and m["name"] == rec_name:
+            return m
+    return next((m for m in LLAMACPP_GGUF_CATALOG if m["kind"] == kind), None)
+
+
+def _install_llamacpp_models(win, step: int, needs: set[str],
+                             rec: dict[str, str]) -> None:
+    """Download the GGUF models the profile needs and record them in config.
+
+    A vision GGUF (with mmproj) also serves text-only prompts, so a profile
+    needing both vision and text only downloads the vision model; text-only
+    profiles download the small text GGUF instead.
+    """
+    needs_vision = "vision_model" in needs
+    needs_text = "text_model" in needs
+
+    if needs_vision:
+        model = _pick_llamacpp_model("vision", rec)
+    elif needs_text:
+        model = _pick_llamacpp_model("text", rec)
+    else:
+        return
+
+    gguf_path, mmproj_path = _llamacpp_gguf_paths(model["name"])
+    if gguf_path.exists():
+        win.set_step(step, f"\u2713 {model['label']} \u2014 already installed")
+        win.set_progress(100)
+        win.set_info("")
+    else:
+        win.set_step(step, f"\u27f3 Downloading {model['label']}...")
+        win.set_progress(0)
+        win.set_info("This is a large model \u2014 please wait.")
+        win.update()
+        _download_hf_with_mirror(model["url"], gguf_path, win, model["label"])
+        win.set_progress(100)
+        win.set_info("")
+
+    mmproj = model.get("mmproj_url", "")
+    if needs_vision and mmproj and not mmproj_path.exists():
+        win.set_step(step, "\u27f3 Downloading vision projector (mmproj)...")
+        win.set_progress(0)
+        win.set_info("Smaller companion file for image understanding.")
+        win.update()
+        _download_hf_with_mirror(mmproj, mmproj_path, win, "Vision projector")
+        win.set_progress(100)
+        win.set_info("")
+
+    configure_llamacpp_install(model["name"], gguf_path,
+                               mmproj_path if needs_vision else None,
+                               make_default=True)
+
+    win.set_step(step, f"\u2713 {model['label']} \u2014 ready")
+    win.set_progress(100)
+    win.set_info("")
+    win.update()
+
+
+def _start_llamacpp_server(win) -> bool:
+    """Launch the installed llama.cpp server (idempotent) and wait for it."""
+    win.set_step(0, "\u27f3 Starting llama.cpp server...")
+    win.set_progress(50)
+    win.set_info("Launching local AI server in background...")
+    win.update()
+    ok = ensure_llamacpp_server(timeout=40)
+    win.set_progress(100)
+    win.set_info("")
+    win.update()
+    return ok
+
+
 def _stream_model_with_progress(win, step_num, label, model_name):
     win.set_step(step_num, f"\u27f3 {label}")
     win.set_progress(0)
@@ -675,7 +832,8 @@ def _plan_sizes(rec_models: dict[str, str]) -> dict[str, str]:
     Model rows show the full size range across the catalog alternatives,
     because the exact size depends on which model the user picks next.
     """
-    sizes = {"ollama": "~1.5 GB", "ffmpeg": "~109 MB", "exiftool": "~10 MB",
+    sizes = {"ollama": "~1.5 GB", "llamacpp": "~18 MB",
+             "ffmpeg": "~109 MB", "exiftool": "~10 MB",
              "whisper": "~74 MB"}
     for kind in ("vision", "text"):
         cands = [m["size_gb"] for m in MODEL_CATALOG if m["kind"] == kind]
@@ -684,28 +842,62 @@ def _plan_sizes(rec_models: dict[str, str]) -> dict[str, str]:
             sizes[f"{kind}_model"] = f"{lo:.1f}\u2013{hi:.1f} GB"
         else:
             sizes[f"{kind}_model"] = "?"
+        cands = [m["size_gb"] for m in LLAMACPP_GGUF_CATALOG if m["kind"] == kind]
+        if cands:
+            lo, hi = min(cands), max(cands)
+            sizes[f"{kind}_gguf"] = (f"{lo:.1f} GB" if abs(hi - lo) < 0.01
+                                     else f"{lo:.1f}\u2013{hi:.1f} GB")
+        else:
+            sizes[f"{kind}_gguf"] = "?"
     return sizes
 
 
 def _build_plan(profile: list[str], needs: set[str], rec_models: dict[str, str]) -> list[dict]:
-    """Build the 'you will download once' plan for the chosen use cases."""
+    """Build the 'you will download once' plan for the chosen use cases.
+
+    The local AI runtime is chosen by what the machine already has: an
+    existing Ollama install is reused as-is, while fresh setups default to the
+    small llama.cpp runtime instead of downloading the 1.5 GB Ollama installer.
+    """
     sizes = _plan_sizes(rec_models)
     installed = _installed_models()
+    runtime = "ollama" if _ollama_binary() else "llamacpp"
     plan: list[dict] = []
-    plan.append({"label": SETUP_DEPENDENCIES["ollama"]["label"], "size": sizes["ollama"],
-                 "desc": SETUP_DEPENDENCIES["ollama"]["desc"],
-                 "status": "ready" if _ollama_binary() else "download"})
+
+    if runtime == "ollama":
+        plan.append({"label": SETUP_DEPENDENCIES["ollama"]["label"], "size": sizes["ollama"],
+                     "desc": SETUP_DEPENDENCIES["ollama"]["desc"],
+                     "status": "ready" if _ollama_binary() else "download"})
+    else:
+        exe = LLAMACPP_EXE if LLAMACPP_EXE.exists() else _resolve_binary_path("llama-server")
+        plan.append({"label": "llama.cpp runtime (AI server)", "size": sizes["llamacpp"],
+                     "desc": "Runs your AI models locally \u2014 the default for new setups.",
+                     "status": "ready" if exe else "download"})
     for key in ("exiftool", "ffmpeg"):
         if key in needs:
             status = "ready" if _resolve_binary_path(key) else "download"
             plan.append({"label": SETUP_DEPENDENCIES[key]["label"], "size": sizes[key],
                          "desc": SETUP_DEPENDENCIES[key]["desc"], "status": status})
     for key in ("vision_model", "text_model"):
-        if key in needs:
-            model = rec_models.get(key.replace("_model", ""), "")
+        if key not in needs:
+            continue
+        kind = key.replace("_model", "")
+        if runtime == "ollama":
+            model = rec_models.get(kind, "")
             status = "installed" if model in installed else "download"
-            plan.append({"label": SETUP_DEPENDENCIES[key]["label"], "size": sizes[key],
-                         "desc": SETUP_DEPENDENCIES[key]["desc"], "status": status})
+            size = sizes[key]
+        else:
+            rec_name = rec_models.get(kind, "")
+            gguf_path, _ = _llamacpp_gguf_paths(rec_name)
+            status = "installed" if gguf_path.exists() else "download"
+            size = sizes.get(f"{kind}_gguf", "?")
+        plan.append({"label": SETUP_DEPENDENCIES[key]["label"], "size": size,
+                     "desc": SETUP_DEPENDENCIES[key]["desc"], "status": status})
+    if runtime == "llamacpp" and "vision_model" in needs and "text_model" in needs:
+        plan.append({"label": "Text analysis (vision model handles it)", "size": "",
+                     "desc": "No extra download \u2014 the vision GGUF also answers "
+                             "text-only prompts.",
+                     "status": "included"})
     if "whisper" in needs:
         plan.append({"label": SETUP_DEPENDENCIES["whisper"]["label"], "size": sizes["whisper"],
                      "desc": SETUP_DEPENDENCIES["whisper"]["desc"], "status": "download"})
@@ -769,8 +961,9 @@ class PlanConfirmDialog:
             row = tk.Frame(self._inner, bg=PANEL, highlightbackground=BORDER,
                            highlightthickness=1)
             row.pack(fill="x", pady=3)
-            status_color = GREEN if item["status"] in ("ready", "installed") else AMBER
-            badge = {"ready": "Found", "installed": "Installed", "download": "To download"}[item["status"]]
+            status_color = GREEN if item["status"] in ("ready", "installed", "included") else AMBER
+            badge = {"ready": "Found", "installed": "Installed",
+                     "included": "Included", "download": "To download"}[item["status"]]
             tk.Label(row, text=item["label"], font=FONT_BOLD, bg=PANEL, fg=FG,
                      anchor="w", width=24).pack(side="left", padx=(12, 6), pady=8)
             tk.Label(row, text=item["size"], font=FONT_MUTED, bg=PANEL,
@@ -1118,69 +1311,69 @@ def main():
 
         step = 1
 
-        # ---- Step: Ollama (always required) ----
-        ollama_binary = _ollama_binary()
-        installer_path = OLLAMA_INSTALLER_CACHE / "OllamaSetup.exe"
+        # ---- Step: Local AI runtime ----
+        # Reuse an existing Ollama install; otherwise default to the small
+        # llama.cpp runtime for fresh setups (the old flow downloaded Ollama).
+        runtime = "ollama" if _ollama_binary() else "llamacpp"
 
-        if not ollama_binary:
-            if not installer_path.exists():
-                url = "https://ollama.com/download/OllamaSetup.exe"
-                win.set_step(step, "\u27f3 Downloading Ollama installer...")
-                win.set_progress(0)
-                win.set_info("Downloading...")
-                win.update()
-
-                def cb(d, t):
-                    _progress_callback(d, t, win, "Ollama installer")
-
-                download_file(url, installer_path, progress_callback=cb)
-            win.set_step(step, "\u27f3 Installing Ollama...")
-            win.set_progress(50)
-            win.set_info("Running silent installer (this may take a moment)...")
-            win.update()
-            subprocess.run([str(installer_path), "/S"], check=True, capture_output=True)
+        if runtime == "ollama":
             ollama_binary = _ollama_binary()
 
-        # Check if the Ollama service is actually running
-        ollama_running = False
-        try:
-            resp = requests.get("http://localhost:11434/api/tags", timeout=2)
-            ollama_running = resp.status_code == 200
-        except Exception:
-            pass
+            # Check if the Ollama service is actually running
+            ollama_running = False
+            try:
+                resp = requests.get("http://localhost:11434/api/tags", timeout=2)
+                ollama_running = resp.status_code == 200
+            except Exception:
+                pass
 
-        if ollama_running:
-            win.set_step(step, "\u2713 Checking Ollama... running")
-            win.set_progress(100)
-            win.set_info("")
-        elif ollama_binary:
-            win.set_step(step, "\u27f3 Starting Ollama service...")
-            win.set_progress(50)
-            win.set_info("Launching Ollama in background...")
-            win.update()
-            subprocess.Popen(
-                [ollama_binary, "serve"],
-                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            if wait_for_ollama_service(timeout=30):
+            if ollama_running:
                 win.set_step(step, "\u2713 Checking Ollama... running")
                 win.set_progress(100)
                 win.set_info("")
+            elif ollama_binary:
+                win.set_step(step, "\u27f3 Starting Ollama service...")
+                win.set_progress(50)
+                win.set_info("Launching Ollama in background...")
+                win.update()
+                subprocess.Popen(
+                    [ollama_binary, "serve"],
+                    creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                if wait_for_ollama_service(timeout=30):
+                    win.set_step(step, "\u2713 Checking Ollama... running")
+                    win.set_progress(100)
+                    win.set_info("")
+                else:
+                    win.set_step(step, "\u26a0 Ollama service did not start")
+                    win.set_progress(100)
+                    win.set_info("Please start Ollama manually and restart this app.")
+                    win.wait_for_user()
+                    win.close()
+                    return
             else:
-                win.set_step(step, "\u26a0 Ollama service did not start")
+                win.set_step(step, "\u26a0 Ollama not found")
                 win.set_progress(100)
-                win.set_info("Please start Ollama manually and restart this app.")
+                win.set_info("Ollama installation may have failed. Please install manually from ollama.com.")
                 win.wait_for_user()
                 win.close()
                 return
         else:
-            win.set_step(step, "\u26a0 Ollama not found")
-            win.set_progress(100)
-            win.set_info("Ollama installation may have failed. Please install manually from ollama.com.")
-            win.wait_for_user()
-            win.close()
-            return
+            llm_exe = LLAMACPP_EXE if LLAMACPP_EXE.exists() else _resolve_binary_path("llama-server")
+            if not llm_exe:
+                _install_llamacpp_runtime(win, step)
+            if _llamacpp_server_running():
+                win.set_step(step, "\u2713 Checking llama.cpp... running")
+                win.set_progress(100)
+                win.set_info("")
+            elif not _start_llamacpp_server(win):
+                win.set_step(step, "\u26a0 llama.cpp server did not start")
+                win.set_progress(100)
+                win.set_info("Please start llama-server manually and restart this app.")
+                win.wait_for_user()
+                win.close()
+                return
         win.update()
         step += 1
 
@@ -1211,35 +1404,37 @@ def main():
         # ---- Step: AI models (vision and/or text for the profile) ----
         needs_vision = "vision_model" in needs
         needs_text = "text_model" in needs
-        model_choices: dict[str, str | None] = {"vision": None, "text": None}
 
         if needs_vision or needs_text:
-            if not onboarded or force_setup:
-                dlg = ModelRecommendationDialog(win.root, needs,
-                                                _installed_models(), rec_models)
-                _show_modal(win, dlg)
-                model_choices = dlg.result or {"vision": None, "text": None}
-            else:
-                model_choices = {
-                    "vision": config.get("model", {}).get("name") if needs_vision else None,
-                    "text": config.get("model", {}).get("text_model") if needs_text else None,
-                }
-
-            for kind in ("vision", "text"):
-                model = model_choices.get(kind)
-                if not model:
-                    continue
-                if model not in _installed_models():
-                    _stream_model_with_progress(win, step, f"Downloading {model}...", model)
+            if runtime == "ollama":
+                model_choices: dict[str, str | None] = {"vision": None, "text": None}
+                if not onboarded or force_setup:
+                    dlg = ModelRecommendationDialog(win.root, needs,
+                                                    _installed_models(), rec_models)
+                    _show_modal(win, dlg)
+                    model_choices = dlg.result or {"vision": None, "text": None}
                 else:
-                    win.set_step(step, f"\u2713 {kind.title()} model \u2014 ready")
-                    win.set_progress(100)
-                    win.set_info("")
-                    win.update()
-                step += 1
+                    model_choices = {
+                        "vision": config.get("model", {}).get("name") if needs_vision else None,
+                        "text": config.get("model", {}).get("text_model") if needs_text else None,
+                    }
 
-            os.environ["SELECTED_MODEL"] = (model_choices.get("vision")
-                                            or config.get("model", {}).get("name", "qwen2.5vl:7b"))
+                for kind in ("vision", "text"):
+                    model = model_choices.get(kind)
+                    if not model:
+                        continue
+                    if model not in _installed_models():
+                        _stream_model_with_progress(win, step, f"Downloading {model}...", model)
+                    else:
+                        win.set_step(step, f"\u2713 {kind.title()} model \u2014 ready")
+                        win.set_progress(100)
+                        win.set_info("")
+                        win.update()
+                    step += 1
+            else:
+                rec_llamacpp = recommended_llamacpp_models(profile)
+                _install_llamacpp_models(win, step, needs, rec_llamacpp)
+                step += 1
             win.update()
 
         # ---- Step: Whisper (speech-to-text, when the profile needs it) ----
@@ -1257,7 +1452,7 @@ def main():
 
         # ---- Persist the onboarding profile ----
         if not onboarded or force_setup:
-            save_setup_profile(profile=profile, onboarded=True)
+            save_setup_profile(profile=profile, onboarded=True, runtime=runtime)
 
         # ---- Step: Update check ----
         update_info = check_for_updates()

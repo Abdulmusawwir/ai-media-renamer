@@ -21,7 +21,7 @@ import openai
 import requests
 from pydantic import BaseModel, ValidationError
 
-VERSION = "v1.6.1"
+VERSION = "v1.6.2"
 
 
 class AssetAnalysisResponse(BaseModel):
@@ -349,6 +349,44 @@ MODEL_CATALOG: list[dict[str, Any]] = [
     },
 ]
 
+# GGUF models downloaded by the setup wizard for the llama.cpp runtime. These
+# are raw model files served by llama-server; a vision entry carries an mmproj
+# (vision-projector) companion file and ALSO handles text-only prompts, so a
+# profile needing both vision and text only downloads the vision GGUF.
+LLAMACPP_GGUF_CATALOG: list[dict[str, Any]] = [
+    {
+        "name": "qwen2.5vl:7b", "kind": "vision", "label": "Qwen 2 VL 7B (Q4_K_M)",
+        "size": "5.4 GB", "size_gb": 5.4, "quality": "Best", "speed": "Moderate",
+        "desc": "Vision + text in one file. Best quality for structured JSON "
+                "extraction and visual analysis.",
+        "url": "https://huggingface.co/ggml-org/Qwen2-VL-7B-Instruct-GGUF/resolve/main/"
+               "Qwen2-VL-7B-Instruct-Q4_K_M.gguf",
+        "mmproj_url": "https://huggingface.co/ggml-org/Qwen2-VL-7B-Instruct-GGUF/resolve/main/"
+                      "mmproj-Qwen2-VL-7B-Instruct-Q8_0.gguf",
+        "recommended_gpu": True,
+    },
+    {
+        "name": "qwen2.5vl:2b", "kind": "vision", "label": "Qwen 2 VL 2B (Q4_K_M)",
+        "size": "1.7 GB", "size_gb": 1.7, "quality": "Good", "speed": "Fast",
+        "desc": "Lighter option \u2014 good quality, fast on CPU or low VRAM.",
+        "url": "https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF/resolve/main/"
+               "Qwen2-VL-2B-Instruct-Q4_K_M.gguf",
+        "mmproj_url": "https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF/resolve/main/"
+                      "mmproj-Qwen2-VL-2B-Instruct-Q8_0.gguf",
+        "recommended_cpu": True,
+    },
+    {
+        "name": "qwen2.5:3b", "kind": "text", "label": "Qwen 2.5 3B (Q4_K_M)",
+        "size": "2.1 GB", "size_gb": 2.1, "quality": "Good", "speed": "Fast",
+        "desc": "Text-only model \u2014 recommended for documents, spreadsheets "
+                "and transcripts.",
+        "url": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/"
+               "qwen2.5-3b-instruct-q4_k_m.gguf",
+        "mmproj_url": "",
+        "recommended_cpu": True, "recommended_gpu": True,
+    },
+]
+
 
 def use_cases_needs(profile: list[str]) -> set[str]:
     """Return the set of dependencies required for the given use cases."""
@@ -401,6 +439,30 @@ def recommended_models(profile: list[str]) -> dict[str, str]:
     return out
 
 
+def recommended_llamacpp_models(profile: list[str]) -> dict[str, str]:
+    """Pick default GGUF vision/text models for the llama.cpp runtime.
+
+    Returns:
+        Dict with optional 'vision' and 'text' model names (from
+        LLAMACPP_GGUF_CATALOG), chosen for the detected hardware.
+    """
+    needs = use_cases_needs(profile)
+    has_gpu = _has_gpu()
+    out: dict[str, str] = {}
+    for kind in ("vision", "text"):
+        if f"{kind}_model" not in needs:
+            continue
+        cands = [m for m in LLAMACPP_GGUF_CATALOG if m["kind"] == kind]
+        if not cands:
+            continue
+        preferred = next(
+            (m for m in cands if m.get("recommended_gpu" if has_gpu else "recommended_cpu")),
+            None,
+        )
+        out[kind] = (preferred or cands[0])["name"]
+    return out
+
+
 @functools.lru_cache(maxsize=128)
 def _model_tag_exists(name: str, tag: str) -> bool | None:
     """True/False if the tag exists in Ollama's registry, None if offline."""
@@ -435,24 +497,35 @@ def pre_download_whisper(model_size: str = "base") -> bool:
 
 def load_setup_profile() -> dict[str, Any]:
     """Load the persisted onboarding profile from user data (%APPDATA%)."""
-    default: dict[str, Any] = {"onboarded": False, "profile": [], "setup_version": VERSION}
+    default: dict[str, Any] = {"onboarded": False, "profile": [], "setup_version": VERSION,
+                               "runtime": ""}
     try:
         data = json.loads((USER_DATA_DIR / "setup.json").read_text(encoding="utf-8"))
         data.setdefault("onboarded", False)
         data.setdefault("profile", [])
         data.setdefault("setup_version", VERSION)
+        data.setdefault("runtime", "")
         return data
     except Exception:
         return default
 
 
-def save_setup_profile(profile: list[str] | None = None, onboarded: bool = True) -> dict[str, Any]:
-    """Persist the onboarding profile to user data so it survives EXE restarts."""
+def save_setup_profile(profile: list[str] | None = None, onboarded: bool = True,
+                       runtime: str | None = None) -> dict[str, Any]:
+    """Persist the onboarding profile to user data so it survives EXE restarts.
+
+    Args:
+        profile: Use-case keys chosen in onboarding ('', to clear).
+        onboarded: True once the questionnaire has been answered.
+        runtime: Chosen local AI runtime ('ollama' or 'llamacpp').
+    """
     data = load_setup_profile()
     if profile is not None:
         data["profile"] = list(profile)
     data["onboarded"] = onboarded
     data["setup_version"] = VERSION
+    if runtime is not None:
+        data["runtime"] = runtime
     try:
         USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
         (USER_DATA_DIR / "setup.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -1633,11 +1706,61 @@ class OpenAIProvider(AIProvider):
             kwargs["base_url"] = self._base_url
         return openai.OpenAI(**kwargs)
 
-    def analyze(self, base64_img: str, verbose: bool = False) -> dict[str, Any]:
+    def analyze(self, base64_img: str, verbose: bool = False,
+                prompt_override: str | None = None) -> dict[str, Any]:
         """Analyze an image using the OpenAI vision API.
 
         Args:
             base64_img: Base64-encoded JPEG image data.
+            verbose: If True, include raw response in error details.
+            prompt_override: Optional custom prompt instead of get_active_prompt().
+
+        Returns:
+            Result dict with parsed data or error information.
+        """
+        result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
+        if not self._api_key:
+            result['error'] = 'api_key_missing'
+            result['detail'] = 'API key not configured.'
+            return result
+        try:
+            prompt = prompt_override or get_active_prompt()
+            client = self._make_client()
+            model_name = self._model or "gpt-4o"
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
+                    ]
+                }],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "asset_analysis",
+                        "strict": True,
+                        "schema": AssetAnalysisResponse.model_json_schema(),
+                    },
+                },
+                max_tokens=1024
+            )
+            raw_text = response.choices[0].message.content or ""
+            return self._parse_and_validate(raw_text)
+        except Exception as exc:
+            result['error'] = 'openai_api_error'
+            result['detail'] = f'OpenAI API request failed: {exc}'
+            return result
+
+    def _analyze_prompt_only(self, prompt: str, verbose: bool = False) -> dict[str, Any]:
+        """Send a text-only prompt to an OpenAI-compatible endpoint (no images).
+
+        Used for document/audio analysis through cloud providers and the local
+        llama.cpp runtime, which expose the same chat-completions surface.
+
+        Args:
+            prompt: Full prompt text to send.
             verbose: If True, include raw response in error details.
 
         Returns:
@@ -1650,15 +1773,12 @@ class OpenAIProvider(AIProvider):
             return result
         try:
             client = self._make_client()
-            model_name = self._model or "gpt-4o"
+            model_name = self.text_model or self._model or "gpt-4o"
             response = client.chat.completions.create(
                 model=model_name,
                 messages=[{
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": get_active_prompt()},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
-                    ]
+                    "content": [{"type": "text", "text": prompt}],
                 }],
                 response_format={
                     "type": "json_schema",
@@ -1794,6 +1914,45 @@ def _llamacpp_base_url() -> str:
     if cfg_url:
         return cfg_url.rstrip("/") + "/v1"
     return LLAMACPP_DEFAULT_URL + "/v1"
+
+
+LLAMACPP_RUNTIME_PINNED: tuple[str, ...] = (
+    "https://github.com/ggml-org/llama.cpp/releases/download/"
+    "b10327/llama-b10327-bin-win-cpu-x64.zip",
+    "https://github.com/ggml-org/llama.cpp/releases/download/"
+    "b10326/llama-b10326-bin-win-cpu-x64.zip",
+)
+
+
+def _llamacpp_runtime_urls() -> list[str]:
+    """Return candidate download URLs for the llama.cpp Windows CPU runtime.
+
+    Resolves the latest release from GitHub's API and prefers its win-cpu-x64
+    zip (the SourceForge-style flexible approach mirrors ExifTool's resolver),
+    with pinned release builds as fallbacks so setup never hardcodes a version
+    that could go stale.
+
+    Returns:
+        List of candidate zip URLs, most-recent first.
+    """
+    urls: list[str] = []
+    try:
+        resp = requests.get(
+            "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
+            timeout=10,
+        )
+        data = resp.json()
+        tag = data.get("tag_name", "")
+        for asset in data.get("assets", []):
+            name = asset.get("name", "")
+            if f"{tag}-bin" in name and "-win-cpu-x64" in name and name.endswith(".zip"):
+                download_url = asset.get("browser_download_url", "")
+                if download_url:
+                    urls.append(download_url)
+    except Exception:
+        pass
+    urls.extend(url for url in LLAMACPP_RUNTIME_PINNED if url)
+    return urls
 
 
 class LlamaCppProvider(OpenAIProvider):
@@ -2957,6 +3116,115 @@ def download_file(url: str, dest: Path, progress_callback: Callable[[int, int], 
         if tmp.exists():
             tmp.unlink(missing_ok=True)
         raise
+
+
+# -----------------------------------------------------------------------------
+# 5d. LLAMA.CPP RUNTIME INSTALL + LIFECYCLE (wizard-driven default runtime)
+# -----------------------------------------------------------------------------
+
+# GGUF files are stored under the user data dir so they survive app re-installs.
+LLAMACPP_MODELS_DIR = USER_DATA_DIR / "models"
+LLAMACPP_SERVER_EXE = "llama-server.exe"
+
+LLAMACPP_GGUF_FILENAMES: dict[str, tuple[str, str]] = {
+    "qwen2.5vl:7b": ("qwen2-vl-7b-q4_k_m.gguf", "mmproj-qwen2-vl-7b-q8_0.gguf"),
+    "qwen2.5vl:2b": ("qwen2-vl-2b-q4_k_m.gguf", "mmproj-qwen2-vl-2b-q8_0.gguf"),
+    "qwen2.5:3b": ("qwen2.5-3b-instruct-q4_k_m.gguf", ""),
+}
+
+
+def _llamacpp_gguf_paths(model_name: str) -> tuple[Path, Path]:
+    """Return (gguf_path, mmproj_path) where a GGUF catalog model lives.
+
+    Args:
+        model_name: Catalog model name (e.g. 'qwen2.5vl:7b').
+
+    Returns:
+        (Path to the main GGUF, Path to the mmproj — empty Path when the
+        model is text-only).
+    """
+    gguf_file, mmproj_file = LLAMACPP_GGUF_FILENAMES.get(
+        model_name, (model_name.replace(":", "-") + ".gguf", "")
+    )
+    mmproj = LLAMACPP_MODELS_DIR / mmproj_file if mmproj_file else Path("")
+    return LLAMACPP_MODELS_DIR / gguf_file, mmproj
+
+
+def configure_llamacpp_install(model_name: str, gguf_path: Path,
+                               mmproj_path: Path | None = None,
+                               make_default: bool = True) -> None:
+    """Record a wizard-installed llama.cpp runtime in config and persist it.
+
+    Args:
+        model_name: Model name the server advertises (e.g. 'qwen2.5vl:7b').
+        gguf_path: Path to the loaded GGUF model file.
+        mmproj_path: Optional vision-projector file (mmproj).
+        make_default: Also make the app start on the llama.cpp runtime with
+            this as its active model.
+    """
+    config["model"]["llamacpp"] = {
+        "base_url": LLAMACPP_DEFAULT_URL,
+        "gguf_name": model_name,
+        "gguf_path": str(gguf_path),
+        "mmproj_path": str(mmproj_path) if mmproj_path else "",
+    }
+    providers = config["model"].setdefault("providers", {})
+    providers.setdefault("llamacpp", {})
+    providers["llamacpp"]["models"] = [model_name]
+    providers["llamacpp"]["selected_model"] = model_name
+    if make_default:
+        config["model"]["name"] = model_name
+        config["model"]["text_model"] = model_name
+        config["model"]["last_provider"] = "llamacpp"
+    save_config()
+
+
+def ensure_llamacpp_server(timeout: int = 40) -> bool:
+    """Start the configured llama.cpp server if it is not already running.
+
+    Uses the model paths recorded by ``configure_llamacpp_install``. Returns
+    True when a server answers on the API port (either already running or
+    freshly started).
+
+    Args:
+        timeout: Maximum seconds to wait for the server to come up.
+    """
+    if _llamacpp_server_running():
+        return True
+    exe = _resolve_binary_path(LLAMACPP_SERVER_EXE)
+    if not exe:
+        bundled = USER_DATA_DIR / "bin" / LLAMACPP_SERVER_EXE
+        if bundled.exists():
+            exe = str(bundled)
+    if not exe:
+        return False
+    llamacpp = config.get("model", {}).get("llamacpp", {})
+    gguf = llamacpp.get("gguf_path", "")
+    if not gguf or not Path(gguf).exists():
+        return False
+    args = [exe, "-m", gguf, "--host", "127.0.0.1", "--port", "8080",
+            "-c", str(MODEL_NUM_CTX)]
+    alias = llamacpp.get("gguf_name", "")
+    if alias:
+        args += ["--alias", alias]
+    mmproj = llamacpp.get("mmproj_path", "")
+    if mmproj and Path(mmproj).exists():
+        args += ["--mmproj", mmproj]
+    try:
+        subprocess.Popen(
+            args,
+            creationflags=_NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        import time as _time
+        deadline = _time.time() + timeout
+        while _time.time() < deadline:
+            if _llamacpp_server_running():
+                return True
+            _time.sleep(1)
+    except Exception:
+        return False
+    return False
 
 
 def wait_for_ollama_service(timeout: int = 120) -> bool:

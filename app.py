@@ -45,6 +45,7 @@ from engine import (
     check_ollama_health,
     config,
     detect_hw_accel,
+    ensure_llamacpp_server,
     execute_commit,
     export_staging_csv,
     extract_text_from_file,
@@ -434,7 +435,10 @@ with st.sidebar:
         st.session_state.provider_info = "ollama"
 
     env_now = st.session_state.env_check
-    llamacpp_visible = bool(env_now and env_now.get("llamacpp_running"))
+    # The llama.cpp engine is offered when its server is running OR when the
+    # setup wizard has installed it (gguf on disk) but the server is idle.
+    llamacpp_installed = bool(config.get("model", {}).get("llamacpp", {}).get("gguf_path"))
+    llamacpp_visible = bool(env_now and env_now.get("llamacpp_running")) or llamacpp_installed
 
     engine_labels = ["Local (Ollama)"]
     engine_ids = ["ollama"]
@@ -455,6 +459,9 @@ with st.sidebar:
     # Persist the engine switch so analysis uses the same provider. Skipped
     # while analysis runs so a mid-run radio click cannot break the rerun loop.
     if not analysis_active and new_provider != st.session_state.provider_info:
+        if new_provider == "llamacpp" and not (env_now or {}).get("llamacpp_running"):
+            ensure_llamacpp_server()
+            st.session_state.env_check = None
         switch_ai_provider(new_provider)
         st.session_state.provider_info = new_provider
 
