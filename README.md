@@ -21,7 +21,7 @@ This is the tool that fixes it.
 - **Drop in your mess → get back order.** One click starts the AI. It watches every frame, reads every document, transcribes every voice note, and figures out what each file is.
 - **Names you'd actually search for.** `IMG_5821.jpg` becomes `quran_carving_ornate_detail.jpg`. `Recording_004.m4a` becomes `voice_note_team_standup_notes.m4a`.
 - **Metadata written *into* the file — not a spreadsheet you'll ignore.** DaVinci Resolve, Premiere Pro, and Windows Explorer read it natively. Search "drone" and everything drone-related shows up.
-- **Private by design.** Everything runs locally with Ollama. Your family videos and client work never leave your computer.
+- **Private by design.** Everything runs locally on a bundled AI runtime — llama.cpp on fresh installs, or your existing Ollama install when detected. Your family videos and client work never leave your computer.
 - **Safe.** Nothing is touched until you hit Commit, and one click on **Undo** reverses the whole batch.
 
 ---
@@ -61,7 +61,7 @@ This is the tool that fixes it.
 ## Getting started (60 seconds)
 
 1. Download `AIMediaRenamer.exe` from the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest) — no installation, no accounts.
-2. Double-click. It sets up its own AI engine on first launch (a guided wizard walks you through it).
+2. Double-click. It sets up its own AI engine on first launch — a guided wizard downloads the llama.cpp runtime (~18 MB) and a vision model for you. Already have Ollama? It's detected and reused.
 3. Drop in your files → **Run AI Analysis** → review → **Commit**.
 
 That's it. A folder that took an afternoon to organize by hand is done while you make tea.

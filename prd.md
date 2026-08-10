@@ -58,7 +58,8 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] Stop Analysis button (immediate abort, preserves already-analyzed assets)
 - [x] Progress bar during extraction and analysis phases
 - [x] 8 AI prompt profiles (General Balanced, General B-Roll, Cinematography, Motion Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming, Audio Files) + Custom — selectable in web UI (main interface, before analysis) and CLI via `--profile`
-- [x] Multi-provider AI support (Ollama, OpenAI, Anthropic, Groq, OpenRouter) with provider abstraction layer — cloud providers disabled in UI, untested
+- [x] Multi-provider AI support (Ollama, llama.cpp, OpenAI, Anthropic, Groq, OpenRouter) with provider abstraction layer — cloud providers disabled in UI, untested
+- [x] llama.cpp as default local runtime for new installs — wizard downloads `llama-server` + a GGUF vision/text model (verified HuggingFace URLs, `hf-mirror` fallback); existing Ollama installs are detected and reused
 - [x] Auto-detect available Ollama models via `ollama.list()` and populate dropdown
 - [x] "Re-analyze Selected" button (replaced per-asset + Re-analyze All buttons)
 - [x] Ollama health check with status indicator in web UI
@@ -145,7 +146,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 |---|---|---|
 | **Frontend / UI** | Streamlit | Fastest path to interactive data-editor UI with file upload, progress bars, and charts |
 | **Backend** | Pure Python 3.10+ | Single-process, no web framework needed beyond Streamlit |
-| **AI Model / Providers** | Ollama (primary), OpenAI, Anthropic, LM Studio | Local + cloud vision models via abstracted provider interface. Multiple prompt profiles per use case |
+| **AI Model / Providers** | Ollama + llama.cpp (local, primary), OpenAI, Anthropic, LM Studio | Local + cloud vision models via abstracted provider interface. llama.cpp is the default runtime for fresh installs (Ollama reused when detected). Multiple prompt profiles per use case |
 | **Metadata Engine** | ExifTool 12+ | Industry standard for cross-format metadata; `-stay_open` mode for persistent subprocess performance |
 | **Media Decoding** | FFmpeg 6+ | Hardware-accelerated frame extraction, downscaling, video storyboard grid generation |
 | **Desktop Bundler** | PyInstaller 6+ | Single-file executable distribution; `_resolve_binary_path()` for bundled FFmpeg/ExifTool |
@@ -155,11 +156,11 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 | **OS** | Windows 10/11 | Primary target (NLE ecosystem). Linux/macOS secondary (compatible but untested) |
 
 ### Assumptions
-- **AI provider available.** For Ollama/LM Studio: app must be running locally. For OpenAI/Anthropic: valid API key required. Auto-detection of available Ollama models at startup. First-time users can select from 4 model options with size/quality tradeoff descriptions.
+- **AI provider available.** For Ollama/llama.cpp: the app must be running locally. For OpenAI/Anthropic: valid API key required. Auto-detection of available Ollama models at startup, and auto-start of the llama.cpp daemon when installed. First-time users can select from 4 model options with size/quality tradeoff descriptions.
 - **ExifTool and FFmpeg are in `PATH`.** Not bundled. Users install them independently. The EXE bundles both.
 - **Single user per session.** No state shared between browser tabs or users.
 - **Files are under 4 GB typical.** `LargeFileSupport=1` is enabled in ExifTool args for oversized files, but very large files (>10 GB) may cause longer processing times.
-- **Network reliability for Ollama.** AI inference runs over localhost HTTP; transient failures are retried once.
+- **Network reliability for the local AI.** Inference runs over localhost HTTP (Ollama `11434`, llama.cpp `8080`); transient failures are retried once.
 - **No concurrent file modification.** The app assumes exclusive access to files during the commit phase. External modifications during processing may cause `PermissionError`.
 - **Windows file system.** Paths use backslashes, `PermissionError` is the primary failure mode (locked by Explorer preview pane), `Path.rename()` works within the same drive only.
 - **Privacy-first audio.** Audio transcription runs locally via `faster-whisper` (CTranslate2). No cloud API calls for audio processing.

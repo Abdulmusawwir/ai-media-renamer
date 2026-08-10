@@ -8,7 +8,7 @@ Automatically organize, rename, and tag video, image, document, and audio assets
 
 ### Download the EXE
 
-Pre-built binaries are available on the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest). The EXE is self-contained — it checks for FFmpeg, ExifTool, and Ollama on first run and downloads any missing components automatically.
+Pre-built binaries are available on the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest). The EXE is self-contained — on first run it checks for FFmpeg, ExifTool, and a local AI runtime and downloads any missing components automatically (including the ~18 MB llama.cpp runtime and a GGUF vision model when Ollama isn't already installed).
 
 ### Building from Source
 
@@ -29,7 +29,9 @@ streamlit run app.py
 ```
 
 ### Prerequisites
-- **Ollama** with a vision model (e.g. `qwen2.5vl:7b`) — [ollama.com](https://ollama.com)
+- **A local AI runtime** — one of:
+  - **llama.cpp** (default for fresh installs) — `llama-server` + a GGUF vision model (7B Qwen2-VL, or lighter 2B on CPU), auto-downloaded by the setup wizard; documents/audio route to a compact text model (Qwen2.5-3B)
+  - **Ollama** with a vision model (e.g. `qwen2.5vl:7b`) — [ollama.com](https://ollama.com); auto-detected and reused when already installed
 - **ExifTool 12+** — [exiftool.org](https://exiftool.org)
 - **FFmpeg 6+** (including ffprobe) — [ffmpeg.org](https://ffmpeg.org)
 - **fpcalc** (Chromaprint) — for audio fingerprint duplicate detection (auto-downloaded by EXE)
@@ -40,7 +42,7 @@ streamlit run app.py
 
 - **No more "final_v3_actual_use_this.mp4"** — every file gets a descriptive, consistent name
 - **Metadata written to the file** — not a separate spreadsheet. Your NLE reads it natively
-- **Works offline** — uses local Ollama models, no cloud API needed
+- **Works offline** — uses a local runtime (llama.cpp on fresh installs, or Ollama), no cloud API needed
 - **Bulk operations** — apply categories, edit names, filter, sort — all in one table
 - **Safe** — originals are preserved, dry-run mode shows what will happen before anything changes
 - **Duplicate detection** — visual hash (pHash), document hash (SHA-256), and audio fingerprint (Chromaprint) catch near-identical files before they clutter your library
@@ -51,7 +53,7 @@ streamlit run app.py
 
 ### AI Analysis
 - **8 prompt profiles** — General Balanced, General B-Roll, Cinematography, Motion & Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming, Audio Files, and Custom
-- **6 AI providers** — Ollama (local), Gemini, OpenAI, Anthropic, Groq, OpenRouter
+- **2 local + 5 cloud AI providers** — Ollama (local), llama.cpp (local, default for new installs), Gemini, OpenAI, Anthropic, Groq, OpenRouter
 - **Single-frame extraction** — one representative frame per video for accurate analysis
 - **Image analysis** — downscaled in memory, no disk writes
 - **Audio transcription** — local Whisper transcription for audio files and video audio tracks
@@ -143,7 +145,7 @@ Interactive mode per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze`, `[E]di
 - **Commit** — Write metadata (XMP, QuickTime, EXIF, IPTC, ID3, Vorbis) and optionally sort into categorized subfolders
 - **Undo/Rollback** — Revert the last commit batch from the Analytics tab
 - **Analytics Dashboard** — Auto-refreshing stats cards, Plotly charts, filterable event timeline from JSONL logs, Reset All button
-- **Sidebar** — Provider (Ollama) + model selection, API key management, environment health check indicators
+- **Sidebar** — Engine (Ollama / llama.cpp) + model selection, API key management, environment health check indicators
 
 ### Output Directory
 
@@ -197,7 +199,7 @@ Compatible with **DaVinci Resolve** and **Adobe Premiere Pro**.
 - **`prompt_profiles`** — 8 AI prompt profiles with per-profile allowed categories
 - **`allowed_categories`** — 56 taxonomy entries (including audio categories)
 - **`cinematography`** — Reference tables for shot types, camera moves, lighting, color palettes, composition, moods
-- **`model`** — Provider, model name, temperature, num_ctx, keep_alive
+- **`model`** — Engine (Ollama / llama.cpp), model name, text model, temperature, num_ctx, keep_alive, runtime config (llama.cpp base URL + GGUF paths)
 - **`preview`** — Image max edge (1024px), video frame scale (300px)
 - **`naming_templates`** — Preset filename patterns with `{category}`, `{topic}`, `{description}`, `{date}`
 - **`video_extensions`** / `image_extensions` / `document_extensions` / `audio_extensions` — Configurable file type lists
@@ -214,7 +216,7 @@ Events logged as JSON Lines to `logs/renamer_YYYY-MM-DD.jsonl`. Each line: times
 ## System Requirements
 
 - **Python 3.10+**
-- **Ollama** with a vision model (e.g. `qwen2.5vl:7b`)
+- **A local AI runtime** — llama.cpp (auto-installed by the wizard on fresh setups) or Ollama with a vision model (e.g. `qwen2.5vl:7b`)
 - **ExifTool 12+** in PATH
 - **FFmpeg 6+** (including ffprobe) in PATH
 - **fpcalc** (Chromaprint) — for audio fingerprint duplicate detection

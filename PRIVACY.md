@@ -19,7 +19,7 @@ AI Media Renamer is a **fully local** media management tool. All AI analysis, fi
 
 ## Data Security
 
-- **No data leaves your machine** — AI calls go directly from your app to your chosen provider (Ollama, OpenAI, Anthropic, etc.)
+- **No data leaves your machine** — AI calls go directly from your app to your chosen local runtime (llama.cpp or Ollama) or cloud provider (OpenAI, Anthropic, etc.); the llama.cpp and Ollama paths never make a network request
 - **No cookies, fingerprinting, or tracking**
 - **No third-party analytics or telemetry services**
 - **Logs** are written locally to `%APPDATA%/ai-media-renamer/logs/` and are never transmitted
