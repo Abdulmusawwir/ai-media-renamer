@@ -3,6 +3,7 @@ recommendations, runtime URL resolution, config wiring, server lifecycle, and
 the OpenAI-compatible text/vision surface used by LlamaCppProvider."""
 
 import copy
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,8 +24,10 @@ class TestLlamaCppGguCatalog:
             assert m["name"] and ":" in m["name"]
             assert m["label"] and m["size"] and m["desc"]
             assert m["url"].startswith("https://")
+            assert re.fullmatch(r"[0-9a-f]{64}", m["sha256"])
             if m["kind"] == "vision":
                 assert m["mmproj_url"].startswith("https://")
+                assert re.fullmatch(r"[0-9a-f]{64}", m["mmproj_sha256"])
 
     def test_vision_aliases_are_vision(self):
         for m in engine.LLAMACPP_GGUF_CATALOG:
@@ -98,6 +101,130 @@ class TestLlamaRuntimeUrls:
         urls = engine._llamacpp_runtime_urls()
         assert urls[0] == "https://github.com/x/win-cpu.zip"
         assert any("cpu" in u for u in urls)
+
+
+class TestLlamaRuntimeDigests:
+    def test_offline_includes_pinned_digests(self, monkeypatch):
+        def boom(url, timeout=10):
+            raise OSError("offline")
+        monkeypatch.setattr(engine.requests, "get", boom)
+        digests = engine._llamacpp_runtime_digests()
+        assert digests
+        for url, digest in digests.items():
+            assert url.startswith("https://")
+            assert re.fullmatch(r"[0-9a-f]{64}", digest)
+
+    def test_pinned_digests_match_pinned_urls(self):
+        digests = engine._llamacpp_runtime_digests()
+        for url in engine.LLAMACPP_RUNTIME_PINNED:
+            assert re.fullmatch(r"[0-9a-f]{64}", digests[url])
+
+    def test_latest_digest_read_from_api(self, monkeypatch):
+        def fake_get(url, timeout=10):
+            return _FakeReleases({"tag_name": "b10360", "assets": [
+                {"name": "llama-b10360-bin-win-cpu-x64.zip",
+                 "browser_download_url": "https://github.com/x/latest.zip",
+                 "digest": "sha256:62eed0fd4fbe7638f7db684259babcfc1e5a2892cbd5c9ebe149d196e3ff5ed5"},
+                {"name": "llama-b10360-bin-win-cuda.zip",
+                 "browser_download_url": "https://github.com/x/cuda.zip",
+                 "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+            ]})
+        monkeypatch.setattr(engine.requests, "get", fake_get)
+        digests = engine._llamacpp_runtime_digests()
+        assert digests["https://github.com/x/latest.zip"] == (
+            "62eed0fd4fbe7638f7db684259babcfc1e5a2892cbd5c9ebe149d196e3ff5ed5")
+
+    def test_api_missing_digest_skips_url(self, monkeypatch):
+        def fake_get(url, timeout=10):
+            return _FakeReleases({"tag_name": "b10360", "assets": [
+                {"name": "llama-b10360-bin-win-cpu-x64.zip",
+                 "browser_download_url": "https://github.com/x/latest.zip"},
+            ]})
+        monkeypatch.setattr(engine.requests, "get", fake_get)
+        digests = engine._llamacpp_runtime_digests()
+        assert "https://github.com/x/latest.zip" not in digests
+        assert digests  # pinned digests still present
+
+
+class TestSha256Verify:
+    def test_sha256_file_matches_expected(self, tmp_path):
+        path = tmp_path / "data.bin"
+        path.write_bytes(b"hello world")
+        assert engine.sha256_file(path) == (
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
+
+    def test_verify_sha256_ok(self, tmp_path):
+        path = tmp_path / "data.bin"
+        path.write_bytes(b"hello world")
+        digest = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        engine.verify_sha256(path, digest, "test")
+
+    def test_verify_sha256_mismatch_raises(self, tmp_path):
+        path = tmp_path / "data.bin"
+        path.write_bytes(b"hello world!")
+        with pytest.raises(RuntimeError, match="SHA-256 mismatch"):
+            engine.verify_sha256(
+                path,
+                "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+                "test")
+
+    def test_verify_sha256_invalid_digest_raises(self, tmp_path):
+        path = tmp_path / "data.bin"
+        path.write_bytes(b"hello")
+        with pytest.raises(RuntimeError, match="invalid expected SHA-256"):
+            engine.verify_sha256(path, "not-a-digest", "test")
+
+
+class TestDownloadFile:
+    def test_rejects_plain_http(self, tmp_path):
+        with pytest.raises(ValueError, match="insecure transport"):
+            engine.download_file("http://example.com/x.zip", tmp_path / "x.zip")
+
+    def test_checksum_mismatch_removes_file(self, tmp_path, monkeypatch):
+        dest = tmp_path / "x.zip"
+        calls = []
+
+        class _FakeResp:
+            headers = {"content-length": "3"}
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size=8192):
+                return [b"abc"]
+
+        def fake_get(url, stream=True, timeout=30):
+            calls.append(url)
+            return _FakeResp()
+
+        monkeypatch.setattr(engine.requests, "get", fake_get)
+        with pytest.raises(RuntimeError, match="SHA-256 mismatch"):
+            engine.download_file(
+                "https://example.com/x.zip", dest,
+                expected_sha256="b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
+        assert not dest.exists()
+        assert not dest.with_suffix(".part").exists()
+
+    def test_checksum_match_succeeds(self, tmp_path, monkeypatch):
+        dest = tmp_path / "x.zip"
+        data = b"hello world"
+
+        class _FakeResp:
+            headers = {"content-length": str(len(data))}
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size=8192):
+                return [data]
+
+        monkeypatch.setattr(engine.requests, "get",
+                            lambda url, stream=True, timeout=30: _FakeResp())
+        ok = engine.download_file(
+            "https://example.com/x.zip", dest,
+            expected_sha256="b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
+        assert ok is True
+        assert dest.read_bytes() == data
 
 
 # ---------------------------------------------------------------------------

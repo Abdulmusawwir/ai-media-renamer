@@ -54,6 +54,41 @@ class TestExiftoolDownloadUrls:
         )
 
 
+class TestExiftoolExpectedSha256:
+    def test_parses_sha2_line(self, monkeypatch):
+        class _FakeResp:
+            text = (
+                "SHA2-256(exiftool-13.59_64.zip)= "
+                "44b512b25af500724ba579d0a53c8fc5851628b692dd5e5d94ae4a15c2cba9ec\n"
+                "SHA1(exiftool-13.59_64.zip)= 022b902bb3d01b171d5108e2c4be59491eb64444\n"
+            )
+        monkeypatch.setattr(bootstrap.requests, "get", lambda url, timeout: _FakeResp())
+        url = ("https://sourceforge.net/projects/exiftool/files/"
+               "exiftool-13.59_64.zip/download")
+        assert bootstrap._exiftool_expected_sha256(url) == (
+            "44b512b25af500724ba579d0a53c8fc5851628b692dd5e5d94ae4a15c2cba9ec")
+
+    def test_returns_none_when_checksum_fetch_fails(self, monkeypatch):
+        def _boom(url, timeout):
+            raise OSError("offline")
+        monkeypatch.setattr(bootstrap.requests, "get", _boom)
+        url = ("https://sourceforge.net/projects/exiftool/files/"
+               "exiftool-13.59_64.zip/download")
+        assert bootstrap._exiftool_expected_sha256(url) is None
+
+    def test_returns_none_when_version_missing(self):
+        url = "https://sourceforge.net/projects/exiftool/files/exiftool-64.zip/download"
+        assert bootstrap._exiftool_expected_sha256(url) is None
+
+    def test_returns_none_when_line_missing(self, monkeypatch):
+        class _FakeResp:
+            text = "SHA1(exiftool-13.59_64.zip)= abc\n"
+        monkeypatch.setattr(bootstrap.requests, "get", lambda url, timeout: _FakeResp())
+        url = ("https://sourceforge.net/projects/exiftool/files/"
+               "exiftool-13.59_64.zip/download")
+        assert bootstrap._exiftool_expected_sha256(url) is None
+
+
 class TestIsValidZip:
     def test_real_zip_returns_true(self, tmp_path):
         path = tmp_path / "test.zip"

@@ -361,8 +361,10 @@ LLAMACPP_GGUF_CATALOG: list[dict[str, Any]] = [
                 "extraction and visual analysis.",
         "url": "https://huggingface.co/ggml-org/Qwen2-VL-7B-Instruct-GGUF/resolve/main/"
                "Qwen2-VL-7B-Instruct-Q4_K_M.gguf",
+        "sha256": "cba46c253ee6d1bd4c322f5a620cf69d65d644086c12df8dba59ebeff0768501",
         "mmproj_url": "https://huggingface.co/ggml-org/Qwen2-VL-7B-Instruct-GGUF/resolve/main/"
                       "mmproj-Qwen2-VL-7B-Instruct-Q8_0.gguf",
+        "mmproj_sha256": "97fbf5ee6c08b6fb34b9d589d2531d980714401b6150db6ee716fcf45b215bc4",
         "recommended_gpu": True,
     },
     {
@@ -371,8 +373,10 @@ LLAMACPP_GGUF_CATALOG: list[dict[str, Any]] = [
         "desc": "Lighter option \u2014 good quality, fast on CPU or low VRAM.",
         "url": "https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF/resolve/main/"
                "Qwen2-VL-2B-Instruct-Q4_K_M.gguf",
+        "sha256": "5745685d2e607a82a0696c1118e56a2a1ae0901da450fd9cd4f161c6b62867d7",
         "mmproj_url": "https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF/resolve/main/"
                       "mmproj-Qwen2-VL-2B-Instruct-Q8_0.gguf",
+        "mmproj_sha256": "a0ad91f00a7a80dcf84d719a61b00ee2e07b71794f4ee2dfa81a254621a8c418",
         "recommended_cpu": True,
     },
     {
@@ -382,7 +386,9 @@ LLAMACPP_GGUF_CATALOG: list[dict[str, Any]] = [
                 "and transcripts.",
         "url": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/"
                "qwen2.5-3b-instruct-q4_k_m.gguf",
+        "sha256": "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
         "mmproj_url": "",
+        "mmproj_sha256": "",
         "recommended_cpu": True, "recommended_gpu": True,
     },
 ]
@@ -1924,6 +1930,51 @@ LLAMACPP_RUNTIME_PINNED: tuple[str, ...] = (
 )
 
 
+# Published SHA-256 digests (from the GitHub release pages) for every pinned
+# runtime zip, so downloads are verifiable even when the GitHub API is down.
+LLAMACPP_RUNTIME_PINNED_DIGESTS: dict[str, str] = {
+    "https://github.com/ggml-org/llama.cpp/releases/download/"
+    "b10327/llama-b10327-bin-win-cpu-x64.zip":
+        "c2781932f9af623c9498a12f002f667d2b668f65e0f19b4401e12b5fe9f860c3",
+    "https://github.com/ggml-org/llama.cpp/releases/download/"
+    "b10326/llama-b10326-bin-win-cpu-x64.zip":
+        "dabff645e0948feae41ee6c8e46f2c12dffee96b0cb050e850da7d6b3932f56d",
+}
+
+
+def _llamacpp_runtime_digests() -> dict[str, str]:
+    """Return {download_url: sha256-hex} for every llama.cpp runtime candidate.
+
+    The latest release's digest is read from the GitHub API ``digest`` field
+    (published as ``sha256:<hex>``). Pinned fallbacks carry the verified
+    digests from ``LLAMACPP_RUNTIME_PINNED_DIGESTS`` so setup can verify them
+    even when the API is unreachable.
+
+    Returns:
+        Map of download URL to lowercase 64-char SHA-256 hex digest.
+    """
+    digests: dict[str, str] = {}
+    try:
+        resp = requests.get(
+            "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
+            timeout=10,
+        )
+        data = resp.json()
+        tag = data.get("tag_name", "")
+        for asset in data.get("assets", []):
+            name = asset.get("name", "")
+            if f"{tag}-bin" in name and "-win-cpu-x64" in name and name.endswith(".zip"):
+                url = asset.get("browser_download_url", "")
+                digest = asset.get("digest", "")
+                if url and digest.startswith("sha256:"):
+                    digests[url] = digest[len("sha256:"):].strip().lower()
+                break
+    except Exception:
+        pass
+    digests.update({k: v.lower() for k, v in LLAMACPP_RUNTIME_PINNED_DIGESTS.items()})
+    return digests
+
+
 def _llamacpp_runtime_urls() -> list[str]:
     """Return candidate download URLs for the llama.cpp Windows CPU runtime.
 
@@ -3081,21 +3132,72 @@ def check_for_updates() -> dict[str, Any]:
                 "download_url": "", "error": str(exc)}
 
 
-def download_file(url: str, dest: Path, progress_callback: Callable[[int, int], None] | None = None, chunk_size: int = 8192) -> bool:
-    """Download a file from a URL with optional progress callback.
+def sha256_file(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
+    """Return the lowercase hex SHA-256 digest of a file, streaming in chunks.
 
     Args:
-        url: HTTP(S) URL to download.
+        path: File to hash (may be large, e.g. multi-GB GGUF models).
+        chunk_size: Read chunk size in bytes.
+
+    Returns:
+        Lowercase 64-char hex digest.
+    """
+    hasher = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(chunk_size), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def verify_sha256(path: str | Path, expected: str, label: str) -> None:
+    """Raise if a file's SHA-256 digest does not match the published value.
+
+    Args:
+        path: File to verify.
+        expected: Expected lowercase 64-char hex digest (whitespace-tolerant).
+        label: Human-readable name for error messages.
+
+    Raises:
+        RuntimeError: When the computed digest differs from ``expected``.
+    """
+    expected = expected.strip().lower()
+    if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
+        raise RuntimeError(f"invalid expected SHA-256 digest for {label}: {expected}")
+    actual = sha256_file(path)
+    if actual != expected:
+        raise RuntimeError(
+            f"SHA-256 mismatch for {label}: expected {expected}, got {actual}"
+        )
+
+
+def download_file(url: str, dest: Path,
+                  progress_callback: Callable[[int, int], None] | None = None,
+                  chunk_size: int = 8192,
+                  expected_sha256: str | None = None) -> bool:
+    """Download a file from an HTTPS URL with optional progress callback.
+
+    HTTPS is mandatory: plain-HTTP downloads are rejected outright. When
+    ``expected_sha256`` is supplied, the downloaded bytes are verified against
+    the published digest before the file is accepted; a mismatch raises
+    ``RuntimeError`` and the partial file is removed.
+
+    Args:
+        url: HTTPS URL to download.
         dest: Destination file path.
         progress_callback: Optional function receiving (bytes_downloaded, total_bytes).
         chunk_size: Read chunk size in bytes.
+        expected_sha256: Published SHA-256 hex digest to verify against.
 
     Returns:
         True on successful download.
 
     Raises:
+        ValueError: When ``url`` is not HTTPS.
+        RuntimeError: When the downloaded file fails SHA-256 verification.
         requests exceptions on network failure.
     """
+    if not url.lower().startswith("https://"):
+        raise ValueError(f"Refusing to download over insecure transport: {url}")
     tmp = dest.with_suffix(".part")
     try:
         resp = requests.get(url, stream=True, timeout=30)
@@ -3111,6 +3213,12 @@ def download_file(url: str, dest: Path, progress_callback: Callable[[int, int], 
                     if progress_callback and total:
                         progress_callback(downloaded, total)
         tmp.rename(dest)
+        if expected_sha256:
+            try:
+                verify_sha256(dest, expected_sha256, dest.name)
+            except Exception:
+                dest.unlink(missing_ok=True)
+                raise
         return True
     except Exception:
         if tmp.exists():

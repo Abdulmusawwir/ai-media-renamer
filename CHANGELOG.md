@@ -1,5 +1,16 @@
 # Changelog
 
+## [v1.6.3] — 2026-08-11
+
+### Security
+- **Supply-chain hardening for bootstrap downloads (Phase AI 20.1):** every binary the wizard fetches — FFmpeg, ExifTool, the llama.cpp runtime, and GGUF models — is now verified against its published SHA-256 digest before use. `download_file()` rejects plain-HTTP URLs outright and deletes any file that fails checksum verification. Digests come from the publishers themselves: gyan.dev's `.sha256` file for FFmpeg, exiftool.org's per-version checksums file for ExifTool, the GitHub release API `digest` field plus pinned fallback digests for llama.cpp, and HuggingFace LFS OIDs baked into the GGUF catalog. A build with no published digest is skipped, never installed.
+- **Dependency audit (Phase AI 20.1):** `cryptography>=50.0.0` floor added for PYSEC-2026-3552 (transitive dep of pywebview); `requirements.lock` now freezes exact build versions.
+
+### Code Quality
+- **15 new tests** (SHA-256 helpers, HTTPS enforcement, checksum mismatch handling, digest resolvers, ExifTool checksum parsing); 305 total, all passing. Ruff unchanged (pre-existing baseline only).
+
+---
+
 ## [v1.6.2] — 2026-08-08
 
 ### New

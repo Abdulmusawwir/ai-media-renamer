@@ -10,6 +10,8 @@ anthropic>=0.30.0
 keyring>=24.0.0
 pyinstaller>=6.0
 pywebview>=4.0
+# transitive dep of pywebview; pinned floor to the version fixing PYSEC-2026-3552
+cryptography>=50.0.0
 rich>=13.0.0
 imagehash>=4.3.0
 pytest-cov>=4.0

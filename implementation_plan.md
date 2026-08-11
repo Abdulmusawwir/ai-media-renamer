@@ -777,9 +777,9 @@
 > Requested add-on: full security audit of the shipped app (EXE, web UI, CLI). Every item below is unstarted — plan only.
 
 ### 20.1 Dependency & supply-chain audit
-- [ ] Run `pip-audit` (or OSV-scanner) against `requirements.txt`; fix or document every reported CVE
-- [ ] Freeze exact versions into `requirements.lock` (`pip freeze`) so builds are reproducible and auditable
-- [ ] Bootstrap binary downloads (ffmpeg, exiftool, model files): enforce HTTPS-only and verify a published SHA-256 checksum before use — reject mismatches instead of proceeding
+- [x] Run `pip-audit` (or OSV-scanner) against `requirements.txt`; fix or document every reported CVE — `cryptography>=50.0.0` floor added for PYSEC-2026-3552 (transitive dep of pywebview)
+- [x] Freeze exact versions into `requirements.lock` (`pip freeze`) so builds are reproducible and auditable
+- [x] Bootstrap binary downloads (ffmpeg, exiftool, model files): enforce HTTPS-only and verify a published SHA-256 checksum before use — reject mismatches instead of proceeding
 
 ### 20.2 Secrets management hardening
 - [ ] Audit every log/event/error path: API keys must never reach `config.json`, JSONL logs, telemetry events, or exception messages — add redaction in `log_event()` and `track_event()`

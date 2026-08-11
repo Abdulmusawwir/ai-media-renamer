@@ -27,6 +27,7 @@ from engine import (
     SETUP_USE_CASES,
     VERSION,
     _llamacpp_gguf_paths,
+    _llamacpp_runtime_digests,
     _llamacpp_runtime_urls,
     _llamacpp_server_running,
     _resolve_binary_path,
@@ -370,6 +371,37 @@ def _exiftool_download_urls() -> list[str]:
     return urls
 
 
+def _exiftool_expected_sha256(url: str) -> str | None:
+    """Return the published SHA-256 digest for an ExifTool zip URL, or None.
+
+    The digest is read from exiftool.org's ``checksums-<ver>.txt`` file, which
+    lists ``SHA2-256(exiftool-<ver>_64.zip)= <hex>``. The version is derived
+    from the zip filename embedded in the SourceForge URL. Returns None when
+    the version cannot be derived or the checksum file is unavailable.
+    """
+    match = re.search(r"exiftool-(\d+\.\d+)_64\.zip", url)
+    if not match:
+        return None
+    ver = match.group(1)
+    try:
+        resp = requests.get(f"https://exiftool.org/checksums-{ver}.txt", timeout=10)
+        checksum_line = next(
+            (
+                line for line in resp.text.splitlines()
+                if f"SHA2-256(exiftool-{ver}_64.zip)=" in line
+            ),
+            "",
+        )
+        if not checksum_line:
+            return None
+        digest = checksum_line.split("=", 1)[1].strip().lower()
+        if re.fullmatch(r"[0-9a-f]{64}", digest):
+            return digest
+    except Exception:
+        pass
+    return None
+
+
 def _extract_exiftool(zip_path: Path) -> bool:
     """Extract the ExifTool Windows zip and install exiftool.exe + support files.
 
@@ -426,9 +458,14 @@ def _install_exiftool(win) -> None:
     last_err = None
     for url in _exiftool_download_urls():
         try:
+            expected_sha256 = _exiftool_expected_sha256(url)
+            if not expected_sha256:
+                raise RuntimeError(
+                    "no published SHA-256 checksum available for this build")
             zip_dest.unlink(missing_ok=True)
             download_file(url, zip_dest,
-                          progress_callback=lambda d, t: _progress_callback(d, t, win, "ExifTool"))
+                          progress_callback=lambda d, t: _progress_callback(d, t, win, "ExifTool"),
+                          expected_sha256=expected_sha256)
             if not _is_valid_zip(zip_dest):
                 raise RuntimeError("downloaded file is not a valid ZIP archive")
             if not _extract_exiftool(zip_dest):
@@ -463,9 +500,20 @@ def _install_ffmpeg(win) -> None:
 
     zip_dest = CACHE_DIR / "ffmpeg.zip"
     try:
+        resp = requests.get(
+            "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256",
+            timeout=10,
+        )
+        resp.raise_for_status()
+        match = re.search(r"[0-9a-f]{64}", resp.text.strip())
+        if not match:
+            raise RuntimeError("could not read published SHA-256 checksum from gyan.dev")
+        expected_sha256 = match.group(0)
+
         download_file("https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
                       zip_dest,
-                      progress_callback=lambda d, t: _progress_callback(d, t, win, "FFmpeg"))
+                      progress_callback=lambda d, t: _progress_callback(d, t, win, "FFmpeg"),
+                      expected_sha256=expected_sha256)
         if not _is_valid_zip(zip_dest):
             raise RuntimeError("downloaded file is not a valid ZIP archive")
         extract_dir = CACHE_DIR / "ffmpeg_extracted"
@@ -513,11 +561,17 @@ def _install_llamacpp_runtime(win, step: int) -> None:
     win.update()
 
     last_err = None
+    digests = _llamacpp_runtime_digests()
     for url in _llamacpp_runtime_urls():
         try:
+            expected_sha256 = digests.get(url, "").strip().lower()
+            if not expected_sha256:
+                raise RuntimeError(
+                    "no published SHA-256 checksum available for this runtime build")
             LLAMACPP_ZIP_CACHE.unlink(missing_ok=True)
             download_file(url, LLAMACPP_ZIP_CACHE,
-                          progress_callback=lambda d, t: _progress_callback(d, t, win, "llama.cpp"))
+                          progress_callback=lambda d, t: _progress_callback(d, t, win, "llama.cpp"),
+                          expected_sha256=expected_sha256)
             if not _is_valid_zip(LLAMACPP_ZIP_CACHE):
                 raise RuntimeError("downloaded file is not a valid ZIP archive")
             extract_dir = CACHE_DIR / "llamacpp_extracted"
@@ -552,8 +606,19 @@ def _install_llamacpp_runtime(win, step: int) -> None:
     time.sleep(5)
 
 
-def _download_hf_with_mirror(url: str, dest: Path, win, label: str) -> None:
-    """Download a HuggingFace file, falling back to the hf-mirror.com host."""
+def _download_hf_with_mirror(url: str, dest: Path, win, label: str,
+                             expected_sha256: str | None = None) -> None:
+    """Download a HuggingFace file, falling back to the hf-mirror.com host.
+
+    Args:
+        url: HTTPS HuggingFace resolve URL.
+        dest: Destination file path.
+        win: Wizard window (for progress updates).
+        label: Human-readable download label.
+        expected_sha256: Published SHA-256 digest to verify against. When set,
+            a mismatching download is rejected (the mirror is only retried for
+            transport failures, never for checksum mismatches).
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     last_err = None
     for host in ("huggingface.co", "hf-mirror.com"):
@@ -566,9 +631,13 @@ def _download_hf_with_mirror(url: str, dest: Path, win, label: str) -> None:
         try:
             dest.unlink(missing_ok=True)
             download_file(candidate, dest,
-                          progress_callback=lambda d, t: _progress_callback(d, t, win, label))
+                          progress_callback=lambda d, t: _progress_callback(d, t, win, label),
+                          expected_sha256=expected_sha256)
             return
         except Exception as exc:
+            if expected_sha256 and "SHA-256 mismatch" in str(exc):
+                raise RuntimeError(
+                    f"Checksum verification failed for {label}: {exc}")
             last_err = exc
             continue
     raise RuntimeError(f"Download failed for {label}: {last_err}")
@@ -611,7 +680,8 @@ def _install_llamacpp_models(win, step: int, needs: set[str],
         win.set_progress(0)
         win.set_info("This is a large model \u2014 please wait.")
         win.update()
-        _download_hf_with_mirror(model["url"], gguf_path, win, model["label"])
+        _download_hf_with_mirror(model["url"], gguf_path, win, model["label"],
+                                 expected_sha256=model.get("sha256", ""))
         win.set_progress(100)
         win.set_info("")
 
@@ -621,7 +691,8 @@ def _install_llamacpp_models(win, step: int, needs: set[str],
         win.set_progress(0)
         win.set_info("Smaller companion file for image understanding.")
         win.update()
-        _download_hf_with_mirror(mmproj, mmproj_path, win, "Vision projector")
+        _download_hf_with_mirror(mmproj, mmproj_path, win, "Vision projector",
+                                 expected_sha256=model.get("mmproj_sha256", ""))
         win.set_progress(100)
         win.set_info("")
 
