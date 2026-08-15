@@ -7,9 +7,13 @@ import hashlib
 import json
 import logging
 import os
+import queue
+import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Callable
@@ -216,18 +220,26 @@ def save_config() -> None:
 def reload_config() -> None:
     """Reload config from disk and refresh all module-level globals."""
     global config, ALLOWED_CATEGORIES, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS, AUDIO_EXTENSIONS
-    global MODEL_NAME, MODEL_TEMPERATURE, MODEL_NUM_CTX, MODEL_KEEP_ALIVE
+    global MODEL_NAME, TEXT_MODEL_NAME, MODEL_TEMPERATURE, MODEL_NUM_CTX, MODEL_KEEP_ALIVE
     global EXTRACTION_WORKERS, DEFAULT_CASE_STYLE, DEFAULT_MAX_FILENAME_CHARS
     global NAMED_TEMPLATES, DEFAULT_TEMPLATE_STRING, PROMPT_PROFILES, CURRENT_PROVIDER
+    global IMAGE_PREVIEW_MAX_EDGE, VIDEO_GRID_SCALE, DOCUMENT_EXTENSIONS
     config = load_config()
     ALLOWED_CATEGORIES = config['allowed_categories']
     VIDEO_EXTENSIONS = config['video_extensions']
     IMAGE_EXTENSIONS = config['image_extensions']
     AUDIO_EXTENSIONS = config['audio_extensions']
+    DOCUMENT_EXTENSIONS = config.get('document_extensions', [
+        '.pdf', '.docx', '.doc', '.txt', '.md', '.rtf',
+        '.xlsx', '.csv', '.pptx',
+    ])
     MODEL_NAME = config['model']['name']
+    TEXT_MODEL_NAME = config['model'].get('text_model', 'qwen2.5:3b')
     MODEL_TEMPERATURE = config['model']['temperature']
     MODEL_NUM_CTX = config['model']['num_ctx']
     MODEL_KEEP_ALIVE = config['model']['keep_alive']
+    IMAGE_PREVIEW_MAX_EDGE = config['preview']['image_max_edge']
+    VIDEO_GRID_SCALE = config['preview']['video_grid_scale']
     EXTRACTION_WORKERS = _resolve_workers(config['preview'].get('extraction_workers', 0))
     DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'title_case')
     DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
@@ -236,7 +248,9 @@ def reload_config() -> None:
         "short": "{topic}_{description}",
         "editorial": "{date}_{topic}"
     })
-DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}")
+    DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}")
+    PROMPT_PROFILES = get_profile_labels()
+    CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
 
 # -----------------------------------------------------------------------------
 # 1b. SETUP / ONBOARDING (use-case → one-time dependency matrix)
@@ -545,11 +559,19 @@ def save_setup_profile(profile: list[str] | None = None, onboarded: bool = True,
 def save_api_key(provider_name: str, key: str) -> None:
     """Store an API key for a provider in the system keyring.
 
+    Fails closed: if the OS keychain cannot be reached, raises instead of
+    falling back to a plaintext file.
+
     Args:
         provider_name: Provider identifier (e.g. 'gemini', 'openai').
         key: API key string to store.
     """
-    keyring.set_password(KEYRING_SERVICE, provider_name, key)
+    try:
+        keyring.set_password(KEYRING_SERVICE, provider_name, key)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not reach the OS keychain to store the {provider_name} API key: {exc}"
+        ) from exc
 
 
 def load_api_key(provider_name: str) -> str:
@@ -561,7 +583,12 @@ def load_api_key(provider_name: str) -> str:
     Returns:
         The stored API key, or an empty string if not found.
     """
-    return keyring.get_password(KEYRING_SERVICE, provider_name) or ""
+    try:
+        return keyring.get_password(KEYRING_SERVICE, provider_name) or ""
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not reach the OS keychain to read the {provider_name} API key: {exc}"
+        ) from exc
 
 
 def delete_api_key(provider_name: str) -> None:
@@ -600,6 +627,42 @@ def setup_logging(verbose: bool = False) -> logging.Logger:
     return logger
 
 
+_SENSITIVE_VALUES: list[str] = []
+_QUERY_KEY_RE = re.compile(r"(?i)([?&](?:key|api_key|apikey|token|password)=)([^&#\s]+)")
+
+
+def register_secret(value: str | None) -> None:
+    """Register a secret (e.g. an API key) so it is redacted from logs and errors.
+
+    Kept in-memory only — never written to disk. Checked by :func:`_redact_sensitive`.
+    """
+    if value and value not in _SENSITIVE_VALUES:
+        _SENSITIVE_VALUES.append(value)
+
+
+def _redact_sensitive(text: str | None) -> str:
+    """Return ``text`` with known secrets and ``key=`` query parameters masked."""
+    if not text:
+        return text or ""
+    out = text
+    for secret in _SENSITIVE_VALUES:
+        if secret and secret in out:
+            out = out.replace(secret, "[REDACTED]")
+    out = _QUERY_KEY_RE.sub(r"\1[REDACTED]", out)
+    return out
+
+
+def _redact_recursive(value: Any) -> Any:
+    """Recursively redact secret-looking strings inside a JSON-like structure."""
+    if isinstance(value, dict):
+        return {k: _redact_recursive(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_recursive(v) for v in value]
+    if isinstance(value, str):
+        return _redact_sensitive(value)
+    return value
+
+
 def log_event(logger: Any, level: str, event: str, file_name: str | None = None, details: dict[str, Any] | None = None) -> None:
     """Write a structured JSON log entry.
 
@@ -614,10 +677,10 @@ def log_event(logger: Any, level: str, event: str, file_name: str | None = None,
         "timestamp": datetime.datetime.now().astimezone().isoformat(),
         "level": level,
         "event": event,
-        "file": file_name,
+        "file": _redact_sensitive(file_name),
     }
     if details:
-        record["details"] = details
+        record["details"] = _redact_recursive(details)
     msg = json.dumps(record)
     if level == "DEBUG":
         logger.debug(msg)
@@ -634,6 +697,13 @@ def log_event(logger: Any, level: str, event: str, file_name: str | None = None,
 # -----------------------------------------------------------------------------
 
 class ExifToolSession:
+    """Persistent (stay_open) ExifTool subprocess with timeout-protected reads.
+
+    A background daemon thread drains stdout into a queue so read calls cannot
+    block forever if ExifTool hangs or dies mid-session; every read is bounded
+    by ``_timeout`` seconds and raises on a dead process.
+    """
+
     def __init__(self) -> None:
         """Start a persistent ExifTool subprocess in stay_open mode."""
         try:
@@ -646,6 +716,39 @@ class ExifToolSession:
         except FileNotFoundError:
             print("Error: ExifTool is not installed or not in system PATH.")
             sys.exit(1)
+
+        self._timeout: float = 60.0
+        self._queue: queue.Queue[str | None] = queue.Queue()
+        self._reader = threading.Thread(target=self._read_loop, name="exiftool-reader", daemon=True)
+        self._reader.start()
+
+    def _read_loop(self) -> None:
+        """Drain ExifTool stdout into the queue until EOF."""
+        try:
+            for line in self.process.stdout:
+                self._queue.put(line)
+        except Exception:
+            pass
+        finally:
+            self._queue.put(None)  # EOF sentinel
+
+    def _read_until_ready(self) -> str:
+        """Read one response (until the ``{ready}`` marker) with a timeout."""
+        output = ""
+        deadline = time.monotonic() + self._timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"ExifTool did not respond within {self._timeout:.0f}s")
+            try:
+                line = self._queue.get(timeout=remaining)
+            except queue.Empty:
+                continue
+            if line is None:
+                raise OSError("ExifTool process closed its output stream unexpectedly")
+            if "{ready}" in line:
+                return output
+            output += line
 
     def execute(self, args: list[str]) -> str:
         """Send arguments to ExifTool and return the output.
@@ -660,19 +763,13 @@ class ExifToolSession:
             self.process.stdin.write(f"{arg}\n")
         self.process.stdin.write("-execute\n")
         self.process.stdin.flush()
-
-        output = ""
-        for line in self.process.stdout:
-            if "{ready}" in line:
-                break
-            output += line
-        return output
+        return self._read_until_ready()
 
     def execute_batch(self, all_args: list[list[str]]) -> list[str]:
-        """Send multiple file argument sets in a single -execute block.
+        """Run each argument set as its own -execute block, one output each.
 
-        Batches all metadata writes into one IPC round-trip instead of one
-        per file, reducing overhead from ~200ms x N to ~200ms total.
+        Keeps the persistent process (no re-spawn per file) but sends one
+        ``-execute`` per file so per-file ExifTool errors stay attributable.
 
         Args:
             all_args: List of argument lists, one per file. Each inner list
@@ -681,18 +778,14 @@ class ExifToolSession:
         Returns:
             List of ExifTool output strings, one per file argument set.
         """
+        outputs: list[str] = []
         for file_args in all_args:
             for arg in file_args:
                 self.process.stdin.write(f"{arg}\n")
-        self.process.stdin.write("-execute\n")
-        self.process.stdin.flush()
-
-        output = ""
-        for line in self.process.stdout:
-            if "{ready}" in line:
-                break
-            output += line
-        return [output]
+            self.process.stdin.write("-execute\n")
+            self.process.stdin.flush()
+            outputs.append(self._read_until_ready())
+        return outputs
 
     def close(self) -> None:
         """Shut down the persistent ExifTool subprocess."""
@@ -1355,6 +1448,8 @@ def _parse_ai_response(raw_text: str) -> tuple[dict[str, Any] | None, str | None
     for candidate in candidates:
         try:
             raw_dict = json.loads(candidate)
+            if not isinstance(raw_dict, dict):
+                continue
             try:
                 validated = AssetAnalysisResponse.model_validate(raw_dict)
                 return validated.model_dump(), None, None
@@ -1365,6 +1460,8 @@ def _parse_ai_response(raw_text: str) -> tuple[dict[str, Any] | None, str | None
 
     try:
         raw_dict = json.loads(clean_res)
+        if not isinstance(raw_dict, dict):
+            return None, 'json_parse_error', 'Model response was not a JSON object'
         return raw_dict, None, None
     except json.JSONDecodeError as exc:
         return None, 'json_parse_error', f'JSON decode failed: {exc}'
@@ -1469,6 +1566,8 @@ class AIProvider(ABC):
     def api_key(self, value: str) -> None:
         """Set the API key."""
         self._api_key = value
+        if value:
+            register_secret(value)
 
     def _parse_and_validate(self, raw_text: str) -> dict[str, Any]:
         """Parse raw AI text and validate required response keys.
@@ -1488,6 +1587,10 @@ class AIProvider(ABC):
         if 'new_filename' not in parsed:
             result['error'] = 'missing_keys'
             result['detail'] = "Response JSON is missing required key 'new_filename'"
+            return result
+        if 'tags' in parsed and not isinstance(parsed['tags'], list):
+            result['error'] = 'invalid_tags'
+            result['detail'] = "Response field 'tags' must be a list"
             return result
         result['ok'] = True
         result['data'] = parsed
@@ -1667,11 +1770,11 @@ class GeminiProvider(AIProvider):
             return self._parse_and_validate(raw_text)
         except requests.exceptions.RequestException as exc:
             result['error'] = 'gemini_api_error'
-            result['detail'] = f'Gemini API request failed: {exc}'
+            result['detail'] = _redact_sensitive(f'Gemini API request failed: {exc}')
             return result
         except Exception as exc:
             result['error'] = 'gemini_api_error'
-            result['detail'] = f'Unexpected Gemini error: {exc}'
+            result['detail'] = _redact_sensitive(f'Unexpected Gemini error: {exc}')
             return result
 
     def health_check(self) -> dict[str, Any]:
@@ -2157,9 +2260,10 @@ def _format_ai_error(ai_result: dict[str, Any], verbose: bool = False) -> str:
         'anthropic_api_error': detail,
     }
     msg = messages.get(error_type, detail)
+    msg = _redact_sensitive(msg)
     if verbose and ai_result.get('raw_response'):
         snippet = ai_result['raw_response'][:500]
-        msg += f"\n    [verbose] Raw model response: {snippet!r}"
+        msg += f"\n    [verbose] Raw model response: {_redact_sensitive(snippet)!r}"
     return msg
 
 
@@ -2235,6 +2339,21 @@ def _write_document_metadata(target_file: Path, asset: dict[str, Any]) -> bool:
     return False
 
 
+def _sanitize_metadata_value(value: Any) -> str:
+    """Sanitize an AI-controlled metadata value before building ExifTool args.
+
+    ExifTool reads one argument per line from ``-@`` stdin, so any ``\n`` in a
+    tag/summary/title value would inject an extra argument (e.g. ``-o evil`` or
+    ``-delete_original!``). Strip control chars, collapse whitespace, forbid a
+    leading ``-`` (option look-alike), and cap the length.
+    """
+    s = str(value if value is not None else "")
+    s = s.replace("\x00", "").replace("\r", " ").replace("\n", " ")
+    s = " ".join(s.split())
+    s = s.lstrip("-")
+    return s[:2048]
+
+
 def _build_commit_args(asset: dict[str, Any], target_file: Path) -> list[str]:
     """Build ExifTool argument list for a single asset's metadata.
 
@@ -2249,9 +2368,10 @@ def _build_commit_args(asset: dict[str, Any], target_file: Path) -> list[str]:
         List of ExifTool CLI arguments (flags + file path as last element),
         or empty list if ExifTool should not be used for this file.
     """
-    tag_string = ", ".join(asset['tags'])
-    summary = asset['summary']
-    title = asset['staged_name'].replace("_", " ").replace("-", " ").title()
+    sanitized_tags = [_sanitize_metadata_value(t) for t in asset['tags']]
+    tag_string = ", ".join(sanitized_tags)
+    summary = _sanitize_metadata_value(asset['summary'])
+    title = _sanitize_metadata_value(asset['staged_name'].replace("_", " ").replace("-", " ").title())
     suffix = target_file.suffix.lower()
 
     if suffix in DOCUMENT_EXTENSIONS and suffix != '.pdf':
@@ -2265,7 +2385,7 @@ def _build_commit_args(asset: dict[str, Any], target_file: Path) -> list[str]:
                 f"-ID3:TALB={summary}",
                 f"-ID3:TCOM={summary}",
             ]
-            for t in asset['tags']:
+            for t in sanitized_tags:
                 args.append(f"-ID3:TSRC={t}")
             args.append(str(target_file))
             return args
@@ -2275,7 +2395,7 @@ def _build_commit_args(asset: dict[str, Any], target_file: Path) -> list[str]:
                 f"-ID3:TIT2={title}",
                 f"-ID3:TALB={summary}",
             ]
-            for t in asset['tags']:
+            for t in sanitized_tags:
                 args.append(f"-ID3:TSRC={t}")
             args.append(str(target_file))
             return args
@@ -2285,7 +2405,7 @@ def _build_commit_args(asset: dict[str, Any], target_file: Path) -> list[str]:
                 f"-XMP-dc:Title={title}",
                 f"-XMP-dc:Description={summary}",
             ]
-            for t in asset['tags']:
+            for t in sanitized_tags:
                 args.append(f"-XMP-dc:Subject={t}")
             args.append(str(target_file))
             return args
@@ -2309,7 +2429,7 @@ def _build_commit_args(asset: dict[str, Any], target_file: Path) -> list[str]:
         f"-XMP-dc:Description={summary}",
         f"-Microsoft:Category={tag_string}",
     ]
-    for t in asset['tags']:
+    for t in sanitized_tags:
         args.append(f"-XMP-dc:Subject={t}")
 
     if is_video:
@@ -2327,10 +2447,46 @@ def _build_commit_args(asset: dict[str, Any], target_file: Path) -> list[str]:
             f"-EXIF:XPKeywords={tag_string}",
             f"-Description={summary}",
             f"-Comment={summary}",
-        ] + [f"-Keywords={t}" for t in asset['tags']])
+        ] + [f"-Keywords={t}" for t in sanitized_tags])
 
     args.append(str(target_file))
     return args
+
+
+def _commit_move(old_path: Path, final_folder: Path, base_stem: str, suffix: str, skip_rename: bool) -> Path:
+    """Move (or copy) ``old_path`` into ``final_folder`` using an unused name.
+
+    Uses ``os.rename`` with a copy+delete fallback instead of ``Path.rename``,
+    which fails across Windows drives (AGENTS.md rule). When a destination name
+    is already taken — including races from parallel CLI commit workers — it
+    retries with an incrementing ``_N`` suffix. Returns the resolved target path.
+    """
+    counter = 0
+    final_folder.mkdir(parents=True, exist_ok=True)
+    while True:
+        name = f"{base_stem}{('_' + str(counter)) if counter else ''}{suffix}"
+        target = final_folder / name
+        if target == old_path:
+            return target
+        if not target.exists():
+            try:
+                if skip_rename:
+                    shutil.copy2(str(old_path), str(target))
+                else:
+                    try:
+                        os.rename(str(old_path), str(target))
+                    except OSError:
+                        # Cross-drive / filesystem-dependent rename failure:
+                        # fall back to copy + delete the source.
+                        if target.exists():
+                            raise FileExistsError(str(target))
+                        shutil.copy2(str(old_path), str(target))
+                        os.unlink(str(old_path))
+                return target
+            except FileExistsError:
+                counter += 1
+                continue
+        counter += 1
 
 
 def execute_commit(
@@ -2362,37 +2518,25 @@ def execute_commit(
     suffix = old_path.suffix.lower()
 
     final_folder = target_dir / asset['category'] if sort_into_folders else target_dir
-    final_folder.mkdir(parents=True, exist_ok=True)
-
-    new_filename = f"{safe_name}{suffix}"
-    new_path = final_folder / new_filename
-
-    counter = 1
-    while new_path.exists() and new_path != old_path:
-        new_filename = f"{safe_name}_{counter}{suffix}"
-        new_path = final_folder / new_filename
-        counter += 1
 
     try:
         if skip_rename:
-            final_folder.mkdir(parents=True, exist_ok=True)
-            target_file = final_folder / old_path.name
-            if old_path != target_file:
-                shutil.copy2(str(old_path), str(target_file))
+            target_file = _commit_move(old_path, final_folder, old_path.stem, old_path.suffix, skip_rename=True)
         else:
-            old_path.rename(new_path)
-            target_file = new_path
+            target_file = _commit_move(old_path, final_folder, safe_name, suffix, skip_rename=False)
 
         args = _build_commit_args(asset, target_file)
         if not skip_metadata:
             if args:
-                exiftool_session.execute(args)
+                output = exiftool_session.execute(args)
+                if _exiftool_output_has_error(output):
+                    return f"ERROR:ExifTool metadata write failed for {target_file.name}"
             else:
                 _write_document_metadata(target_file, asset)
 
         if skip_rename:
             return target_file
-        return new_path.relative_to(target_dir)
+        return target_file.relative_to(target_dir)
     except Exception as e:
         return f"ERROR:{e}"
 
@@ -2430,44 +2574,57 @@ def execute_commit_batch(
         safe_name = asset['staged_name']
         suffix = old_path.suffix.lower()
         final_folder = target_dir / asset['category'] if sort_into_folders else target_dir
-        final_folder.mkdir(parents=True, exist_ok=True)
-        new_filename = f"{safe_name}{suffix}"
-        new_path = final_folder / new_filename
-        counter = 1
-        while new_path.exists() and new_path != old_path:
-            new_filename = f"{safe_name}_{counter}{suffix}"
-            new_path = final_folder / new_filename
-            counter += 1
         try:
             if skip_rename:
-                final_folder.mkdir(parents=True, exist_ok=True)
-                target_file = final_folder / old_path.name
-                if old_path != target_file:
-                    shutil.copy2(str(old_path), str(target_file))
+                target_file = _commit_move(old_path, final_folder, old_path.stem, old_path.suffix, skip_rename=True)
             else:
-                old_path.rename(new_path)
-                target_file = new_path
+                target_file = _commit_move(old_path, final_folder, safe_name, suffix, skip_rename=False)
             prepared.append((asset, target_file))
         except Exception as exc:
             results.append(f"ERROR:{exc}")
 
     all_args = [_build_commit_args(asset, tf) for asset, tf in prepared]
     if not skip_metadata:
-        exiftool_args = [a for a in all_args if a]
-        if exiftool_args:
-            exiftool_session.execute_batch(exiftool_args)
+        files_with_args: list[tuple[dict[str, Any], Path]] = []
         for (asset, tf), file_args in zip(prepared, all_args):
-            if not file_args:
+            if file_args:
+                files_with_args.append((asset, tf))
+            else:
                 _write_document_metadata(tf, asset)
+        if files_with_args:
+            exiftool_args = [_build_commit_args(asset, tf) for asset, tf in files_with_args]
+            try:
+                outputs = exiftool_session.execute_batch(exiftool_args)
+                for (asset, tf), output in zip(files_with_args, outputs):
+                    if _exiftool_output_has_error(output):
+                        results.append(f"ERROR:ExifTool metadata write failed for {tf.name}")
+                    else:
+                        results.append(_commit_result(tf, target_dir, skip_rename))
+            except Exception as exc:
+                for asset, tf in files_with_args:
+                    results.append(f"ERROR:ExifTool metadata write failed: {exc}")
 
     for asset, target_file in prepared:
-        if skip_rename:
-            results.append(target_file)
-        else:
-            final_folder = target_dir / asset['category'] if sort_into_folders else target_dir
-            results.append(target_file.relative_to(target_dir))
+        already_reported = any(
+            r == target_file or r == target_file.relative_to(target_dir)
+            for r in results
+        )
+        if not already_reported:
+            results.append(_commit_result(target_file, target_dir, skip_rename))
 
     return results
+
+
+def _commit_result(target_file: Path, target_dir: Path, skip_rename: bool) -> str | Path:
+    """Build a commit result: the target path (copy mode) or its relative path."""
+    if skip_rename:
+        return target_file
+    return target_file.relative_to(target_dir)
+
+
+def _exiftool_output_has_error(output: str) -> bool:
+    """Return True when an ExifTool output block contains a hard error marker."""
+    return bool(re.search(r"(?m)^\s*Error\s*:", output or ""))
 
 
 # -----------------------------------------------------------------------------
@@ -2663,11 +2820,14 @@ def rollback_last_batch() -> dict[str, Any]:
     except Exception:
         pass
 
-    remaining = [b for b in batches if b["batch_id"] != batch_id]
-    UNDO_DIR.mkdir(parents=True, exist_ok=True)
-    with open(UNDO_LOG_FILE, "w", encoding="utf-8") as f:
-        for b in reversed(remaining):
-            f.write(json.dumps(b) + "\n")
+    if failed == 0:
+        # Full success: drop the batch from the undo log so it cannot be rolled back twice.
+        remaining = [b for b in batches if b["batch_id"] != batch_id]
+        UNDO_DIR.mkdir(parents=True, exist_ok=True)
+        with open(UNDO_LOG_FILE, "w", encoding="utf-8") as f:
+            for b in reversed(remaining):
+                f.write(json.dumps(b) + "\n")
+    # Partial failure: keep the batch entry so the remaining files can be retried.
 
     return {
         "ok": failed == 0,
@@ -2931,37 +3091,48 @@ def _resolve_binary_path(name: str) -> str | None:
 def check_ollama_health() -> dict[str, Any]:
     """Probe the Ollama server for connectivity and list vision-capable models.
 
+    Retries once on transient failures so a busy daemon doesn't flash a
+    false "disconnected" state before returning.
+
     Returns:
         Dict with 'connected', 'models', 'all_models', counts, and 'error'.
     """
-    try:
-        tags = ollama.list()
-        models = tags.get('models', [])
-        all_names = []
-        vision_names = []
-        for m in models:
-            name = m.get('name', '') if isinstance(m, dict) else str(m)
-            if name:
-                all_names.append(name)
-                if _is_vision_model(name):
-                    vision_names.append(name)
-        return {
-            "connected": True,
-            "models": vision_names,
-            "all_models": all_names,
-            "model_count": len(all_names),
-            "vision_count": len(vision_names),
-            "error": None,
-        }
-    except Exception as exc:
-        return {
-            "connected": False,
-            "models": [],
-            "all_models": [],
-            "model_count": 0,
-            "vision_count": 0,
-            "error": str(exc),
-        }
+    errors = []
+    for attempt in range(2):
+        try:
+            tags = ollama.list()
+            models = tags.get('models', [])
+            all_names = []
+            vision_names = []
+            for m in models:
+                if isinstance(m, dict):
+                    name = m.get('name', '')
+                elif hasattr(m, 'model'):
+                    name = m.model
+                else:
+                    name = str(m)
+                if name:
+                    all_names.append(name)
+                    if _is_vision_model(name):
+                        vision_names.append(name)
+            return {
+                "connected": True,
+                "models": vision_names,
+                "all_models": all_names,
+                "model_count": len(all_names),
+                "vision_count": len(vision_names),
+                "error": None,
+            }
+        except Exception as exc:
+            errors.append(str(exc))
+    return {
+        "connected": False,
+        "models": [],
+        "all_models": [],
+        "model_count": 0,
+        "vision_count": 0,
+        "error": errors[-1] if errors else "Unknown error",
+    }
 
 
 def _llamacpp_server_running() -> bool:
@@ -3202,6 +3373,8 @@ def download_file(url: str, dest: Path,
     try:
         resp = requests.get(url, stream=True, timeout=30)
         resp.raise_for_status()
+        if not resp.url.lower().startswith("https://"):
+            raise ValueError(f"Refusing to follow redirect to insecure transport: {resp.url}")
         total = int(resp.headers.get("content-length", 0))
         downloaded = 0
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -3376,12 +3549,13 @@ def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[st
         except Exception:
             pass
 
-    CURRENT_PROVIDER = new_provider
-
     provider = get_provider(new_provider)
     if api_key:
-        CURRENT_API_KEY = api_key
+        # Persist the key before mutating state so a keychain failure never
+        # leaves the app pointing at a provider whose credentials were lost.
         save_api_key(new_provider, api_key)
+        CURRENT_API_KEY = api_key
+        register_secret(api_key)
         provider.api_key = api_key
     elif new_provider == "llamacpp":
         # Local llama-server needs no credentials; keep the provider default.
@@ -3390,6 +3564,8 @@ def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[st
         stored = load_api_key(new_provider)
         CURRENT_API_KEY = stored
         provider.api_key = stored
+
+    CURRENT_PROVIDER = new_provider
     pconf = config.get("model", {}).get("providers", {}).get(new_provider, {})
     provider.model = pconf.get("selected_model", "") or (pconf.get("models") or [None])[0] or config["model"]["name"]
 

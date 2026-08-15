@@ -25,13 +25,38 @@ from engine import (
 )
 
 HAS_EXIFTOOL = shutil.which("exiftool") is not None
+HAS_FFMPEG = shutil.which("ffmpeg") is not None
 
 
-def _make_asset(tmp_path: Path, name: str = "test_video", ext: str = ".mp4", category: str = "test") -> dict:
+def _write_valid_media(path: Path, ext: str) -> None:
+    """Create a real media file that ExifTool can process (dummy bytes can't)."""
+    if not HAS_FFMPEG:
+        path.write_bytes(b"\x00" * 1024)
+        return
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
+    if ext == ".mp4":
+        cmd += ["-f", "lavfi", "-i", "color=red:size=64x64:duration=1",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)]
+    elif ext == ".jpg":
+        cmd += ["-f", "lavfi", "-i", "color=blue:size=64x64", "-frames:v", "1",
+                "-q:v", "2", str(path)]
+    elif ext == ".png":
+        cmd += ["-f", "lavfi", "-i", "color=blue:size=64x64", "-frames:v", "1", str(path)]
+    else:
+        path.write_bytes(b"\x00" * 1024)
+        return
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
+def _make_asset(tmp_path: Path, name: str = "test_video", ext: str = ".mp4",
+                category: str = "test", valid_media: bool = False) -> dict:
     """Create a minimal asset dict for testing."""
     src = tmp_path / "src" / f"{name}{ext}"
     src.parent.mkdir(parents=True, exist_ok=True)
-    src.write_bytes(b"\x00" * 1024)
+    if valid_media:
+        _write_valid_media(src, ext)
+    else:
+        src.write_bytes(b"\x00" * 1024)
     return {
         "original_name": f"{name}{ext}",
         "original_path": src,
@@ -177,10 +202,10 @@ class TestNativeMetadataWriters:
 
 # --- execute_commit tests (requires ExifTool for media, skips for docs) ---
 
-@pytest.mark.skipif(not HAS_EXIFTOOL, reason="ExifTool not installed")
+@pytest.mark.skipif(not (HAS_EXIFTOOL and HAS_FFMPEG), reason="ExifTool or FFmpeg not installed")
 class TestExecuteCommit:
     def test_commit_video_renames_and_writes_metadata(self, tmp_path: Path):
-        asset = _make_asset(tmp_path, ext=".mp4", category="test_cat")
+        asset = _make_asset(tmp_path, ext=".mp4", category="test_cat", valid_media=True)
         target_dir = tmp_path / "output"
         session = ExifToolSession()
         try:
@@ -192,7 +217,7 @@ class TestExecuteCommit:
             session.process.stdin.close()
 
     def test_commit_image_renames(self, tmp_path: Path):
-        asset = _make_asset(tmp_path, ext=".jpg", category="photos")
+        asset = _make_asset(tmp_path, ext=".jpg", category="photos", valid_media=True)
         target_dir = tmp_path / "output"
         session = ExifToolSession()
         try:
@@ -203,7 +228,7 @@ class TestExecuteCommit:
             session.process.stdin.close()
 
     def test_commit_skip_metadata(self, tmp_path: Path):
-        asset = _make_asset(tmp_path, ext=".mp4", category="test")
+        asset = _make_asset(tmp_path, ext=".mp4", category="test", valid_media=True)
         target_dir = tmp_path / "output"
         session = ExifToolSession()
         try:
@@ -214,7 +239,7 @@ class TestExecuteCommit:
             session.process.stdin.close()
 
     def test_commit_skip_rename_copies(self, tmp_path: Path):
-        asset = _make_asset(tmp_path, ext=".mp4", category="test")
+        asset = _make_asset(tmp_path, ext=".mp4", category="test", valid_media=True)
         target_dir = tmp_path / "output"
         session = ExifToolSession()
         try:
@@ -226,7 +251,7 @@ class TestExecuteCommit:
             session.process.stdin.close()
 
     def test_commit_duplicate_name_appends_counter(self, tmp_path: Path):
-        asset = _make_asset(tmp_path, ext=".mp4", category="test")
+        asset = _make_asset(tmp_path, ext=".mp4", category="test", valid_media=True)
         target_dir = tmp_path / "output" / "test"
         target_dir.mkdir(parents=True)
         (target_dir / "renamed_test_video.mp4").write_bytes(b"\x00" * 100)
@@ -241,12 +266,12 @@ class TestExecuteCommit:
 
 # --- execute_commit_batch tests ---
 
-@pytest.mark.skipif(not HAS_EXIFTOOL, reason="ExifTool not installed")
+@pytest.mark.skipif(not (HAS_EXIFTOOL and HAS_FFMPEG), reason="ExifTool or FFmpeg not installed")
 class TestExecuteCommitBatch:
     def test_batch_multiple_assets(self, tmp_path: Path):
         assets = [
-            _make_asset(tmp_path, name="vid1", ext=".mp4", category="cat_a"),
-            _make_asset(tmp_path, name="vid2", ext=".mp4", category="cat_b"),
+            _make_asset(tmp_path, name="vid1", ext=".mp4", category="cat_a", valid_media=True),
+            _make_asset(tmp_path, name="vid2", ext=".mp4", category="cat_b", valid_media=True),
         ]
         target_dir = tmp_path / "output"
         session = ExifToolSession()
@@ -261,8 +286,8 @@ class TestExecuteCommitBatch:
 
     def test_batch_mixed_formats(self, tmp_path: Path):
         assets = [
-            _make_asset(tmp_path, name="video1", ext=".mp4", category="video"),
-            _make_asset(tmp_path, name="image1", ext=".jpg", category="image"),
+            _make_asset(tmp_path, name="video1", ext=".mp4", category="video", valid_media=True),
+            _make_asset(tmp_path, name="image1", ext=".jpg", category="image", valid_media=True),
         ]
         target_dir = tmp_path / "output"
         session = ExifToolSession()
@@ -275,7 +300,7 @@ class TestExecuteCommitBatch:
             session.process.stdin.close()
 
     def test_batch_skip_metadata(self, tmp_path: Path):
-        assets = [_make_asset(tmp_path, name="v1", ext=".mp4", category="test")]
+        assets = [_make_asset(tmp_path, name="v1", ext=".mp4", category="test", valid_media=True)]
         target_dir = tmp_path / "output"
         session = ExifToolSession()
         try:

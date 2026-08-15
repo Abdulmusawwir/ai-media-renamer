@@ -2007,6 +2007,28 @@ with tab_analytics:
 # Tab 3: Configuration
 # -----------------------------------------------------------------------------
 
+_SECRET_KEY_HINTS = ("api_key", "apikey", "token", "password", "secret")
+
+
+def _mask_secrets(value: Any) -> Any:
+    """Deep-copy ``value`` redacting secret-looking keys and nested strings.
+
+    Used for the read-only config JSON view so API keys / tokens / passwords
+    never appear in the UI. Editing the raw JSON remains available in Edit mode.
+    """
+    if isinstance(value, dict):
+        masked = {}
+        for k, v in value.items():
+            if isinstance(k, str) and any(h in k.lower() for h in _SECRET_KEY_HINTS) and v:
+                masked[k] = "[REDACTED]"
+            else:
+                masked[k] = _mask_secrets(v)
+        return masked
+    if isinstance(value, list):
+        return [_mask_secrets(v) for v in value]
+    return value
+
+
 with tab_config:
     # Config health badge
     try:
@@ -2026,6 +2048,8 @@ with tab_config:
                                      help="Toggle to edit config.json directly")
 
     if config_edit_mode:
+        st.warning("Editing mode shows raw config — including any stored API keys. "
+                   "Do not share this view.")
         config_json_str = json.dumps(config, indent=2)
         edited = st.text_area("config.json", value=config_json_str, height=500,
                               key="config_editor_area",
@@ -2050,7 +2074,7 @@ with tab_config:
         st.warning("Some changes (model, categories) require re-running analysis to take effect.")
     else:
         with st.expander("View config.json (read-only)", expanded=False):
-            st.json(config)
+            st.json(_mask_secrets(config))
 
     st.space()
 

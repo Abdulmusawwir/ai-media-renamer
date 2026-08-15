@@ -186,6 +186,7 @@ class TestDownloadFile:
 
         class _FakeResp:
             headers = {"content-length": "3"}
+            url = "https://example.com/x.zip"
 
             def raise_for_status(self):
                 return None
@@ -211,6 +212,7 @@ class TestDownloadFile:
 
         class _FakeResp:
             headers = {"content-length": str(len(data))}
+            url = "https://example.com/x.zip"
 
             def raise_for_status(self):
                 return None

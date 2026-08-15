@@ -54,3 +54,21 @@ class TestParseAiResponse:
         result, error, detail = _parse_ai_response(raw)
         assert error is None
         assert result["cinematography"]["shot_type"] == "wide"
+
+    def test_parse_null_returns_error(self):
+        result, error, detail = _parse_ai_response("null")
+        assert result is None
+        assert error == "json_parse_error"
+        assert detail is not None
+
+    def test_parse_non_object_returns_error(self):
+        result, error, detail = _parse_ai_response('[1, 2, 3]')
+        assert result is None
+        assert error == "json_parse_error"
+        assert detail is not None
+
+    def test_parse_string_returns_error(self):
+        result, error, detail = _parse_ai_response('"just a string"')
+        assert result is None
+        assert error == "json_parse_error"
+        assert detail is not None
