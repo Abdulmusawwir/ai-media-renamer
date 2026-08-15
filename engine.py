@@ -556,6 +556,20 @@ def save_setup_profile(profile: list[str] | None = None, onboarded: bool = True,
     CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
 
 
+def keyring_available() -> tuple[bool, str]:
+    """Return (available, detail) for the OS keychain.
+
+    Used by the UI to surface a clear warning when API-key storage is
+    unavailable instead of failing silently or on a raw exception.
+    """
+    try:
+        keyring.get_keyring()
+        keyring.get_password(KEYRING_SERVICE, "__probe__")
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
+
+
 def save_api_key(provider_name: str, key: str) -> None:
     """Store an API key for a provider in the system keyring.
 

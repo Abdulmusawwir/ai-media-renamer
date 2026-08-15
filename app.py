@@ -58,6 +58,7 @@ from engine import (
     delete_session,
     list_sessions,
     load_api_key,
+    keyring_available,
     load_session,
     log_event,
     normalize_category,
@@ -382,8 +383,13 @@ def _on_api_key_change() -> None:
     """Save the API key entered in the sidebar text input to the system keychain."""
     provider = st.session_state.provider_info
     key = st.session_state.get(f"api_key_{provider}", "")
-    save_api_key(provider, key)
-    st.session_state.api_key_stored = bool(key)
+    try:
+        save_api_key(provider, key)
+        st.session_state.api_key_stored = bool(key)
+        st.session_state.pop("keyring_warning", None)
+    except RuntimeError as exc:
+        st.session_state.keyring_warning = str(exc)
+        return
     prov_inst = get_provider(provider)
     prov_inst.api_key = key
 
@@ -462,7 +468,10 @@ with st.sidebar:
         if new_provider == "llamacpp" and not (env_now or {}).get("llamacpp_running"):
             ensure_llamacpp_server()
             st.session_state.env_check = None
-        switch_ai_provider(new_provider)
+        try:
+            switch_ai_provider(new_provider)
+        except RuntimeError as exc:
+            st.session_state.switch_error = str(exc)
         st.session_state.provider_info = new_provider
 
     cloud_names = {
@@ -471,6 +480,10 @@ with st.sidebar:
     }
     pending = [cloud_names.get(p, p) for p in all_providers if p not in _local_providers]
     st.caption(f"Cloud providers (coming soon): {', '.join(pending)}")
+
+    if st.session_state.get("switch_error"):
+        st.error(st.session_state.switch_error)
+        del st.session_state.switch_error
 
     if analysis_active:
         st.caption("Analysis in progress — settings locked")
@@ -567,7 +580,17 @@ with st.sidebar:
 
         # API key (cloud providers only)
         if new_provider not in ("ollama", "llamacpp"):
-            api_key = load_api_key(new_provider)
+            keyring_ok, keyring_why = keyring_available()
+            if not keyring_ok:
+                st.warning(
+                    ":material/key_off: System keychain unavailable — API keys cannot be saved. "
+                    f"({keyring_why})"
+                )
+            api_key = ""
+            try:
+                api_key = load_api_key(new_provider)
+            except RuntimeError as exc:
+                st.error(f"Could not read the saved API key: {exc}")
             st.text_input(
                 "API Key", type="password", key=f"api_key_{new_provider}",
                 value=api_key,
@@ -717,7 +740,11 @@ if st.session_state.provider_info in _local_provider_ids:
         st.caption(":material/check: llama.cpp server detected at localhost:8080")
 
 if st.session_state.provider_info not in _local_provider_ids:
-    stored = load_api_key(st.session_state.provider_info)
+    stored = ""
+    try:
+        stored = load_api_key(st.session_state.provider_info)
+    except RuntimeError as exc:
+        st.error(f"Could not read the saved API key: {exc}")
     if not stored:
         st.warning(f"Enter your {st.session_state.provider_info} API key in the sidebar.", icon=":material/warning:")
 

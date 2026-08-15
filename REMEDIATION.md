@@ -13,7 +13,7 @@
 | S1 | Gemini API key leaks into error detail / `log_event` / `_format_ai_error` | `engine.py:1647, 1670, 603, 2136` | Register keys in a module secret cache; `_redact_sensitive()` masks key values + `?key=...` query strings in exception detail, log records, and formatted AI errors. | DONE |
 | S2 | ExifTool argument injection from AI metadata | `engine.py:2263-2330` | `_sanitize_metadata_value()` strips `\r\n\x00`, collapses whitespace, strips leading `-`, caps length; applied to `title`/`summary`/`tags` in `_build_commit_args`. | DONE |
 | S3 | `download_file` follows redirects to plaintext HTTP | `engine.py:3203` | Reject non-HTTPS from `resp.url` after redirects. | DONE |
-| S4 | Keyring fail-closed + provider-switch consistency | `engine.py:3384, 545-576` | Wrap keyring calls; no plaintext fallback; `switch_ai_provider` mutates state only after a successful key store / consistent sequence. | DONE |
+| S4 | Keyring fail-closed + provider-switch consistency | `engine.py:3384, 545-576` | Wrap keyring calls; no plaintext fallback; `switch_ai_provider` mutates state only after a successful key store / consistent sequence. UI surfaces keychain unavailability via new `keyring_available()` probe (sidebar warning + guarded `load_api_key`/`save_api_key`/`switch_ai_provider` call sites). Completes 20.2. | DONE |
 | S5 | Mask secrets in Config tab | `app.py:2053` | `mask_secrets()` deep-copies the JSON view, redacting `*api_key*/*token*/*password*/*secret*` keys; editor gets a warning caption. | DONE |
 
 ### Workstream 2 — Correctness & data-loss bugs

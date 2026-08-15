@@ -15,6 +15,7 @@ from engine import (
     _llamacpp_server_running,
     delete_api_key,
     get_provider,
+    keyring_available,
     list_providers,
     load_api_key,
     register_provider,
@@ -613,6 +614,25 @@ class TestApiKeyStorage:
         import keyring as kr_mod
         mock_kr.side_effect = kr_mod.errors.PasswordDeleteError("not found")
         delete_api_key("missing")  # should not raise
+
+    @patch("engine.keyring.get_password")
+    @patch("engine.keyring.get_keyring")
+    def test_keyring_available(self, mock_get_keyring, mock_get_password):
+        mock_get_keyring.return_value = object()
+        mock_get_password.return_value = None
+        available, detail = keyring_available()
+        assert available is True
+        assert detail == ""
+        mock_get_keyring.assert_called_once()
+        mock_get_password.assert_called_once_with("ai-media-renamer", "__probe__")
+
+    @patch("engine.keyring.get_password", side_effect=RuntimeError("no keychain backend"))
+    @patch("engine.keyring.get_keyring")
+    def test_keyring_unavailable(self, mock_get_keyring, mock_get_password):
+        mock_get_keyring.side_effect = RuntimeError("no keychain backend")
+        available, detail = keyring_available()
+        assert available is False
+        assert "no keychain backend" in detail
 
 
 # ---------------------------------------------------------------------------

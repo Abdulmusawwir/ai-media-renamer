@@ -782,9 +782,9 @@
 - [x] Bootstrap binary downloads (ffmpeg, exiftool, model files): enforce HTTPS-only and verify a published SHA-256 checksum before use — reject mismatches instead of proceeding
 
 ### 20.2 Secrets management hardening
-- [ ] Audit every log/event/error path: API keys must never reach `config.json`, JSONL logs, telemetry events, or exception messages — add redaction in `log_event()` and `track_event()`
-- [ ] Keyring fallback: if the OS keychain is unavailable, fail closed (no plaintext file fallback) and surface a clear warning in UI
-- [ ] Mask secret-looking keys (`api_key`, `token`, `password`, `*secret*`) in the Configuration tab JSON view / editor
+- [x] Audit every log/event/error path: API keys must never reach `config.json`, JSONL logs, telemetry events, or exception messages — redaction added in `log_event()` (S1). No `track_event()` exists: telemetry was never shipped (see 20.5 divergence note).
+- [x] Keyring fallback: if the OS keychain is unavailable, fail closed (no plaintext file fallback) and surface a clear warning in UI — S4 (engine) + `keyring_available()` health probe with sidebar/switch warnings (app).
+- [x] Mask secret-looking keys (`api_key`, `token`, `password`, `*secret*`) in the Configuration tab JSON view / editor — S5 read-only view masked; editor shows a warning caption.
 
 ### 20.3 Local server exposure
 - [ ] Desktop EXE must bind Streamlit to `127.0.0.1` by default (never `0.0.0.0`); add a config flag to opt into LAN exposure with an in-UI warning
@@ -797,9 +797,9 @@
 - [ ] Add a test asserting staged filenames can never traverse directories on commit (sanitization already exists — lock it in)
 
 ### 20.5 Telemetry & log privacy
-- [ ] Confirm telemetry events carry only counts/profiles/versions — never absolute paths, filenames, or AI text; add a redaction pass in `track_event()`
-- [ ] Purge `telemetry.jsonl` on opt-out
-- [ ] Logs store absolute paths: add a `redact_paths` flag (default on for non-verbose) and document log retention for `undo_log.jsonl`
+- [x] Confirm telemetry events carry only counts/profiles/versions — never absolute paths, filenames, or AI text; add a redaction pass in `track_event()`. **SCOPE CHANGE:** telemetry was never shipped (divergence documented in REMEDIATION.md Wave 3). No `track_event()` exists, so the check is vacuous; re-scoped to: any future telemetry must reuse the `log_event` redaction path. PRIVACY.md already documents "no telemetry".
+- [x] Purge `telemetry.jsonl` on opt-out. **N/A** — file never exists (no telemetry).
+- [ ] Logs store absolute paths: add a `redact_paths` flag (default on for non-verbose) and document log retention for `undo_log.jsonl` — **OPEN**, moves to Wave 2/3.
 
 ---
 
