@@ -39,6 +39,14 @@
 | C12 | Data-editor edits not synced | `app.py:1527-1531` | Sync `category`/`tags`/`proposed_filename` back to `staged_assets` alongside `rating`. | |
 | C13 | All-audio uploads abort | `app.py:1309-1311` | Include `audio_results` in the abort guard. | |
 
+## Phase AI 20.3–20.5 — Local server exposure, input validation, log privacy
+
+| # | Item | Location | Fix | Status |
+|---|------|----------|-----|--------|
+| 20.3 | Streamlit binds loopback by default + LAN opt-in | `bootstrap.py:1312`, `.streamlit/config.toml`, `config.json` `server.lan_expose`, `app.py` Config tab | Explicit `--server.address=127.0.0.1` unless `lan_expose`; in-UI toggle + warnings; Docker host ports bound to `127.0.0.1:`. | DONE |
+| 20.4 | Input validation & injection | `engine.py:3691-3727, 2702-2752, 2470` | `unsafe_allow_html` sites audited (all static); `_neutralize_csv_formula()` on import/export; CSV `proposed_filename` path-separator rejection; `load_session` schema validation + symlink rejection; `_safe_stem()` traversal lock-in. | DONE |
+| 20.5 | Log path privacy | `engine.py:657-715`, `config.json` `logging.redact_paths` | `redact_paths` flag (default on) masks Windows/UNC/POSIX absolute paths in `log_event`; retention documented. | DONE |
+
 ## Wave 2 — Medium backlog (Workstreams 2 + 3)
 
 - `app.py:435,461-466,495-501` — move provider reset / engine switch / config writes into callbacks.
@@ -63,7 +71,7 @@
 ## Wave 3 — CLI, docs, config & lint hygiene
 
 - **CLI**: `--import-csv` should not require a positional `dir`; `--categories-override` validated as dict.
-- **Telemetry divergence**: `implementation_plan.md` Layer 15 + CHANGELOG + `README_TECH.md:82-83` claim telemetry that does not exist (PRIVACY.md says none). Document reality; re-scope 20.5.
+- **Telemetry divergence**: `implementation_plan.md` Layer 15 + CHANGELOG + `README_TECH.md:82-83` claim telemetry that does not exist (PRIVACY.md says none). Document reality; re-scope 20.5. **RESOLVED (v1.6.3):** 20.5 re-scoped in `implementation_plan.md` — no `track_event()` exists, PRIVACY.md already documents "no telemetry", purge item marked N/A. A separate pass should still clean the stale telemetry claims in `CHANGELOG.md` + `README_TECH.md`.
 - **Config**: fix `model.providers.gemini.selected_model` (`llama-3.2-90b-vision-preview` → real Gemini model); drop dead `preview.video_grid_tile` / `video_frame_count`.
 - **Ruff**: fix 70 lint errors (43 auto-fixable; mostly `tests/` F401/E501/I001).
 - **Single source of truth**: `NAMED_TEMPLATES`, llama.cpp URLs/digests duplicated in code vs config.

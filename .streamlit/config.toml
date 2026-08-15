@@ -6,6 +6,12 @@
 # strips the Streamlit chrome in the packaged app.
 toolbarMode = "minimal"
 
+[server]
+# Bind to loopback only by default so the app is never reachable from the LAN.
+# Opt into LAN exposure by setting server.lan_expose = true in config.json
+# (bootstrap.py then overrides this with --server.address=0.0.0.0).
+address = "127.0.0.1"
+
 [theme]
 base = "dark"
 primaryColor = "#A1A1AA"

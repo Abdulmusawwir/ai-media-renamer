@@ -68,6 +68,62 @@ class TestLoadSession:
             assert len(result["staged_assets"]) == 0
             assert "deleted_video.mp4" in result["missing_files"]
 
+    def test_load_session_rejects_non_object(self, tmp_dir):
+        """A session file that is not a JSON object raises ValueError."""
+        bad = tmp_dir / "session_bad.json"
+        bad.write_text("[1, 2, 3]", encoding="utf-8")
+        with pytest.raises(ValueError):
+            load_session(bad)
+
+    def test_load_session_skips_malformed_assets(self, tmp_dir):
+        """Assets missing required string fields are dropped, not crashed on."""
+        real = tmp_dir / "real.mp4"
+        real.write_bytes(b"\x00" * 8)
+        data = {
+            "staged_assets": [
+                {"original_name": 42, "original_path": str(real), "staged_name": "x"},
+                {"original_name": "good.mp4", "original_path": str(real), "staged_name": "y"},
+            ],
+            "uploaded_files": {},
+            "settings": {"case_style": "snake_case"},
+        }
+        path = tmp_dir / "session_mixed.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        result = load_session(path)
+        assert len(result["staged_assets"]) == 1
+        assert result["staged_assets"][0]["original_name"] == "good.mp4"
+
+    @pytest.mark.skipif(
+        not hasattr(Path, "symlink_to") or not hasattr(__import__("os"), "symlink"),
+        reason="symlinks unavailable",
+    )
+    def test_load_session_never_follows_symlinks(self, tmp_dir):
+        """Symlinked original paths are rejected, never followed."""
+        target = tmp_dir / "target.mp4"
+        target.write_bytes(b"\x00" * 8)
+        link = tmp_dir / "link.mp4"
+        try:
+            link.symlink_to(target)
+        except OSError:
+            pytest.skip("symlink creation failed on this platform")
+        data = {
+            "staged_assets": [{
+                "original_name": "link.mp4",
+                "original_path": str(link),
+                "staged_name": "x",
+                "category": "test",
+                "tags": [],
+                "summary": "",
+            }],
+            "uploaded_files": {},
+            "settings": {},
+        }
+        path = tmp_dir / "session_symlink.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        result = load_session(path)
+        assert len(result["staged_assets"]) == 0
+        assert "link.mp4" in result["missing_files"]
+
 
 class TestListSessions:
     def test_list_sessions_empty_dir(self, tmp_dir):

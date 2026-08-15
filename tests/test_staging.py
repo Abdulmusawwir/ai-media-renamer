@@ -111,3 +111,55 @@ class TestImportStagingCsv:
         csv_data = "original_name,proposed_filename,category,tags,summary\nf.mov,clip,Aerial_Drone,test,desc\n"
         assets, _ = import_staging_csv(csv_data, ALLOWED_CATEGORIES)
         assert assets[0]["category"] == "aerial_drone"
+
+
+class TestCsvFormulaInjection:
+    def test_export_neutralizes_formula_cells(self):
+        assets = [{
+            "original_name": "=cmd()",
+            "staged_name": "+SUM(A1:A9)",
+            "category": "@import",
+            "tags": ["-danger", "=danger2"],
+            "summary": "@HYPERLINK",
+        }]
+        result = export_staging_csv(assets)
+        assert "'=cmd()" in result
+        assert "'+SUM(A1:A9)" in result
+        assert "'@import" in result
+        # The joined tags cell starts with "-danger", so the leading quote
+        # neutralizes the whole cell (Excel only evaluates the first char).
+        assert "'-danger, =danger2" in result
+        assert "'@HYPERLINK" in result
+
+    def test_import_neutralizes_formula_cells(self):
+        csv_data = (
+            "original_name,proposed_filename,category,tags,summary\n"
+            "=cmd(),+SUM(A1:A9),@import,\"-danger, =danger2\",@HYPERLINK\n"
+        )
+        assets, _ = import_staging_csv(csv_data, ALLOWED_CATEGORIES)
+        assert assets[0]["original_name"] == "'=cmd()"
+        assert assets[0]["staged_name"] == "'+SUM(A1:A9)"
+        assert assets[0]["tags"] == ["'-danger", "'=danger2"]
+        assert assets[0]["summary"] == "'@HYPERLINK"
+
+    def test_import_rejects_path_separators_in_proposed_filename(self):
+        csv_data = (
+            "original_name,proposed_filename,category,tags,summary\n"
+            "safe.mp4,../../etc/passwd,landscapes_broll,tag,desc\n"
+        )
+        assets, warnings = import_staging_csv(csv_data, ALLOWED_CATEGORIES)
+        assert assets[0]["staged_name"] == ""
+        assert any("path separators" in w for w in warnings)
+
+    def test_plain_values_unchanged(self):
+        assets = [{
+            "original_name": "plain.mp4",
+            "staged_name": "normal_name",
+            "category": "landscapes_broll",
+            "tags": ["ok"],
+            "summary": "fine text",
+        }]
+        result = export_staging_csv(assets)
+        assert "plain.mp4" in result
+        assert "normal_name" in result
+        assert "'plain.mp4" not in result

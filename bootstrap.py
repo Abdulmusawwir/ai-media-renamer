@@ -1309,12 +1309,17 @@ def main():
 
         _log(f"APP_PATH={APP_PATH} exists={APP_PATH.exists()}")
         os.environ["STREAMLIT_CONFIG_PATH"] = str(BASE_DIR / ".streamlit" / "config.toml")
+        # Bind to loopback by default; opt into LAN exposure via
+        # config.json server.lan_expose = true (see AGENTS.md / 20.3).
+        lan_expose = bool(config.get("server", {}).get("lan_expose", False))
+        server_address = "0.0.0.0" if lan_expose else "127.0.0.1"
         sys.argv = [
             "streamlit",
             "run",
             str(APP_PATH),
             "--server.port=8501",
             "--server.headless=true",
+            f"--server.address={server_address}",
             "--browser.serverAddress=",
             "--global.developmentMode=false",
             "--browser.gatherUsageStats=false",

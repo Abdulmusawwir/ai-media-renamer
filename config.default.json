@@ -167,6 +167,9 @@
     ".ape",
     ".wv"
   ],
+  "server": {
+    "lan_expose": false
+  },
   "model": {
     "name": "qwen2.5vl:7b",
     "text_model": "qwen2.5:3b",
@@ -252,7 +255,8 @@
     "directory": "logs",
     "max_bytes_per_file": 5242880,
     "backup_count": 3,
-    "max_upload_size": 10737418240
+    "max_upload_size": 10737418240,
+    "redact_paths": true
   },
   "naming_templates": {
     "default": "{topic}_{description}",

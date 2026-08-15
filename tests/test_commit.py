@@ -70,6 +70,33 @@ def _make_asset(tmp_path: Path, name: str = "test_video", ext: str = ".mp4",
 
 # --- _build_commit_args tests (no ExifTool needed) ---
 
+class TestSafeStem:
+    def test_plain_stem_unchanged(self):
+        from engine import _safe_stem
+        assert _safe_stem("golden_hour_coast") == "golden_hour_coast"
+
+    def test_strips_backslash_traversal(self):
+        from engine import _safe_stem
+        assert _safe_stem(r"..\..\evil") == "evil"
+
+    def test_strips_forward_slash_traversal(self):
+        from engine import _safe_stem
+        assert _safe_stem("../../evil") == "evil"
+
+    def test_mixed_separators(self):
+        from engine import _safe_stem
+        assert _safe_stem(r"a\b/..\c") == "a_b_c"
+
+    def test_removes_windows_colons(self):
+        from engine import _safe_stem
+        assert _safe_stem("C:evil") == "C_evil"
+
+    def test_empty_returns_unnamed(self):
+        from engine import _safe_stem
+        assert _safe_stem("") == "unnamed"
+        assert _safe_stem("..") == "unnamed"
+
+
 class TestBuildCommitArgs:
     def test_video_returns_args(self, tmp_path: Path):
         asset = _make_asset(tmp_path, ext=".mp4")
@@ -235,6 +262,23 @@ class TestExecuteCommit:
             result = execute_commit(asset, target_dir, sort_into_folders=False, exiftool_session=session, skip_metadata=True)
             assert isinstance(result, Path)
             assert (target_dir / result).exists()
+        finally:
+            session.process.stdin.close()
+
+    def test_commit_traversal_stays_inside_target(self, tmp_path: Path):
+        asset = _make_asset(tmp_path, ext=".mp4", category="test", valid_media=True)
+        asset["staged_name"] = r"..\..\..\escape_attempt"
+        target_dir = tmp_path / "output"
+        session = ExifToolSession()
+        try:
+            result = execute_commit(asset, target_dir, sort_into_folders=False,
+                                    exiftool_session=session, skip_metadata=True)
+            assert isinstance(result, Path)
+            target = target_dir / result
+            assert target.exists()
+            assert target.resolve().is_relative_to(target_dir.resolve())
+            assert not (tmp_path / "escape_attempt.mp4").exists()
+            assert (tmp_path / "output" / "escape_attempt.mp4").exists()
         finally:
             session.process.stdin.close()
 

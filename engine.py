@@ -666,6 +666,20 @@ def _redact_sensitive(text: str | None) -> str:
     return out
 
 
+_ABS_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_\\/.-])(?:"
+    r"[A-Za-z]:[\\/][^\s\"',;<>\[\]{}()|]*"
+    r"|\\\\[^\\/]+(?:[\\/][^\s\"',;<>\[\]{}()|]*)+"
+    r"|/[A-Za-z0-9_.-]+(?:/[^\s\"',;<>\[\]{}()|]*)+"
+    r")"
+)
+
+
+def _redact_paths_in_text(text: str) -> str:
+    """Replace absolute paths (Windows drive / UNC / POSIX) with ``[PATH]``."""
+    return _ABS_PATH_RE.sub("[PATH]", text)
+
+
 def _redact_recursive(value: Any) -> Any:
     """Recursively redact secret-looking strings inside a JSON-like structure."""
     if isinstance(value, dict):
@@ -673,7 +687,10 @@ def _redact_recursive(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact_recursive(v) for v in value]
     if isinstance(value, str):
-        return _redact_sensitive(value)
+        out = _redact_sensitive(value)
+        if config.get("logging", {}).get("redact_paths", True):
+            out = _redact_paths_in_text(out)
+        return out
     return value
 
 
@@ -691,7 +708,7 @@ def log_event(logger: Any, level: str, event: str, file_name: str | None = None,
         "timestamp": datetime.datetime.now().astimezone().isoformat(),
         "level": level,
         "event": event,
-        "file": _redact_sensitive(file_name),
+        "file": _redact_recursive(file_name),
     }
     if details:
         record["details"] = _redact_recursive(details)
@@ -2467,6 +2484,19 @@ def _build_commit_args(asset: dict[str, Any], target_file: Path) -> list[str]:
     return args
 
 
+def _safe_stem(raw: str) -> str:
+    """Strip path separators and traversal components from a filename stem.
+
+    Defense against directory traversal: a staged name like ``..\\..\\evil``
+    must never escape ``final_folder`` when joined with ``/``.
+    """
+    cleaned = str(raw).replace("\\", "/")
+    parts = [p for p in cleaned.split("/") if p not in ("", ".", "..")]
+    cleaned = "_".join(parts)
+    cleaned = cleaned.replace(":", "_")
+    return cleaned or "unnamed"
+
+
 def _commit_move(old_path: Path, final_folder: Path, base_stem: str, suffix: str, skip_rename: bool) -> Path:
     """Move (or copy) ``old_path`` into ``final_folder`` using an unused name.
 
@@ -2475,6 +2505,7 @@ def _commit_move(old_path: Path, final_folder: Path, base_stem: str, suffix: str
     is already taken — including races from parallel CLI commit workers — it
     retries with an incrementing ``_N`` suffix. Returns the resolved target path.
     """
+    base_stem = _safe_stem(base_stem)
     counter = 0
     final_folder.mkdir(parents=True, exist_ok=True)
     while True:
@@ -2699,26 +2730,51 @@ def delete_session(session_path: str | Path) -> bool:
         return False
 
 
+def _valid_session_asset(a: Any) -> bool:
+    """Return True if ``a`` is a well-formed staged-asset dict for restore."""
+    return (isinstance(a, dict)
+            and isinstance(a.get("original_name"), str)
+            and isinstance(a.get("staged_name"), str)
+            and isinstance(a.get("original_path"), str))
+
+
 def load_session(session_path: str | Path) -> dict[str, Any]:
-    """Load a saved session, validating that original files still exist on disk."""
+    """Load a saved session, validating schema and that original files still exist on disk.
+
+    Malformed entries and paths outside the expected roots are dropped; symlinks
+    are never followed (defense against malicious session files).
+    """
     data = json.loads(Path(session_path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("Session file is not a JSON object")
 
     staged_assets = []
     missing_files = []
     for a in data.get("staged_assets", []):
-        a["original_path"] = Path(a["original_path"])
-        if a["original_path"].exists():
+        if not _valid_session_asset(a):
+            continue
+        p = Path(a["original_path"])
+        if p.is_symlink():
+            missing_files.append(a["original_name"])
+            continue
+        if p.exists():
             staged_assets.append(a)
         else:
             missing_files.append(a["original_name"])
 
     uploaded_files = {}
     for name, path_str in data.get("uploaded_files", {}).items():
+        if not isinstance(path_str, str):
+            continue
         p = Path(path_str)
+        if p.is_symlink():
+            continue
         if p.exists():
             uploaded_files[name] = p
 
     settings = data.get("settings", {})
+    if not isinstance(settings, dict):
+        settings = {}
     return {
         "staged_assets": staged_assets,
         "uploaded_files": uploaded_files,
@@ -3627,6 +3683,20 @@ def wipe_local_model(model_name: str = "qwen2.5vl:7b") -> dict[str, Any]:
 # 7. STAGING EXPORT / IMPORT
 # -----------------------------------------------------------------------------
 
+def _neutralize_csv_formula(value: str | None) -> str:
+    """Neutralize spreadsheet formula-injection leading characters.
+
+    Cells starting with ``=``, ``+``, ``-``, ``@`` (or a leading tab / CR)
+    are interpreted as formulas by Excel/Sheets. Prefix a single quote so the
+    value is treated as plain text.
+    """
+    if not value:
+        return value or ""
+    if value[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def export_staging_csv(staged_assets: list[dict[str, Any]]) -> str:
     """Serialize staged assets to a CSV string for export.
 
@@ -3643,11 +3713,11 @@ def export_staging_csv(staged_assets: list[dict[str, Any]]) -> str:
     writer.writerow(["original_name", "proposed_filename", "category", "tags", "summary"])
     for a in staged_assets:
         writer.writerow([
-            a.get("original_name", ""),
-            a.get("staged_name", ""),
-            a.get("category", ""),
-            ", ".join(a.get("tags", [])),
-            a.get("summary", ""),
+            _neutralize_csv_formula(str(a.get("original_name", ""))),
+            _neutralize_csv_formula(str(a.get("staged_name", ""))),
+            _neutralize_csv_formula(str(a.get("category", ""))),
+            _neutralize_csv_formula(", ".join(a.get("tags", []))),
+            _neutralize_csv_formula(str(a.get("summary", ""))),
         ])
     return output.getvalue()
 
@@ -3692,7 +3762,7 @@ def import_staging_csv(csv_string: str, allowed_categories: tuple[str, ...] | li
     allowed = set(allowed_categories)
     for row_num, row in enumerate(reader, start=2):
         tags_raw = row.get("tags", "")
-        tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+        tags = [_neutralize_csv_formula(t.strip()) for t in tags_raw.split(",") if t.strip()]
         category = row.get("category", "").strip().lower().replace(" ", "_")
         safe_chars = [c for c in category if c.isalpha() or c.isdigit() or c in ("_", "-")]
         category = "".join(safe_chars).strip("_")
@@ -3701,11 +3771,16 @@ def import_staging_csv(csv_string: str, allowed_categories: tuple[str, ...] | li
             category = "uncategorized"
         if not category:
             category = "uncategorized"
+        original_name = _neutralize_csv_formula(str(row.get("original_name", "")))
+        proposed = _neutralize_csv_formula(str(row.get("proposed_filename", "")))
+        if proposed and any(ch in proposed for ch in ('/', '\\', '\x00')):
+            warnings.append(f"Row {row_num}: proposed_filename '{proposed}' contains path separators — cleared")
+            proposed = ""
         assets.append({
-            "original_name": row.get("original_name", ""),
-            "staged_name": row.get("proposed_filename", ""),
+            "original_name": original_name,
+            "staged_name": proposed,
             "category": category,
             "tags": tags,
-            "summary": row.get("summary", ""),
+            "summary": _neutralize_csv_formula(str(row.get("summary", ""))),
         })
     return assets, warnings

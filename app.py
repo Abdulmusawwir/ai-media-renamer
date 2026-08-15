@@ -379,6 +379,16 @@ def _model_option_label(model: str, installed: set[str]) -> str:
 # Sidebar: AI Provider & Environment
 # -----------------------------------------------------------------------------
 
+def _on_server_lan_expose_change(prev_value: bool) -> None:
+    """Persist the LAN-exposure toggle to config (takes effect on restart)."""
+    new_value = st.session_state.get("server_lan_expose", prev_value)
+    if bool(new_value) == prev_value:
+        return
+    config.setdefault("server", {})["lan_expose"] = bool(new_value)
+    save_config()
+    reload_config()
+
+
 def _on_api_key_change() -> None:
     """Save the API key entered in the sidebar text input to the system keychain."""
     provider = st.session_state.provider_info
@@ -1014,7 +1024,11 @@ with tab_upload:
                     chosen = st.selectbox("Saved sessions", options, key="session_picker")
                     if st.button(":material/history: Restore Session", key="restore_session"):
                         idx = options.index(chosen)
-                        result = load_session(saved[idx]["path"])
+                        try:
+                            result = load_session(saved[idx]["path"])
+                        except (ValueError, json.JSONDecodeError, OSError) as exc:
+                            st.error(f"Session file is corrupt or unreadable: {exc}")
+                            st.stop()
                         st.session_state.staged_assets = result["staged_assets"]
                         st.session_state.uploaded_files = result["uploaded_files"]
                         s = result["settings"]
@@ -2102,6 +2116,33 @@ with tab_config:
     else:
         with st.expander("View config.json (read-only)", expanded=False):
             st.json(_mask_secrets(config))
+
+    st.space()
+
+    # -- 20.3: Server / LAN exposure --
+    st.subheader(":material/dns: Server")
+    lan_expose = bool(config.get("server", {}).get("lan_expose", False))
+    new_lan_expose = st.toggle(
+        "Expose on local network (LAN)",
+        value=lan_expose,
+        key="server_lan_expose",
+        help="When OFF the app binds to 127.0.0.1 (loopback) only. When ON it binds "
+             "to 0.0.0.0 and is reachable from other devices on your network.",
+        on_change=lambda: _on_server_lan_expose_change(lan_expose),
+    )
+    if new_lan_expose:
+        st.warning(
+            ":material/warning: The app will be reachable from your local network "
+            "with NO authentication on the next start. Do not enable this on "
+            "untrusted networks."
+        )
+    st.caption("The bind address is fixed at launch — restart the app for this setting to take effect.")
+    if lan_expose:
+        st.warning(
+            ":material/public: LAN exposure is enabled (config `server.lan_expose = true`). "
+            "When the server starts it binds to 0.0.0.0 with no authentication, so it is "
+            "reachable from your local network."
+        )
 
     st.space()
 

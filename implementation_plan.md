@@ -787,19 +787,19 @@
 - [x] Mask secret-looking keys (`api_key`, `token`, `password`, `*secret*`) in the Configuration tab JSON view / editor — S5 read-only view masked; editor shows a warning caption.
 
 ### 20.3 Local server exposure
-- [ ] Desktop EXE must bind Streamlit to `127.0.0.1` by default (never `0.0.0.0`); add a config flag to opt into LAN exposure with an in-UI warning
-- [ ] Docker compose: keep `renamer` and `ollama` off exposed host ports unless explicitly requested; document the unauth exposure risk
+- [x] Desktop EXE must bind Streamlit to `127.0.0.1` by default (never `0.0.0.0`); add a config flag to opt into LAN exposure with an in-UI warning — `.streamlit/config.toml` `[server] address = "127.0.0.1"`; bootstrap passes `--server.address=127.0.0.1` unless `config.server.lan_expose=true` (then `0.0.0.0`); Config-tab "Expose on local network" toggle + warnings (takes effect on restart).
+- [x] Docker compose: keep `renamer` and `ollama` off exposed host ports unless explicitly requested; document the unauth exposure risk — host ports now bind `127.0.0.1:` with a comment explaining the opt-in (`0.0.0.0:`).
 
 ### 20.4 Input validation & injection
-- [ ] Audit all `st.markdown(unsafe_allow_html=True)` call sites — confirm no user-controlled strings (filenames, AI summaries, tags, profile prompts) can reach HTML; sanitize or render as text
-- [ ] CSV import: neutralize spreadsheet formula injection (cells starting `=`, `+`, `-`, `@`) and validate imported paths/filenames before use
-- [ ] Session restore: schema-validate loaded JSON, reject paths outside expected roots, never follow symlinks
-- [ ] Add a test asserting staged filenames can never traverse directories on commit (sanitization already exists — lock it in)
+- [x] Audit all `st.markdown(unsafe_allow_html=True)` call sites — confirm no user-controlled strings (filenames, AI summaries, tags, profile prompts) can reach HTML; sanitize or render as text — 3 call sites audited, all static/constant content (`_COMMIT_BEEP` base64, static CSS, static footer); no user-controlled strings reach raw HTML.
+- [x] CSV import: neutralize spreadsheet formula injection (cells starting `=`, `+`, `-`, `@`) and validate imported paths/filenames before use — `_neutralize_csv_formula()` applied on export + import; import also rejects `proposed_filename` containing path separators.
+- [x] Session restore: schema-validate loaded JSON, reject paths outside expected roots, never follow symlinks — `load_session()` rejects non-object JSON, drops malformed asset dicts, skips symlinked paths.
+- [x] Add a test asserting staged filenames can never traverse directories on commit (sanitization already exists — lock it in) — `_safe_stem()` in `_commit_move()` strips `/`/`\`/`..`/`:`; covered by unit tests + a commit-level traversal test.
 
 ### 20.5 Telemetry & log privacy
 - [x] Confirm telemetry events carry only counts/profiles/versions — never absolute paths, filenames, or AI text; add a redaction pass in `track_event()`. **SCOPE CHANGE:** telemetry was never shipped (divergence documented in REMEDIATION.md Wave 3). No `track_event()` exists, so the check is vacuous; re-scoped to: any future telemetry must reuse the `log_event` redaction path. PRIVACY.md already documents "no telemetry".
 - [x] Purge `telemetry.jsonl` on opt-out. **N/A** — file never exists (no telemetry).
-- [ ] Logs store absolute paths: add a `redact_paths` flag (default on for non-verbose) and document log retention for `undo_log.jsonl` — **OPEN**, moves to Wave 2/3.
+- [x] Logs store absolute paths: add a `redact_paths` flag (default on for non-verbose) and document log retention for `undo_log.jsonl` — `config.logging.redact_paths` (default `true`); `log_event`/`_redact_recursive` mask Windows/UNC/POSIX absolute paths via `_redact_paths_in_text()`. Log retention: JSONL logs are written per-day to `logs/renamer_<date>.jsonl` (append-only, `setup_logging` uses a plain `FileHandler`); `undo_log.jsonl` lives under `%APPDATA%/ai-media-renamer/`, is append-only, and a batch entry is pruned only after a fully successful rollback (`failed == 0`). `config.logging.max_bytes_per_file` / `backup_count` remain unused by the logger — flagged for Wave 2/3 cleanup.
 
 ---
 

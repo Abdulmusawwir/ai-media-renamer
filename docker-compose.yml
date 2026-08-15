@@ -1,4 +1,8 @@
 services:
+  # NOTE — host ports bind to loopback (127.0.0.1) ONLY by default.
+  # Ollama has no authentication and the renamer UI has no authentication:
+  # do not remove the "127.0.0.1:" prefix unless you explicitly want LAN access,
+  # and only on networks you trust.
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -6,7 +10,7 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     deploy:
       resources:
         reservations:
@@ -20,7 +24,7 @@ services:
     container_name: ai-media-renamer
     restart: unless-stopped
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
     volumes:
       - renamer_sessions:/root/.config/ai-media-renamer
     environment:
