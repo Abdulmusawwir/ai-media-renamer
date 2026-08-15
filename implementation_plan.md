@@ -842,9 +842,11 @@ Phase AE: 18.2                   → Pydantic structured outputs — v1.5.0
 Phase AF: 16.3                   → Per-format document metadata — v1.5.0
 Phase AG: 18.3                   → ExifTool batching — v1.5.0
 Phase AH: 19.1, 19.2, 19.3      → Audio transcription pipeline — v1.5.0
-Phase AI: 20.1–20.5             → Security checkup & enhancements — PENDING (only remaining work)
+Phase AI: 20.1–20.5             → Security checkup & enhancements — v1.6.3
 ```
 
 > **v1.6.1 (2026-08-08)** — shipped separately ahead of Phase AI as a release-hardening pass: honest model install status (no config-catalog fallback in `available_models()`), wizard use-case/plan dialogs made resizable + scrollable so footer buttons are always reachable, in-app "open setup wizard" CTA when dependencies are missing, `[client] toolbarMode = "minimal"` to kill the Streamlit chrome flash, and a llama.cpp runtime fallback (`LlamaCppProvider`, auto-detected `llamacpp_running`). See CHANGELOG v1.6.1 and audit.md §1.
 
 > **v1.6.2 (2026-08-08, shipped `901c9c4`, tag `v1.6.2`, PR #4)** — llama.cpp becomes the default local runtime for NEW installs while Ollama (already installed) is detected and reused without prompting. Wizard downloads the `llama-server.exe` runtime (~18 MB) + a GGUF vision/text model (verified URLs in `LLAMACPP_GGUF_CATALOG`), wires `config.json` via `configure_llamacpp_install()`, and starts the daemon via `ensure_llamacpp_server()`. `OpenAIProvider` gained text-only `_analyze_prompt_only()` for documents/audio over the OpenAI-compatible endpoint. `test_llamacpp_setup.py` (21 tests) covers catalog, recommendations, URL resolution, config wiring, server lifecycle, and prompt paths — suite at 290 passing. Frozen EXE smoke-tested; CI run `31329436162` green; release live with asset.
+
+> **v1.6.3 (2026-08-15, branch `feat/remediation-wave1`)** — Phase AI complete (20.1–20.5): checksum-verified downloads, secret redaction, keyring fail-closed + UI surfacing, explicit loopback bind + LAN opt-in, input-validation hardening (CSV formula injection, session schema/symlink, commit traversal lock-in), and log path redaction. Plus remediation Wave 1 (S1–S5, C1–C8: cross-drive/race-safe commits, rollback retention, full `reload_config()`, strict AI parse, ExifTool timeout + error surfacing, Ollama health). Suite at 333 passing.

@@ -1,13 +1,27 @@
 # Changelog
 
-## [v1.6.3] — 2026-08-11
+## [v1.6.3] — 2026-08-15
 
 ### Security
 - **Supply-chain hardening for bootstrap downloads (Phase AI 20.1):** every binary the wizard fetches — FFmpeg, ExifTool, the llama.cpp runtime, and GGUF models — is now verified against its published SHA-256 digest before use. `download_file()` rejects plain-HTTP URLs outright and deletes any file that fails checksum verification. Digests come from the publishers themselves: gyan.dev's `.sha256` file for FFmpeg, exiftool.org's per-version checksums file for ExifTool, the GitHub release API `digest` field plus pinned fallback digests for llama.cpp, and HuggingFace LFS OIDs baked into the GGUF catalog. A build with no published digest is skipped, never installed.
 - **Dependency audit (Phase AI 20.1):** `cryptography>=50.0.0` floor added for PYSEC-2026-3552 (transitive dep of pywebview); `requirements.lock` now freezes exact build versions.
+- **Secret redaction everywhere (Phase AI 20.2):** API keys can no longer leak into exception messages, `log_event()` records, or `_format_ai_error()` output. Keys are registered in an in-memory secret cache and masked (including `?key=`/`api_key=`/`token=` query strings) before anything is logged or shown. The Configuration tab's read-only JSON view masks secret-looking keys (`api_key`, `token`, `password`, `*secret*`).
+- **Keychain failures fail closed (Phase AI 20.2):** if the OS keychain is unavailable, the app never falls back to a plaintext file. A new health probe surfaces a clear sidebar warning and guarded error captions wherever keys are saved/read/switched.
+- **Local server exposure (Phase AI 20.3):** the app now binds to `127.0.0.1` explicitly, so it is never reachable from the LAN by default. Opt in via `config.json` `server.lan_expose` (or the "Expose on local network" toggle in Configuration) — with an in-UI warning that LAN exposure has no authentication. Docker Compose host ports are likewise bound to loopback.
+- **Input validation & injection (Phase AI 20.4):** all `unsafe_allow_html` call sites audited (static content only). CSV import/export neutralize spreadsheet formula injection (`=`, `+`, `-`, `@` leading cells) and reject path separators in imported filenames. Session restore schema-validates loaded JSON, drops malformed entries, and never follows symlinks. Staged filenames can no longer traverse directories on commit (`_safe_stem`).
+- **Log path privacy (Phase AI 20.5):** absolute paths are redacted from JSONL logs by default (`config.logging.redact_paths`).
+
+### Fixed
+- **Cross-drive + race-safe commits:** `_commit_move()` falls back to copy+delete when `rename` fails across Windows drives and retries with a `_N` suffix on name collisions — shared by both commit paths. The `skip_rename` copy target is deduped too (no silent overwrites).
+- **Rollback retained on partial failure:** a failed rollback keeps its undo-log batch so it can be retried.
+- **`reload_config()` refreshed all globals:** text model, extensions, preview settings, profiles, and provider now update immediately after a config save.
+- **Strict AI response parsing:** non-object JSON (`null`, arrays, bare strings) is rejected; `tags` must be a list.
+- **ExifTool hardening:** reader-thread + 60s timeout prevents IPC deadlocks; `execute_batch()` returns one output per file; metadata-write failures are surfaced as `ERROR:...` instead of silently reported as committed.
+- **Ollama health check:** vision-model detection now handles model objects via the same 3-branch extraction as `check_environment()`, with one retry on transient failures.
+- **Keyring exceptions no longer crash the UI** (see Keychain failures above).
 
 ### Code Quality
-- **15 new tests** (SHA-256 helpers, HTTPS enforcement, checksum mismatch handling, digest resolvers, ExifTool checksum parsing); 305 total, all passing. Ruff unchanged (pre-existing baseline only).
+- **28 new tests** (SHA-256 helpers, HTTPS enforcement, checksum handling, redaction, CSV formula injection, session schema/symlink, traversal lock-in, keyring probe); 333 total, all passing. Ruff unchanged (pre-existing baseline only).
 
 ---
 
