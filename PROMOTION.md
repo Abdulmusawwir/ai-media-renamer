@@ -12,7 +12,7 @@ Posts are intentionally plain-spoken (not AI-polished). Tweak names/numbers befo
 
 My downloads folder was a graveyard. `IMG_5821.jpg`. `final_v3_really.mp4`. `voice_note_034.m4a`. Every editor I know has the same problem — you spend a whole afternoon just renaming stuff so you can find it later.
 
-So I made a free desktop app that does it for me. You drop in a folder of videos, photos, docs, and audio. It runs a local AI model (Ollama, so nothing is uploaded anywhere), looks at each file, and renames it something you'd actually search for. `IMG_5821.jpg` becomes `quran_carving_ornate_detail.jpg`. It also writes real metadata tags into the file itself, so Resolve and Premiere can search it.
+So I made a free desktop app that does it for me. You drop in a folder of videos, photos, docs, and audio. It runs a local AI model (llama.cpp or Ollama, so nothing is uploaded anywhere), looks at each file, and renames it something you'd actually search for. `IMG_5821.jpg` becomes `quran_carving_ornate_detail.jpg`. It also writes real metadata tags into the file itself, so Resolve and Premiere can search it.
 
 - Runs fully offline
 - Free, open source, Windows EXE — no install, no account
@@ -33,7 +33,7 @@ I edit as a side hustle and my project folders are a disaster — every export e
 
 It watches the first frame + reads the audio track of a clip, then names it like a human would: `beach_sunset_drone_pan`, `interview_founder_funding_talk`. It tags files with metadata that Premiere and DaVinci Resolve can actually read, so you can search your library by keyword instead of scrolling.
 
-It's free, runs locally (no uploading your clients' footage to anyone), and works for photos, docs, and audio too.
+It's free, runs on a local AI model (llama.cpp or Ollama — no uploading your clients' footage to anyone), and works for photos, docs, and audio too.
 
 Would any of you use something like this, or is your naming system already under control? (Honest question — maybe I'm solving a problem only I have.)
 

@@ -116,7 +116,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 
 ### Configuration
 - [x] Single `config.json` as source of truth for all tunable parameters
-- [x] Configurable: 8 AI prompt profiles, 56 categories, model/ provider settings, extensions (video/image/document/audio), preview params, naming templates, logging limits
+- [x] Configurable: 9 AI prompt profiles, 54 categories, model/ provider settings, extensions (video/image/document/audio), preview params, naming templates, logging limits
 - [x] No hardcoded constants in Python code
 - [x] Config editor tab (read-only + editable modes) in web UI
 - [x] In-app category management (add/delete/rename categories via UI)

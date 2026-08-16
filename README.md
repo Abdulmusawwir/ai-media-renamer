@@ -81,7 +81,7 @@ That's it. A folder that took an afternoon to organize by hand is done while you
 
 ## Roadmap — we're just getting started
 
-- [ ] **Security hardening pass** — supply-chain audit (checksums + lockfile done in v1.6.3); secrets handling and server exposure controls remain
+- [x] **Security hardening pass** — done in v1.6.3: checksum-verified downloads, frozen lockfile, secret redaction, keychain fail-closed, loopback-only server with LAN opt-in, input-validation hardening, log path redaction
 - [ ] More AI models, cloud providers, and language support
 - [ ] Auto-sorting into category folders
 - [ ] Bulk import from cloud drives

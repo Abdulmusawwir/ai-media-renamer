@@ -833,7 +833,7 @@ Phase V: Support                 → Donation / sponsorship links — DEFERRED (
 Phase W: 14.1, 14.2             → Caching + rerun optimization (Critical performance) — DONE
 Phase X: 14.3, 14.4, 14.5       → FFmpeg optimization + loading states + responsive table — DONE
 Phase Y: 14.6, 14.7, 14.8       → Keyboard shortcuts + config polish + download UX — DONE
-Phase Z: 15.1–15.5              → Privacy-first telemetry (PostHog, opt-in, PRIVACY.md) — DONE
+Phase Z: 15.1–15.5              → Privacy-first telemetry (PostHog, opt-in, PRIVACY.md) — REMOVED (telemetry never shipped; see 20.5 divergence note)
 Phase AA: 16.1, 16.4            → Document categorization fix + FontBBox suppression (Critical bugs) — v1.5.0
 Phase AB: 17.1, 17.2, 17.3      → Model selection wizard + bootstrap + detection — v1.5.0
 Phase AC: 16.2                   → Document duplicate detection — v1.5.0

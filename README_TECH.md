@@ -1,6 +1,6 @@
 # AI Media Renamer — Technical Reference
 
-Automatically organize, rename, and tag video, image, document, and audio assets using AI. 8 prompt profiles for different use cases. Comes with both a **CLI** and a **Streamlit web app**.
+Automatically organize, rename, and tag video, image, document, and audio assets using AI. 9 prompt profiles for different use cases. Comes with both a **CLI** and a **Streamlit web app**.
 
 > This is the deep-dive reference: full feature list, CLI flags, config reference, module map, metadata tables, and system requirements.
 >
@@ -52,7 +52,7 @@ streamlit run app.py
 ## Features
 
 ### AI Analysis
-- **8 prompt profiles** — General Balanced, General B-Roll, Cinematography, Motion & Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming, Audio Files, and Custom
+- **9 prompt profiles** — General Balanced, General B-Roll, Cinematography, Motion & Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming, Audio Files, and Custom
 - **2 local + 5 cloud AI providers** — Ollama (local), llama.cpp (local, default for new installs), Gemini, OpenAI, Anthropic, Groq, OpenRouter
 - **Single-frame extraction** — one representative frame per video for accurate analysis
 - **Image analysis** — downscaled in memory, no disk writes
@@ -78,9 +78,18 @@ streamlit run app.py
 - **Session persistence** — save and resume analysis sessions across app restarts
 - **Undo/rollback** — revert the last commit batch (move files back, remove metadata)
 
-### Telemetry (Optional)
-- **Anonymous usage data** — opt-in to send non-identifying events (ratings, session stats, errors) to help improve the app
-- **Full control** — toggle on/off anytime in Configuration tab. See [PRIVACY.md](PRIVACY.md) for details
+### Telemetry
+
+There is **no telemetry**. The app never collects or transmits usage data — no analytics SDK, no PostHog, no tracking events. Privacy is documented in [PRIVACY.md](PRIVACY.md).
+
+### Security (v1.6.3)
+
+- **Checksum-verified downloads** — every binary the setup wizard fetches (FFmpeg, ExifTool, llama.cpp runtime, GGUF models) is verified against its published SHA-256 digest before use; plain-HTTP URLs are rejected.
+- **Secret redaction** — API keys are masked in exception messages, JSONL logs, and the Configuration-tab JSON view.
+- **Keychain fail-closed** — if the OS keychain is unavailable the app shows a warning instead of falling back to plaintext key storage.
+- **Loopback-only by default** — the server binds `127.0.0.1` unless you opt into LAN exposure via `config.server.lan_expose` (an in-UI toggle with a warning). Docker Compose host ports also bind to loopback unless changed.
+- **Input validation** — CSV import/export neutralizes spreadsheet formula injection; session restore schema-validates and rejects symlinks; staged filenames can never traverse directories on commit.
+- **Log path privacy** — absolute paths are redacted from JSONL logs by default (`config.logging.redact_paths`).
 
 ---
 
@@ -127,7 +136,7 @@ Interactive mode per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze`, `[E]di
 | `engine.py` | Core importable functions — config, ExifTool sessions, FFmpeg frame extraction, AI analysis, environment checks, file commits, duplicate detection, audio transcription |
 | `app.py` | Streamlit web app — Upload & Analyze tab (file upload, per-asset AI analysis, editable staging matrix, commit), Analytics Dashboard |
 | `cli.py` | CLI workflow — scan, extract, analyze, stage, commit |
-| `config.json` | Single source of truth — prompt profiles (8), categories (56), model settings, naming templates, providers, logging |
+| `config.json` | Single source of truth — prompt profiles (9), categories (54), model settings, naming templates, providers, logging |
 
 ---
 
@@ -196,14 +205,15 @@ Compatible with **DaVinci Resolve** and **Adobe Premiere Pro**.
 
 ## Configuration (`config.json`)
 
-- **`prompt_profiles`** — 8 AI prompt profiles with per-profile allowed categories
-- **`allowed_categories`** — 56 taxonomy entries (including audio categories)
+- **`prompt_profiles`** — 9 AI prompt profiles with per-profile allowed categories
+- **`allowed_categories`** — 54 taxonomy entries (including audio categories)
 - **`cinematography`** — Reference tables for shot types, camera moves, lighting, color palettes, composition, moods
 - **`model`** — Engine (Ollama / llama.cpp), model name, text model, temperature, num_ctx, keep_alive, runtime config (llama.cpp base URL + GGUF paths)
 - **`preview`** — Image max edge (1024px), video frame scale (300px)
 - **`naming_templates`** — Preset filename patterns with `{category}`, `{topic}`, `{description}`, `{date}`
 - **`video_extensions`** / `image_extensions` / `document_extensions` / `audio_extensions` — Configurable file type lists
-- **`logging`** — Log directory, file rotation, max upload size (10 GB)
+- **`server`** — `lan_expose` (default `false`): when enabled the web server binds `0.0.0.0` instead of loopback-only `127.0.0.1` (no authentication — only enable on trusted networks)
+- **`logging`** — Log directory, file rotation, max upload size (10 GB), `redact_paths` (default `true`)
 
 ---
 

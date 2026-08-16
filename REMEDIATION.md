@@ -71,7 +71,7 @@
 ## Wave 3 — CLI, docs, config & lint hygiene
 
 - **CLI**: `--import-csv` should not require a positional `dir`; `--categories-override` validated as dict.
-- **Telemetry divergence**: `implementation_plan.md` Layer 15 + CHANGELOG + `README_TECH.md:82-83` claim telemetry that does not exist (PRIVACY.md says none). Document reality; re-scope 20.5. **RESOLVED (v1.6.3):** 20.5 re-scoped in `implementation_plan.md` — no `track_event()` exists, PRIVACY.md already documents "no telemetry", purge item marked N/A. A separate pass should still clean the stale telemetry claims in `CHANGELOG.md` + `README_TECH.md`.
+- **Telemetry divergence**: `implementation_plan.md` Layer 15 + CHANGELOG + `README_TECH.md:82-83` claim telemetry that does not exist (PRIVACY.md says none). Document reality; re-scope 20.5. **RESOLVED (v1.6.3):** 20.5 re-scoped in `implementation_plan.md` — no `track_event()` exists, PRIVACY.md already documents "no telemetry", purge item marked N/A. **Stale claims cleaned (v1.6.3 docs sync):** `README_TECH.md` Telemetry section replaced with a "no telemetry" note + a Security (v1.6.3) section; `CHANGELOG.md` v1.5.0 gained a "Removed: all PostHog telemetry" entry; `implementation_plan.md` Phase Z line annotated REMOVED.
 - **Config**: fix `model.providers.gemini.selected_model` (`llama-3.2-90b-vision-preview` → real Gemini model); drop dead `preview.video_grid_tile` / `video_frame_count`.
 - **Ruff**: fix 70 lint errors (43 auto-fixable; mostly `tests/` F401/E501/I001).
 - **Single source of truth**: `NAMED_TEMPLATES`, llama.cpp URLs/digests duplicated in code vs config.

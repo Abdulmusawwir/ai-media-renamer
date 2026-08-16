@@ -89,6 +89,9 @@
 - **Per-format document metadata (16.3):** DOCX metadata via python-docx, XLSX via openpyxl. TXT/MD/RTF/CSV/PPTX skip metadata with no error. `skip_metadata` param on `execute_commit()`.
 - **Model selection wizard (17.1-17.3):** tkinter dialog with 4 model options (Qwen2.5-VL 7B recommended, 3B, Qwen3-VL 4B, Moondream 2). Bootstrap downloads user-chosen model. Vision model detection returns installed model list.
 
+### Removed
+- **All PostHog telemetry:** the opt-in analytics system introduced in v1.4.0 was removed in full — `track_event()`, the PostHog SDK, `TELEMETRY_FILE`, and the opt-in dialog/toggle no longer exist. The app collects no usage data. PRIVACY.md documents "no telemetry". (v1.4.0 changelog entries below describe the system as it existed at that release.)
+
 ### Improvements
 - **Document categorization fix (16.1):** `get_active_prompt()` now appends explicit IMPORTANT constraint listing only profile-specific categories. Multiple needle replacement patterns for robustness.
 - **Document duplicate detection (16.2):** `compute_asset_hash()` returns `sha256:{hash}` for documents (text content for small text files, raw bytes for binary). `find_duplicates()` groups by hash type, compares within groups only.
