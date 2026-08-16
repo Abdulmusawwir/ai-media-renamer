@@ -1,5 +1,16 @@
 # Changelog
 
+## [v1.6.4] — 2026-08-16
+
+### Code Quality
+- **Remediation Wave 2 (Medium backlog) complete.** Engine hardening: atomic `save_config` (temp + `fsync` + `os.replace`), import-safe `load_config` (`RuntimeError`, `CONFIG_LOAD_ERROR` + `_minimal_config()` fallback, `reload_config` keeps old config on failure), thread-safe lazy whisper-model load, provider selection respects `config.model.last_provider`, `validate_category` against the active categories, `sanitize_name` no longer strips `grid`/`sequence`, `.doc` handled truthfully (unsupported), Ollama/llama.cpp ports from config/env (`OLLAMA_HOST`, `model.ollama.base_url`), `ExifToolSession` raises instead of `print`+`sys.exit`, `tempfile.mkstemp` replaces `mktemp`.
+- **Web app:** engine switch moved into an `on_change` callback (`_on_engine_change`, radio disabled during analysis), single `_reset_analysis_state()` helper shared by file-change / Clear All / session restore (also clears `analysis_index` + `duplicate_pairs`), Clear All no longer deletes saved sessions (explicit Delete control remains), `exif.close()` in a `finally`, stale upload `temp_dir` rmtree'd before re-extract, thumbnail decode + duplicate table behind explicit load toggles.
+- **CLI:** argparse mutually-exclusive groups (`--export-csv`/`--import-csv`, `--rollback`/`--reset-config`), `--case-style` default synced to `DEFAULT_CASE_STYLE` from config.
+- **Docs:** `REMEDIATION.md` Wave 2 marked DONE; `audit.md` notes updated; `task.md` repointed at Wave 3.
+- Tests: 333 passing, 1 skipped (unchanged); ruff unchanged from pre-existing baseline (27 findings on engine/app/cli).
+
+---
+
 ## [v1.6.3] — 2026-08-15
 
 ### Security

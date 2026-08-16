@@ -91,6 +91,16 @@ There is **no telemetry**. The app never collects or transmits usage data — no
 - **Input validation** — CSV import/export neutralizes spreadsheet formula injection; session restore schema-validates and rejects symlinks; staged filenames can never traverse directories on commit.
 - **Log path privacy** — absolute paths are redacted from JSONL logs by default (`config.logging.redact_paths`).
 
+### Reliability (v1.6.4)
+
+- **Atomic config writes** — `save_config()` writes to a temp file and `os.replace`s it, so a crash mid-save can never leave a truncated `config.json`.
+- **Import-safe startup** — config load/validation is deferred and non-fatal; a broken config degrades gracefully (`CONFIG_LOAD_ERROR` + a minimal fallback) instead of crashing the process at import time.
+- **Callback-driven settings** — the engine switcher runs in a Streamlit `on_change` callback (radio disabled while analysis is running) instead of mutating provider/config state mid-render.
+- **Safer Clear All** — never deletes saved sessions; sessions are removed only via the explicit Delete control. A shared `_reset_analysis_state()` helper keeps every reset path consistent (also clears the analysis index and duplicate results).
+- **ExifTool lifecycle** — the batch session is closed in a `finally`, and stale upload temp-dirs are cleaned up before re-extraction.
+- **Lazy previews** — thumbnail decoding and the duplicate table are built on demand instead of on every rerun.
+- **CLI validation** — mutually-exclusive argument groups (`--export-csv`/`--import-csv`, `--rollback`/`--reset-config`) and a config-synced default case style.
+
 ---
 
 ## CLI Reference
@@ -105,7 +115,7 @@ python cli.py "path/to/your/assets" [options]
 | `--verbose` / `-v` | Debug output (raw AI responses) |
 | `--profile` / `-p` | AI prompt profile: `general_balanced`, `general_broll`, `cinematography`, `motion_overlays`, `religious_landmarks`, `document_naming`, `spreadsheet_naming`, `audio_naming`, `custom` |
 | `--template` / `-t` | Naming template preset (`default`, `short`, `editorial`) or raw pattern |
-| `--case-style` / `--style` | Case style: `snake_case` (default), `camelCase`, `kebab-case`, `pascal_case`, `lowercase` |
+| `--case-style` / `--style` | Case style (default: config `naming.case_style`, `title_case`): `snake_case`, `camelCase`, `kebab-case`, `pascal_case`, `lowercase` |
 | `--max-chars` / `--max` | Max filename length (0 = no limit) |
 | `--force` | Re-analyze all files, including previously processed ones |
 | `--workers` / `-w` | Parallel extraction workers (default: CPU count) |
