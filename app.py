@@ -37,6 +37,7 @@ from engine import (
     ExifToolSession,
     _format_ai_error,
     _is_vision_model,
+    _llamacpp_host_port,
     analyze_document_with_ai,
     apply_case_style,
     apply_naming_template,
@@ -657,7 +658,8 @@ with st.sidebar:
                     names += f" (+{len(vision_models) - 3} more)"
                 st.caption(f"Vision: {names}")
             elif not env.get("llamacpp_running"):
-                st.error("llama.cpp server is not running at localhost:8080. "
+                _lp_host, _lp_port = _llamacpp_host_port()
+                st.error(f"llama.cpp server is not running at {_lp_host}:{_lp_port}. "
                          "Start `llama-server` and click Refresh.")
             elif not env.get("model_available"):
                 st.info("No vision model loaded in llama.cpp. "
@@ -737,7 +739,8 @@ if st.session_state.provider_info in _local_provider_ids:
     nfoe_id = "llamacpp_running" if st.session_state.provider_info == "llamacpp" else "ollama_running"
     if env and not env.get(nfoe_id):
         if st.session_state.provider_info == "llamacpp":
-            st.warning("llama.cpp server is not reachable at localhost:8080. "
+            _lp_host, _lp_port = _llamacpp_host_port()
+            st.warning(f"llama.cpp server is not reachable at {_lp_host}:{_lp_port}. "
                        "Start `llama-server` with your model, or use the setup "
                        "wizard to install Ollama instead.", icon=":material/warning:")
         else:
@@ -747,7 +750,8 @@ if st.session_state.provider_info in _local_provider_ids:
         if st.button("Open setup wizard", key="_setup_cta_warn"):
             _spawn_setup_wizard()
     elif st.session_state.provider_info == "llamacpp":
-        st.caption(":material/check: llama.cpp server detected at localhost:8080")
+        _lp_host, _lp_port = _llamacpp_host_port()
+        st.caption(f":material/check: llama.cpp server detected at {_lp_host}:{_lp_port}")
 
 if st.session_state.provider_info not in _local_provider_ids:
     stored = ""

@@ -16,14 +16,14 @@ class TestLoadConfig:
     def test_load_config_raises_on_missing_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             fake_path = Path(tmp) / "does_not_exist.json"
-            with pytest.raises(SystemExit):
+            with pytest.raises(RuntimeError):
                 load_config(str(fake_path))
 
     def test_load_config_invalid_json_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
             bad_file = Path(tmp) / "bad.json"
             bad_file.write_text("{invalid json}", encoding="utf-8")
-            with pytest.raises(SystemExit):
+            with pytest.raises(RuntimeError):
                 load_config(str(bad_file))
 
 

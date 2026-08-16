@@ -229,7 +229,11 @@ def process_library(
 
     print("Initializing High-Performance Pipeline...")
 
-    exif_session = ExifToolSession()
+    try:
+        exif_session = ExifToolSession()
+    except RuntimeError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
 
     hw_accel = detect_hw_accel()
     if hw_accel:

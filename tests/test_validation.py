@@ -49,10 +49,11 @@ class TestSanitizeName:
         result = sanitize_name("short")
         assert result.endswith("_media_asset")
 
-    def test_sanitize_name_removes_grid_and_sequence(self):
+    def test_sanitize_name_keeps_grid_and_sequence(self):
         result = sanitize_name("sunset_grid_sequence_view")
-        assert "grid" not in result
-        assert "sequence" not in result
+        assert "grid" in result
+        assert "sequence" in result
+        assert result == "sunset_grid_sequence_view"
 
     def test_sanitize_name_strips_leading_trailing_underscores(self):
         result = sanitize_name("_hello_world_test_")

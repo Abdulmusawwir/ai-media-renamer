@@ -68,14 +68,21 @@ def _resolve_workers(cfg_value: int | float | None) -> int:
 # 1. CONFIGURATION & LOGGING
 # -----------------------------------------------------------------------------
 
-def load_config(config_path: str = "config.json") -> dict[str, Any]:
+def load_config(config_path: str = "config.json", quiet: bool = False) -> dict[str, Any]:
     """Load configuration from JSON file with auto-recovery from default.
 
     Args:
         config_path: Relative path to the config file from the script directory.
+        quiet: When True, suppress recovery/unrecoverable prints (used at import
+            time so importing engine never prints to stdout).
 
     Returns:
         Parsed configuration dictionary with normalized tuple fields.
+
+    Raises:
+        RuntimeError: If neither ``config_path`` nor the sibling
+            ``config.default.json`` can be loaded. Replaces the old
+            ``sys.exit`` so callers can defer handling.
     """
     script_dir = Path(__file__).parent
     full_path = script_dir / config_path
@@ -84,17 +91,22 @@ def load_config(config_path: str = "config.json") -> dict[str, Any]:
         with open(full_path, encoding='utf-8') as f:
             cfg = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError) as e:
-        print(f"Warning: config.json issue: {e}. Attempting auto-recovery from config.default.json...")
+        if not quiet:
+            print(f"Warning: config.json issue: {e}. Attempting auto-recovery from config.default.json...")
         try:
             import shutil
             shutil.copy2(default_path, full_path)
             with open(full_path, encoding='utf-8') as f:
                 cfg = json.load(f)
-            print(f"Auto-recovery successful: restored config.json from config.default.json")
+            if not quiet:
+                print(f"Auto-recovery successful: restored config.json from config.default.json")
         except Exception as recovery_err:
-            print(f"Error: Auto-recovery failed: {recovery_err}")
-            print(f"To fix: manually copy config.default.json to config.json, or run with --reset-config")
-            sys.exit(1)
+            if not quiet:
+                print(f"Error: Auto-recovery failed: {recovery_err}")
+                print(f"To fix: manually copy config.default.json to config.json, or run with --reset-config")
+            raise RuntimeError(
+                f"Unable to load or auto-recover config: {recovery_err}"
+            ) from recovery_err
 
     cfg['video_extensions'] = tuple(cfg.get('video_extensions', ['.mp4', '.mov', '.avi', '.mkv', '.webm']))
     cfg['image_extensions'] = tuple(cfg.get('image_extensions', ['.jpg', '.jpeg', '.png', '.webp', '.gif']))
@@ -118,7 +130,44 @@ def restore_default_config() -> bool:
     return True
 
 
-config = load_config()
+CONFIG_LOAD_ERROR: str | None = None
+
+
+def _minimal_config() -> dict[str, Any]:
+    """Return a minimal in-memory config so imports never crash on a bad config.
+
+    Used only as a last-resort fallback when neither config.json nor
+    config.default.json is loadable; the Config tab's health badge and the
+    recovery UI surface ``CONFIG_LOAD_ERROR`` to the user.
+    """
+    return {
+        "allowed_categories": [],
+        "video_extensions": (),
+        "image_extensions": (),
+        "audio_extensions": (),
+        "document_extensions": (),
+        "model": {
+            "name": "qwen2.5:7b",
+            "text_model": "qwen2.5:3b",
+            "temperature": 0.1,
+            "num_ctx": 8192,
+            "keep_alive": "1h",
+            "last_provider": "ollama",
+            "providers": {},
+        },
+        "preview": {"image_max_edge": 384, "video_grid_scale": 300, "extraction_workers": 0},
+        "naming": {"case_style": "snake_case", "max_filename_chars": 0},
+        "naming_templates": {"default": "{topic}_{description}"},
+        "logging": {"directory": "logs", "max_upload_size": 10737418240},
+        "prompt_profiles": {"active": "general_balanced", "profiles": {}},
+    }
+
+
+try:
+    config = load_config(quiet=True)
+except RuntimeError as exc:
+    CONFIG_LOAD_ERROR = str(exc)
+    config = _minimal_config()
 
 ALLOWED_CATEGORIES = config['allowed_categories']
 
@@ -211,20 +260,45 @@ PROVIDER_REGISTRY = {}
 
 
 def save_config() -> None:
-    """Persist the current in-memory config dict to config.json."""
+    """Persist the current in-memory config dict to config.json atomically.
+
+    Writes to a temp file in the same directory and ``os.replace``s it over
+    config.json so a crash mid-write can never leave a truncated/corrupt
+    config that breaks the next import.
+    """
     global config
-    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=2)
+    tmp_path = CONFIG_PATH.with_suffix(".json.tmp")
+    try:
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, CONFIG_PATH)
+    except OSError:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def reload_config() -> None:
-    """Reload config from disk and refresh all module-level globals."""
+    """Reload config from disk and refresh all module-level globals.
+
+    On a load failure the previously-loaded config stays in place and the
+    error is recorded in ``CONFIG_LOAD_ERROR`` for the UI to surface.
+    """
     global config, ALLOWED_CATEGORIES, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS, AUDIO_EXTENSIONS
     global MODEL_NAME, TEXT_MODEL_NAME, MODEL_TEMPERATURE, MODEL_NUM_CTX, MODEL_KEEP_ALIVE
     global EXTRACTION_WORKERS, DEFAULT_CASE_STYLE, DEFAULT_MAX_FILENAME_CHARS
     global NAMED_TEMPLATES, DEFAULT_TEMPLATE_STRING, PROMPT_PROFILES, CURRENT_PROVIDER
-    global IMAGE_PREVIEW_MAX_EDGE, VIDEO_GRID_SCALE, DOCUMENT_EXTENSIONS
-    config = load_config()
+    global IMAGE_PREVIEW_MAX_EDGE, VIDEO_GRID_SCALE, DOCUMENT_EXTENSIONS, CONFIG_LOAD_ERROR
+    try:
+        config = load_config(quiet=True)
+        CONFIG_LOAD_ERROR = None
+    except RuntimeError as exc:
+        CONFIG_LOAD_ERROR = str(exc)
+        return
     ALLOWED_CATEGORIES = config['allowed_categories']
     VIDEO_EXTENSIONS = config['video_extensions']
     IMAGE_EXTENSIONS = config['image_extensions']
@@ -552,8 +626,6 @@ def save_setup_profile(profile: list[str] | None = None, onboarded: bool = True,
     except Exception:
         pass
     return data
-    PROMPT_PROFILES = get_profile_labels()
-    CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
 
 
 def keyring_available() -> tuple[bool, str]:
@@ -736,7 +808,12 @@ class ExifToolSession:
     """
 
     def __init__(self) -> None:
-        """Start a persistent ExifTool subprocess in stay_open mode."""
+        """Start a persistent ExifTool subprocess in stay_open mode.
+
+        Raises:
+            RuntimeError: If ExifTool is missing or cannot be started, so
+                callers can surface a friendly error instead of exiting.
+        """
         try:
             self.process = subprocess.Popen(
                 ['exiftool', '-stay_open', 'True', '-@', '-'],
@@ -745,8 +822,7 @@ class ExifToolSession:
                 creationflags=_NO_WINDOW,
             )
         except FileNotFoundError:
-            print("Error: ExifTool is not installed or not in system PATH.")
-            sys.exit(1)
+            raise RuntimeError("ExifTool is not installed or not in system PATH.") from None
 
         self._timeout: float = 60.0
         self._queue: queue.Queue[str | None] = queue.Queue()
@@ -1023,7 +1099,9 @@ def extract_audio_from_video(video_path: str | Path) -> Path | None:
     video_path = Path(video_path)
     if not video_path.exists():
         return None
-    tmp = Path(tempfile.mktemp(suffix=".wav"))
+    fd, tmp_name = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    tmp = Path(tmp_name)
     cmd = [
         'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
         '-i', str(video_path),
@@ -1063,6 +1141,7 @@ def _has_audio_track(video_path: str | Path) -> bool:
 
 
 _whisper_model_cache: dict[str, Any] = {}
+_whisper_model_lock = threading.Lock()
 
 
 def transcribe_audio(audio_path: str | Path, model_size: str = "base") -> dict[str, Any]:
@@ -1084,15 +1163,17 @@ def transcribe_audio(audio_path: str | Path, model_size: str = "base") -> dict[s
         return {"text": "", "language": "", "duration": 0.0, "error": "File not found"}
 
     if model_size not in _whisper_model_cache:
-        try:
-            from faster_whisper import WhisperModel
-            _whisper_model_cache[model_size] = WhisperModel(model_size, device="cpu", compute_type="int8")
-        except ImportError:
-            return {"text": "", "language": "", "duration": 0.0,
-                    "error": "faster-whisper not installed. Run: pip install faster-whisper"}
-        except Exception as exc:
-            return {"text": "", "language": "", "duration": 0.0,
-                    "error": f"Failed to load whisper model: {exc}"}
+        with _whisper_model_lock:
+            if model_size not in _whisper_model_cache:
+                try:
+                    from faster_whisper import WhisperModel
+                    _whisper_model_cache[model_size] = WhisperModel(model_size, device="cpu", compute_type="int8")
+                except ImportError:
+                    return {"text": "", "language": "", "duration": 0.0,
+                            "error": "faster-whisper not installed. Run: pip install faster-whisper"}
+                except Exception as exc:
+                    return {"text": "", "language": "", "duration": 0.0,
+                            "error": f"Failed to load whisper model: {exc}"}
 
     model = _whisper_model_cache[model_size]
     try:
@@ -1259,7 +1340,6 @@ def extract_text_plain(path: Path) -> str | None:
 _TEXT_EXTRACTORS: dict[str, callable] = {
     '.pdf': extract_text_pdf,
     '.docx': extract_text_docx,
-    '.doc': extract_text_docx,
     '.xlsx': extract_text_xlsx,
     '.csv': extract_text_csv,
     '.pptx': extract_text_pptx,
@@ -1308,6 +1388,10 @@ def normalize_category(raw: str) -> str:
 def validate_category(raw_category: str | None) -> tuple[str, bool]:
     """Normalize and validate a category name against the allowed list.
 
+    The allowed list follows the active prompt profile's ``allowed_categories``
+    (falling back to the global ``ALLOWED_CATEGORIES``), so a profile that
+    restricts categories also restricts what the UI accepts here.
+
     Args:
         raw_category: User-provided category string (may be None or empty).
 
@@ -1320,7 +1404,7 @@ def validate_category(raw_category: str | None) -> tuple[str, bool]:
     normalized = normalize_category(str(raw_category))
     if not normalized:
         return 'uncategorized', True
-    if normalized in ALLOWED_CATEGORIES:
+    if normalized in get_active_categories():
         return normalized, False
     return 'uncategorized', True
 
@@ -1334,7 +1418,7 @@ def sanitize_name(raw_name: str) -> str:
     Returns:
         Cleaned, lowercase, underscore-separated name.
     """
-    cleaned = raw_name.lower().replace("grid", "").replace("sequence", "")
+    cleaned = raw_name.lower()
     cleaned = cleaned.replace(" ", "_")
     safe = "".join([c for c in cleaned if c.isalpha() or c.isdigit() or c in ('_', '-')]).strip('_')
     if len(safe.split('_')) < 3:
@@ -2039,6 +2123,22 @@ class OpenRouterProvider(OpenAIProvider):
 
 
 LLAMACPP_DEFAULT_URL = "http://localhost:8080"
+OLLAMA_DEFAULT_URL = "http://localhost:11434"
+
+
+def _ollama_base_url() -> str:
+    """Return the base URL for a local Ollama server.
+
+    Reads ``OLLAMA_HOST`` from the environment (or config ``model.ollama.base_url``)
+    so a non-default host/port is supported; defaults to ``127.0.0.1:11434``.
+    """
+    env_url = os.environ.get("OLLAMA_HOST", "").strip()
+    if env_url:
+        return env_url.rstrip("/")
+    cfg_url = config.get("model", {}).get("ollama", {}).get("base_url", "")
+    if cfg_url:
+        return cfg_url.rstrip("/")
+    return OLLAMA_DEFAULT_URL
 
 
 def _llamacpp_base_url() -> str:
@@ -2229,7 +2329,7 @@ def analyze_asset_with_ai(
     retry: bool = True,
     audio_transcription: str | None = None,
 ) -> dict[str, Any]:
-    """Analyze an image using the default Ollama provider.
+    """Analyze an image using the active AI provider.
 
     Args:
         base64_img: Base64-encoded JPEG image data.
@@ -2240,7 +2340,10 @@ def analyze_asset_with_ai(
     Returns:
         Result dict with parsed data or error information.
     """
-    provider = get_provider("ollama")
+    try:
+        provider = get_provider(CURRENT_PROVIDER)
+    except ValueError:
+        provider = get_provider("ollama")
     provider.model = config["model"]["name"]
     prompt_override = None
     if audio_transcription:
@@ -2252,7 +2355,7 @@ def analyze_asset_with_ai(
 
 
 def analyze_document_with_ai(text_content: str, verbose: bool = False) -> dict[str, Any]:
-    """Analyze document text using the default Ollama provider.
+    """Analyze document text using the active AI provider.
 
     Args:
         text_content: Extracted text from the document.
@@ -2261,7 +2364,10 @@ def analyze_document_with_ai(text_content: str, verbose: bool = False) -> dict[s
     Returns:
         Result dict with parsed data or error information.
     """
-    provider = get_provider("ollama")
+    try:
+        provider = get_provider(CURRENT_PROVIDER)
+    except ValueError:
+        provider = get_provider("ollama")
     provider.model = config["model"]["name"]
     provider.text_model = config["model"].get("text_model", TEXT_MODEL_NAME)
     return provider.analyze_text(text_content, verbose=verbose)
@@ -2359,7 +2465,7 @@ def _write_document_metadata(target_file: Path, asset: dict[str, Any]) -> bool:
     suffix = target_file.suffix.lower()
     title = asset['staged_name'].replace("_", " ").replace("-", " ").title()
 
-    if suffix in ('.docx', '.doc'):
+    if suffix == '.docx':
         _write_docx_metadata(target_file, title, asset['summary'], asset['tags'])
         return True
     if suffix == '.xlsx':
@@ -2854,7 +2960,11 @@ def rollback_last_batch() -> dict[str, Any]:
     failed = 0
     errors: list[str] = []
 
-    exif = ExifToolSession()
+    try:
+        exif = ExifToolSession()
+    except RuntimeError as exc:
+        return {"ok": False, "restored": 0, "failed": len(records),
+                "errors": [str(exc)], "batch_id": batch_id}
 
     for rec in records:
         orig = Path(rec["original_path"])
@@ -3207,15 +3317,10 @@ def check_ollama_health() -> dict[str, Any]:
 
 def _llamacpp_server_running() -> bool:
     """Return True if a local llama.cpp ``llama-server`` answers on its API port."""
-    import urllib.parse
-    base = _llamacpp_base_url()
+    host, port = _llamacpp_host_port()
+    scheme = "http"
+    url = f"{scheme}://{host}:{port}"
     try:
-        host_port = base.split("/v1")[0]
-        parsed = urllib.parse.urlsplit(host_port)
-        host = parsed.hostname or "127.0.0.1"
-        port = parsed.port or 8080
-        scheme = parsed.scheme or "http"
-        url = f"{scheme}://{host}:{port}"
         resp = requests.get(f"{url}/v1/models", timeout=2)
         return resp.status_code == 200
     except Exception:
@@ -3530,6 +3635,21 @@ def configure_llamacpp_install(model_name: str, gguf_path: Path,
     save_config()
 
 
+def _llamacpp_host_port() -> tuple[str, int]:
+    """Return (host, port) parsed from the llama.cpp base URL.
+
+    Defaults to ``127.0.0.1`` / ``8080`` when the URL carries no explicit
+    host or port.
+    """
+    import urllib.parse
+    base = _llamacpp_base_url()
+    host_port = base.split("/v1")[0]
+    parsed = urllib.parse.urlsplit(host_port)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 8080
+    return host, port
+
+
 def ensure_llamacpp_server(timeout: int = 40) -> bool:
     """Start the configured llama.cpp server if it is not already running.
 
@@ -3553,7 +3673,8 @@ def ensure_llamacpp_server(timeout: int = 40) -> bool:
     gguf = llamacpp.get("gguf_path", "")
     if not gguf or not Path(gguf).exists():
         return False
-    args = [exe, "-m", gguf, "--host", "127.0.0.1", "--port", "8080",
+    host, port = _llamacpp_host_port()
+    args = [exe, "-m", gguf, "--host", host, "--port", str(port),
             "-c", str(MODEL_NUM_CTX)]
     alias = llamacpp.get("gguf_name", "")
     if alias:
@@ -3588,7 +3709,7 @@ def wait_for_ollama_service(timeout: int = 120) -> bool:
         True if Ollama responded within the timeout.
     """
     import time
-    url = "http://localhost:11434/api/tags"
+    url = f"{_ollama_base_url()}/api/tags"
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -3648,8 +3769,9 @@ def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[st
     if new_provider == "llamacpp":
         env = check_environment()
         if not env["llamacpp_running"]:
+            _h, _p = _llamacpp_host_port()
             return {"ok": False, "require_download": False,
-                    "message": "llama.cpp server is not running at localhost:8080."}
+                    "message": f"llama.cpp server is not running at {_h}:{_p}."}
         if not env["model_available"]:
             return {"ok": False, "require_download": False,
                     "message": "No vision model available. Load a vision GGUF in llama-server."}

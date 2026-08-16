@@ -62,10 +62,10 @@ class TestLoadConfigAutoRecovery:
         result = load_config(str(bad_path))
         assert result["allowed_categories"] == ("restored",)
 
-    def test_auto_recovery_both_missing_exits(self, tmp_dir):
-        """When both config.json and config.default.json are missing, SystemExit."""
+    def test_auto_recovery_both_missing_raises(self, tmp_dir):
+        """When both config.json and config.default.json are missing, RuntimeError."""
         fake_path = tmp_dir / "nope.json"
-        with pytest.raises(SystemExit):
+        with pytest.raises(RuntimeError):
             load_config(str(fake_path))
 
 
