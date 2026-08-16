@@ -30,62 +30,57 @@ from engine import (
     IMAGE_EXTENSIONS,
     LOG_DIR,
     MAX_UPLOAD_SIZE,
+    MODEL_CATALOG,
     NAMED_TEMPLATES,
     PROMPT_PROFILES,
-    VIDEO_EXTENSIONS,
+    SETUP_USE_CASES,
     VERSION,
+    VIDEO_EXTENSIONS,
     ExifToolSession,
     _format_ai_error,
+    _has_audio_track,
     _is_vision_model,
     _llamacpp_host_port,
-    analyze_document_with_ai,
     apply_case_style,
     apply_naming_template,
     check_environment,
     check_for_updates,
     check_ollama_health,
     config,
+    delete_session,
     detect_hw_accel,
     ensure_llamacpp_server,
     execute_commit,
     export_staging_csv,
+    extract_audio_from_video,
     extract_text_from_file,
     find_duplicates,
     get_active_profile,
     get_active_prompt,
     get_provider,
     import_staging_csv,
-    list_providers,
-    delete_session,
     list_sessions,
-    load_api_key,
-    keyring_available,
+    list_undo_batches,
     load_session,
+    load_setup_profile,
+    log_commit_batch,
     log_event,
     normalize_category,
     process_asset_to_base64,
     reload_config,
     restore_default_config,
+    rollback_last_batch,
     sanitize_name,
-    save_api_key,
     save_config,
     save_session,
     set_active_profile,
     setup_logging,
     stream_model_download,
     switch_ai_provider,
+    transcribe_audio,
     truncate_filename,
     validate_category,
     wipe_local_model,
-    log_commit_batch,
-    rollback_last_batch,
-    list_undo_batches,
-    extract_audio_from_video,
-    _has_audio_track,
-    transcribe_audio,
-    load_setup_profile,
-    SETUP_USE_CASES,
-    MODEL_CATALOG,
 )
 
 _ICON_PATH = Path(sys._MEIPASS) / "icon.ico" if getattr(sys, "frozen", False) else Path(__file__).parent / "icon.ico"
@@ -270,9 +265,6 @@ if "template_string" not in st.session_state:
 if "provider_info" not in st.session_state:
     st.session_state.provider_info = config.get("model", {}).get("last_provider", "ollama")
 
-if "api_key_stored" not in st.session_state:
-    st.session_state.api_key_stored = False
-
 if "env_check" not in st.session_state:
     st.session_state.env_check = None
 
@@ -390,21 +382,6 @@ def _on_server_lan_expose_change(prev_value: bool) -> None:
     reload_config()
 
 
-def _on_api_key_change() -> None:
-    """Save the API key entered in the sidebar text input to the system keychain."""
-    provider = st.session_state.provider_info
-    key = st.session_state.get(f"api_key_{provider}", "")
-    try:
-        save_api_key(provider, key)
-        st.session_state.api_key_stored = bool(key)
-        st.session_state.pop("keyring_warning", None)
-    except RuntimeError as exc:
-        st.session_state.keyring_warning = str(exc)
-        return
-    prov_inst = get_provider(provider)
-    prov_inst.api_key = key
-
-
 def _on_model_change() -> None:
     """Persist the selected model to config when the model dropdown changes."""
     provider = st.session_state.provider_info
@@ -497,15 +474,6 @@ with st.sidebar:
 
     analysis_active = st.session_state.get("analysis_in_progress", False)
 
-    # Only local runtimes are currently selectable; cloud providers are
-    # implemented but disabled (no API keys for testing) — see audit.md §2.
-    all_providers = list_providers()
-    _local_providers = {"ollama", "llamacpp"}
-    if st.session_state.provider_info not in _local_providers:
-        st.caption(f"Previously configured provider '{st.session_state.provider_info}' "
-                   "is not available — using Local (Ollama).")
-        st.session_state.provider_info = "ollama"
-
     env_now = st.session_state.env_check
     # The llama.cpp engine is offered when its server is running OR when the
     # setup wizard has installed it (gguf on disk) but the server is idle.
@@ -533,16 +501,9 @@ with st.sidebar:
         key="provider_radio",
         on_change=_on_engine_change,
         disabled=analysis_active,
-        help="Local modes use an on-device LLM server. Cloud modes are not yet available.",
+        help="Local modes use an on-device LLM server (Ollama or llama.cpp).",
     )
     new_provider = st.session_state.provider_info
-
-    cloud_names = {
-        "gemini": "Gemini", "openai": "OpenAI", "anthropic": "Anthropic",
-        "groq": "Groq", "openrouter": "OpenRouter",
-    }
-    pending = [cloud_names.get(p, p) for p in all_providers if p not in _local_providers]
-    st.caption(f"Cloud providers (coming soon): {', '.join(pending)}")
 
     if st.session_state.get("switch_error"):
         st.error(st.session_state.switch_error)
@@ -641,28 +602,6 @@ with st.sidebar:
             else:
                 st.markdown(":material/error: **Ollama** — disconnected")
 
-        # API key (cloud providers only)
-        if new_provider not in ("ollama", "llamacpp"):
-            keyring_ok, keyring_why = keyring_available()
-            if not keyring_ok:
-                st.warning(
-                    ":material/key_off: System keychain unavailable — API keys cannot be saved. "
-                    f"({keyring_why})"
-                )
-            api_key = ""
-            try:
-                api_key = load_api_key(new_provider)
-            except RuntimeError as exc:
-                st.error(f"Could not read the saved API key: {exc}")
-            st.text_input(
-                "API Key", type="password", key=f"api_key_{new_provider}",
-                value=api_key,
-                help=f"API key for {new_provider}. Saved to your system keychain.",
-                on_change=_on_api_key_change,
-            )
-            if api_key:
-                st.caption(":material/check: Key saved in system keychain")
-
 
     st.space()
     st.caption("Environment status")
@@ -716,16 +655,6 @@ with st.sidebar:
             elif not env.get("model_available"):
                 st.info("No vision model loaded in llama.cpp. "
                         "Run `llama-server -m your-vision-model.gguf --mmproj mmproj.gguf`.")
-        else:
-            for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool")]:
-                ok = env.get(key, False)
-                status = "green" if ok else "red"
-                st.badge(label, color=status)
-            has_key = bool(load_api_key(new_provider))
-            pretty_name = new_provider.capitalize()
-            st.badge(f"{pretty_name} API Key", color="green" if has_key else "red")
-            if has_key:
-                st.caption(f"Routing execution via {pretty_name}")
 
     if st.button(":material/refresh: Refresh Status", key="refresh_status"):
         st.session_state.env_check = None
@@ -804,15 +733,6 @@ if st.session_state.provider_info in _local_provider_ids:
     elif st.session_state.provider_info == "llamacpp":
         _lp_host, _lp_port = _llamacpp_host_port()
         st.caption(f":material/check: llama.cpp server detected at {_lp_host}:{_lp_port}")
-
-if st.session_state.provider_info not in _local_provider_ids:
-    stored = ""
-    try:
-        stored = load_api_key(st.session_state.provider_info)
-    except RuntimeError as exc:
-        st.error(f"Could not read the saved API key: {exc}")
-    if not stored:
-        st.warning(f"Enter your {st.session_state.provider_info} API key in the sidebar.", icon=":material/warning:")
 
 # -----------------------------------------------------------------------------
 # Helper: load log data for analytics

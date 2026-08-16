@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 if getattr(sys, "frozen", False) and sys.stdin is None:
-    sys.stdin = open(os.devnull, "r")
+    sys.stdin = open(os.devnull)
 if getattr(sys, "frozen", False) and sys.stdout is None:
     sys.stdout = open(os.devnull, "w")
 if getattr(sys, "frozen", False) and sys.stderr is None:
@@ -1622,7 +1622,7 @@ def _launch_app(win):
         # Dump child process stderr
         log_fh.close()
         try:
-            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            with open(log_path, encoding="utf-8", errors="replace") as f:
                 _log(f"child stdout/stderr:\n{f.read()}")
         except Exception:
             pass
@@ -1635,7 +1635,7 @@ def _launch_app(win):
     # Also dump server log for success case
     log_fh.close()
     try:
-        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
             server_out = f.read().strip()
             if server_out:
                 _log(f"child server output:\n{server_out}")

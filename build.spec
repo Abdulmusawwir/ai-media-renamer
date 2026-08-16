@@ -40,8 +40,6 @@ a = Analysis(
         'pandas',
         'plotly',
         'openai',
-        'anthropic',
-        'keyring',
         'rich',
         'rich.progress',
         'imagehash',

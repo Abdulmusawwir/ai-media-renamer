@@ -15,17 +15,16 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-import anthropic
-import keyring
 import ollama
 import openai
 import requests
 from pydantic import BaseModel, ValidationError
 
-VERSION = "v1.6.4"
+VERSION = "v1.7.0"
 
 
 class AssetAnalysisResponse(BaseModel):
@@ -99,11 +98,11 @@ def load_config(config_path: str = "config.json", quiet: bool = False) -> dict[s
             with open(full_path, encoding='utf-8') as f:
                 cfg = json.load(f)
             if not quiet:
-                print(f"Auto-recovery successful: restored config.json from config.default.json")
+                print("Auto-recovery successful: restored config.json from config.default.json")
         except Exception as recovery_err:
             if not quiet:
                 print(f"Error: Auto-recovery failed: {recovery_err}")
-                print(f"To fix: manually copy config.default.json to config.json, or run with --reset-config")
+                print("To fix: manually copy config.default.json to config.json, or run with --reset-config")
             raise RuntimeError(
                 f"Unable to load or auto-recover config: {recovery_err}"
             ) from recovery_err
@@ -243,7 +242,6 @@ DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'title_case')
 DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
 
 CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
-CURRENT_API_KEY = ""
 
 NAMED_TEMPLATES = config.get('naming_templates', {
     "default": "{topic}_{description}",
@@ -255,7 +253,6 @@ DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}"
 LOG_DIR = Path(config['logging']['directory'])
 MAX_UPLOAD_SIZE = int(config['logging'].get('max_upload_size', 10737418240))
 CONFIG_PATH = Path(__file__).parent / "config.json"
-KEYRING_SERVICE = "ai-media-renamer"
 PROVIDER_REGISTRY = {}
 
 
@@ -626,67 +623,6 @@ def save_setup_profile(profile: list[str] | None = None, onboarded: bool = True,
     except Exception:
         pass
     return data
-
-
-def keyring_available() -> tuple[bool, str]:
-    """Return (available, detail) for the OS keychain.
-
-    Used by the UI to surface a clear warning when API-key storage is
-    unavailable instead of failing silently or on a raw exception.
-    """
-    try:
-        keyring.get_keyring()
-        keyring.get_password(KEYRING_SERVICE, "__probe__")
-        return True, ""
-    except Exception as exc:
-        return False, str(exc)
-
-
-def save_api_key(provider_name: str, key: str) -> None:
-    """Store an API key for a provider in the system keyring.
-
-    Fails closed: if the OS keychain cannot be reached, raises instead of
-    falling back to a plaintext file.
-
-    Args:
-        provider_name: Provider identifier (e.g. 'gemini', 'openai').
-        key: API key string to store.
-    """
-    try:
-        keyring.set_password(KEYRING_SERVICE, provider_name, key)
-    except Exception as exc:
-        raise RuntimeError(
-            f"Could not reach the OS keychain to store the {provider_name} API key: {exc}"
-        ) from exc
-
-
-def load_api_key(provider_name: str) -> str:
-    """Retrieve an API key from the system keyring.
-
-    Args:
-        provider_name: Provider identifier to look up.
-
-    Returns:
-        The stored API key, or an empty string if not found.
-    """
-    try:
-        return keyring.get_password(KEYRING_SERVICE, provider_name) or ""
-    except Exception as exc:
-        raise RuntimeError(
-            f"Could not reach the OS keychain to read the {provider_name} API key: {exc}"
-        ) from exc
-
-
-def delete_api_key(provider_name: str) -> None:
-    """Delete an API key from the system keyring, ignoring if absent.
-
-    Args:
-        provider_name: Provider identifier whose key to delete.
-    """
-    try:
-        keyring.delete_password(KEYRING_SERVICE, provider_name)
-    except keyring.errors.PasswordDeleteError:
-        pass
 
 
 def setup_logging(verbose: bool = False) -> logging.Logger:
@@ -1283,7 +1219,7 @@ def extract_text_csv(path: Path) -> str | None:
     try:
         import csv
         text_parts: list[str] = []
-        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(path, encoding='utf-8', errors='replace') as f:
             reader = csv.reader(f)
             for row in reader:
                 if any(cell.strip() for cell in row):
@@ -1844,71 +1780,6 @@ class OllamaProvider(AIProvider):
             return []
 
 
-class GeminiProvider(AIProvider):
-    def analyze(self, base64_img: str, verbose: bool = False) -> dict[str, Any]:
-        """Analyze an image using the Google Gemini API.
-
-        Args:
-            base64_img: Base64-encoded JPEG image data.
-            verbose: If True, include raw response in error details.
-
-        Returns:
-            Result dict with parsed data or error information.
-        """
-        result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
-        if not self._api_key:
-            result['error'] = 'api_key_missing'
-            result['detail'] = 'Gemini API key not configured.'
-            return result
-        try:
-            model_name = self._model or "gemini-2.0-flash-001"
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self._api_key}"
-            payload = {
-                "contents": [{
-                    "parts": [
-                        {"text": get_active_prompt()},
-                        {"inline_data": {"mime_type": "image/jpeg", "data": base64_img}}
-                    ]
-                }]
-            }
-            resp = requests.post(url, json=payload, timeout=60)
-            resp.raise_for_status()
-            data = resp.json()
-            candidates = data.get("candidates", [])
-            if not candidates:
-                result['error'] = 'gemini_empty_response'
-                result['detail'] = 'Gemini returned no candidates.'
-                return result
-            raw_text = ""
-            for part in candidates[0].get("content", {}).get("parts", []):
-                raw_text += part.get("text", "")
-            return self._parse_and_validate(raw_text)
-        except requests.exceptions.RequestException as exc:
-            result['error'] = 'gemini_api_error'
-            result['detail'] = _redact_sensitive(f'Gemini API request failed: {exc}')
-            return result
-        except Exception as exc:
-            result['error'] = 'gemini_api_error'
-            result['detail'] = _redact_sensitive(f'Unexpected Gemini error: {exc}')
-            return result
-
-    def health_check(self) -> dict[str, Any]:
-        """Check if a Gemini API key is configured.
-
-        Returns:
-            Dict with 'ok' boolean and 'message' string.
-        """
-        return {"ok": bool(self._api_key), "message": "API key set" if self._api_key else "No API key configured"}
-
-    def available_models(self) -> list[str]:
-        """List models available for the Gemini provider.
-
-        Returns:
-            List of model name strings from config.
-        """
-        return config.get("model", {}).get("providers", {}).get("gemini", {}).get("models", [])
-
-
 class OpenAIProvider(AIProvider):
     def __init__(self, base_url: str | None = None) -> None:
         """Initialize OpenAI provider with optional base URL override.
@@ -1980,8 +1851,8 @@ class OpenAIProvider(AIProvider):
     def _analyze_prompt_only(self, prompt: str, verbose: bool = False) -> dict[str, Any]:
         """Send a text-only prompt to an OpenAI-compatible endpoint (no images).
 
-        Used for document/audio analysis through cloud providers and the local
-        llama.cpp runtime, which expose the same chat-completions surface.
+        Used for document/audio analysis through the local llama.cpp runtime,
+        which exposes the same chat-completions surface.
 
         Args:
             prompt: Full prompt text to send.
@@ -2036,90 +1907,6 @@ class OpenAIProvider(AIProvider):
             List of model name strings from config.
         """
         return config.get("model", {}).get("providers", {}).get("openai", {}).get("models", [])
-
-
-class AnthropicProvider(AIProvider):
-    def analyze(self, base64_img: str, verbose: bool = False) -> dict[str, Any]:
-        """Analyze an image using the Anthropic Claude vision API.
-
-        Args:
-            base64_img: Base64-encoded JPEG image data.
-            verbose: If True, include raw response in error details.
-
-        Returns:
-            Result dict with parsed data or error information.
-        """
-        result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
-        if not self._api_key:
-            result['error'] = 'api_key_missing'
-            result['detail'] = 'API key not configured.'
-            return result
-        try:
-            client = anthropic.Anthropic(api_key=self._api_key)
-            model_name = self._model or "claude-3-5-sonnet-20241022"
-            response = client.messages.create(
-                model=model_name,
-                max_tokens=1024,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": get_active_prompt()},
-                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64_img}}
-                    ]
-                }]
-            )
-            raw_text = response.content[0].text
-            return self._parse_and_validate(raw_text)
-        except Exception as exc:
-            result['error'] = 'anthropic_api_error'
-            result['detail'] = f'Anthropic API request failed: {exc}'
-            return result
-
-    def health_check(self) -> dict[str, Any]:
-        """Check if an Anthropic API key is configured.
-
-        Returns:
-            Dict with 'ok' boolean and 'message' string.
-        """
-        return {"ok": bool(self._api_key), "message": "API key set" if self._api_key else "No API key configured"}
-
-    def available_models(self) -> list[str]:
-        """List models available for the Anthropic provider.
-
-        Returns:
-            List of model name strings from config.
-        """
-        return config.get("model", {}).get("providers", {}).get("anthropic", {}).get("models", [])
-
-
-class GroqProvider(OpenAIProvider):
-    def __init__(self) -> None:
-        """Initialize Groq provider with its configured base URL."""
-        base = config.get("model", {}).get("providers", {}).get("groq", {}).get("base_url", "https://api.groq.com/openai/v1")
-        super().__init__(base_url=base)
-
-    def available_models(self) -> list[str]:
-        """List models available for the Groq provider.
-
-        Returns:
-            List of model name strings from config.
-        """
-        return config.get("model", {}).get("providers", {}).get("groq", {}).get("models", [])
-
-
-class OpenRouterProvider(OpenAIProvider):
-    def __init__(self) -> None:
-        """Initialize OpenRouter provider with its configured base URL."""
-        base = config.get("model", {}).get("providers", {}).get("openrouter", {}).get("base_url", "https://openrouter.ai/api/v1")
-        super().__init__(base_url=base)
-
-    def available_models(self) -> list[str]:
-        """List models available for the OpenRouter provider.
-
-        Returns:
-            List of model name strings from config.
-        """
-        return config.get("model", {}).get("providers", {}).get("openrouter", {}).get("models", [])
 
 
 LLAMACPP_DEFAULT_URL = "http://localhost:8080"
@@ -2295,16 +2082,12 @@ def get_provider(name: str) -> AIProvider:
     if not cls:
         raise ValueError(f"Unknown provider: {name}")
     inst = cls()
-    local_runtime = name in ("ollama", "llamacpp")
-    if not local_runtime:
-        # llama.cpp needs no credentials — keep the provider's placeholder key.
-        inst.api_key = load_api_key(name)
     pconf = config.get("model", {}).get("providers", {}).get(name, {})
     valid_models = pconf.get("models", [])
     saved_model = pconf.get("selected_model", "")
-    if saved_model and (local_runtime or saved_model in valid_models):
+    if saved_model and (saved_model in valid_models or not valid_models):
         inst.model = saved_model
-    elif not local_runtime and valid_models:
+    elif valid_models:
         inst.model = valid_models[0]
     return inst
 
@@ -2315,11 +2098,6 @@ def list_providers() -> list[str]:
 
 
 register_provider("ollama", OllamaProvider)
-register_provider("gemini", GeminiProvider)
-register_provider("openai", OpenAIProvider)
-register_provider("anthropic", AnthropicProvider)
-register_provider("groq", GroqProvider)
-register_provider("openrouter", OpenRouterProvider)
 register_provider("llamacpp", LlamaCppProvider)
 
 
@@ -2391,10 +2169,7 @@ def _format_ai_error(ai_result: dict[str, Any], verbose: bool = False) -> str:
         'empty_response': detail,
         'ollama_error': detail,
         'api_key_missing': detail,
-        'gemini_empty_response': detail,
-        'gemini_api_error': detail,
         'openai_api_error': detail,
-        'anthropic_api_error': detail,
     }
     msg = messages.get(error_type, detail)
     msg = _redact_sensitive(msg)
@@ -2790,6 +2565,10 @@ def save_session(staged_assets: list[dict[str, Any]], uploaded_files: dict[str, 
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
     session_path = SESSION_DIR / f"session_{ts}.json"
+    counter = 1
+    while session_path.exists():
+        session_path = SESSION_DIR / f"session_{ts}_{counter}.json"
+        counter += 1
 
     serializable_assets = []
     for a in staged_assets:
@@ -2819,8 +2598,15 @@ def list_sessions() -> list[dict[str, Any]]:
     for s in sessions:
         try:
             data = json.loads(s.read_text(encoding="utf-8"))
-            asset_count = len(data.get("staged_assets", []))
+            if not isinstance(data, dict):
+                continue
+            sa = data.get("staged_assets", [])
+            if not isinstance(sa, list):
+                sa = []
+            asset_count = len(sa)
             created = data.get("created", s.stem.replace("session_", ""))
+            if not isinstance(created, str):
+                created = s.stem.replace("session_", "")
             result.append({"path": s, "created": created, "asset_count": asset_count})
         except Exception:
             continue
@@ -2854,9 +2640,12 @@ def load_session(session_path: str | Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("Session file is not a JSON object")
 
+    staged_assets_list = data.get("staged_assets")
+    if not isinstance(staged_assets_list, list):
+        staged_assets_list = []
     staged_assets = []
     missing_files = []
-    for a in data.get("staged_assets", []):
+    for a in staged_assets_list:
         if not _valid_session_asset(a):
             continue
         p = Path(a["original_path"])
@@ -2869,14 +2658,15 @@ def load_session(session_path: str | Path) -> dict[str, Any]:
             missing_files.append(a["original_name"])
 
     uploaded_files = {}
-    for name, path_str in data.get("uploaded_files", {}).items():
-        if not isinstance(path_str, str):
-            continue
-        p = Path(path_str)
-        if p.is_symlink():
-            continue
-        if p.exists():
-            uploaded_files[name] = p
+    if isinstance(data.get("uploaded_files"), dict):
+        for name, path_str in data["uploaded_files"].items():
+            if not isinstance(path_str, str):
+                continue
+            p = Path(path_str)
+            if p.is_symlink():
+                continue
+            if p.exists():
+                uploaded_files[name] = p
 
     settings = data.get("settings", {})
     if not isinstance(settings, dict):
@@ -2929,7 +2719,7 @@ def list_undo_batches() -> list[dict[str, Any]]:
     if not UNDO_LOG_FILE.exists():
         return []
     batches = []
-    with open(UNDO_LOG_FILE, "r", encoding="utf-8") as f:
+    with open(UNDO_LOG_FILE, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -3106,6 +2896,7 @@ def _compute_image_hash(path: Path, imagehash: Any, pil_image: Any) -> str | Non
         if proc.returncode != 0 or not proc.stdout:
             return None
         import io
+
         from PIL import Image
         img = Image.open(io.BytesIO(proc.stdout))
         return str(imagehash.phash(img))
@@ -3129,8 +2920,9 @@ def _compute_video_hash(path: Path, imagehash: Any) -> str | None:
         proc = subprocess.run(cmd, capture_output=True, creationflags=_NO_WINDOW)
         if proc.returncode != 0 or not proc.stdout:
             return None
-        from PIL import Image
         import io
+
+        from PIL import Image
         img = Image.open(io.BytesIO(proc.stdout))
         return str(imagehash.phash(img))
     except Exception:
@@ -3391,8 +3183,6 @@ def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
         if not model_available and profile and local_models and "vision_model" not in needs:
             model_available = True
 
-    cloud_configured = CURRENT_PROVIDER not in ("ollama", "llamacpp")
-
     return {
         "ffmpeg": bool(ffmpeg_path),
         "exiftool": bool(exiftool_path),
@@ -3402,7 +3192,6 @@ def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
         "vision_models": vision_models,
         "text_models": text_models,
         "text_model_available": bool(text_models),
-        "cloud_configured": cloud_configured,
         "errors": errors,
     }
 
@@ -3722,17 +3511,16 @@ def wait_for_ollama_service(timeout: int = 120) -> bool:
     return False
 
 
-def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[str, Any]:
-    """Switch the active AI provider, release old resources, and persist choice.
+def switch_ai_provider(new_provider: str) -> dict[str, Any]:
+    """Switch the active local AI runtime, release old model weights, and persist choice.
 
     Args:
-        new_provider: Provider name to switch to (e.g. 'ollama', 'gemini').
-        api_key: Optional API key to store for the new provider.
+        new_provider: Provider name to switch to ('ollama' or 'llamacpp').
 
     Returns:
         Dict with 'ok', 'message', and optionally 'require_download'.
     """
-    global CURRENT_PROVIDER, CURRENT_API_KEY
+    global CURRENT_PROVIDER
 
     if CURRENT_PROVIDER == "ollama" and new_provider != "ollama":
         try:
@@ -3741,20 +3529,6 @@ def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[st
             pass
 
     provider = get_provider(new_provider)
-    if api_key:
-        # Persist the key before mutating state so a keychain failure never
-        # leaves the app pointing at a provider whose credentials were lost.
-        save_api_key(new_provider, api_key)
-        CURRENT_API_KEY = api_key
-        register_secret(api_key)
-        provider.api_key = api_key
-    elif new_provider == "llamacpp":
-        # Local llama-server needs no credentials; keep the provider default.
-        CURRENT_API_KEY = None
-    elif new_provider != "ollama":
-        stored = load_api_key(new_provider)
-        CURRENT_API_KEY = stored
-        provider.api_key = stored
 
     CURRENT_PROVIDER = new_provider
     pconf = config.get("model", {}).get("providers", {}).get(new_provider, {})
@@ -3762,9 +3536,6 @@ def switch_ai_provider(new_provider: str, api_key: str | None = None) -> dict[st
 
     config["model"]["last_provider"] = new_provider
     save_config()
-
-    if new_provider not in ("ollama", "llamacpp"):
-        return {"ok": True, "message": f"Switched to {new_provider}. Local model weights released from RAM/VRAM."}
 
     if new_provider == "llamacpp":
         env = check_environment()

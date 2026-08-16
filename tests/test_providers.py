@@ -5,21 +5,13 @@ import pytest
 from engine import (
     TEXT_MODEL_NAME,
     AIProvider,
-    AnthropicProvider,
-    GeminiProvider,
-    GroqProvider,
     LlamaCppProvider,
     OllamaProvider,
     OpenAIProvider,
-    OpenRouterProvider,
     _llamacpp_server_running,
-    delete_api_key,
     get_provider,
-    keyring_available,
     list_providers,
-    load_api_key,
     register_provider,
-    save_api_key,
 )
 
 # ---------------------------------------------------------------------------
@@ -27,41 +19,14 @@ from engine import (
 # ---------------------------------------------------------------------------
 
 class TestProviderRegistry:
-    def test_list_includes_all_seven(self):
+    def test_list_includes_local_providers(self):
         names = list_providers()
         assert "ollama" in names
-        assert "gemini" in names
-        assert "openai" in names
-        assert "anthropic" in names
-        assert "groq" in names
-        assert "openrouter" in names
         assert "llamacpp" in names
 
     def test_get_ollama(self):
         prov = get_provider("ollama")
         assert isinstance(prov, OllamaProvider)
-
-    def test_get_gemini(self):
-        prov = get_provider("gemini")
-        assert isinstance(prov, GeminiProvider)
-
-    def test_get_openai(self):
-        prov = get_provider("openai")
-        assert isinstance(prov, OpenAIProvider)
-
-    def test_get_anthropic(self):
-        prov = get_provider("anthropic")
-        assert isinstance(prov, AnthropicProvider)
-
-    def test_get_groq(self):
-        prov = get_provider("groq")
-        assert isinstance(prov, GroqProvider)
-        assert prov._base_url == "https://api.groq.com/openai/v1"
-
-    def test_get_openrouter(self):
-        prov = get_provider("openrouter")
-        assert isinstance(prov, OpenRouterProvider)
-        assert "openrouter.ai" in prov._base_url
 
     def test_get_llamacpp(self):
         prov = get_provider("llamacpp")
@@ -270,71 +235,7 @@ class TestOllamaProvider:
 
 
 # ---------------------------------------------------------------------------
-# GeminiProvider
-# ---------------------------------------------------------------------------
-
-class TestGeminiProvider:
-    def setup_method(self):
-        self.prov = GeminiProvider()
-        self.prov.api_key = "fake-gemini-key"
-
-    @patch("engine.requests.post")
-    def test_analyze_success(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "candidates": [{
-                "content": {"parts": [{"text": '{"new_filename": "night_city", "topic": "city", '
-                    '"description": "night", "tags": ["city", "night"], '
-                    '"overall_visual_summary": "City at night.", '
-                    '"suggested_category": "night_astro"}'}]}
-            }]
-        }
-        mock_post.return_value = mock_resp
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is True
-        assert result["data"]["new_filename"] == "night_city"
-
-    def test_analyze_no_api_key(self):
-        self.prov.api_key = ""
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is False
-        assert result["error"] == "api_key_missing"
-
-    @patch("engine.requests.post")
-    def test_analyze_no_candidates(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"candidates": []}
-        mock_post.return_value = mock_resp
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is False
-        assert result["error"] == "gemini_empty_response"
-
-    @patch("engine.requests.post")
-    def test_analyze_http_error(self, mock_post):
-        from requests.exceptions import HTTPError
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status.side_effect = HTTPError("429 Too Many Requests")
-        mock_post.return_value = mock_resp
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is False
-        assert result["error"] == "gemini_api_error"
-
-    def test_health_check_with_key(self):
-        result = self.prov.health_check()
-        assert result["ok"] is True
-
-    def test_health_check_without_key(self):
-        self.prov.api_key = ""
-        result = self.prov.health_check()
-        assert result["ok"] is False
-
-    def test_available_models(self):
-        models = self.prov.available_models()
-        assert "gemini-2.0-flash-001" in models
-
-
-# ---------------------------------------------------------------------------
-# OpenAIProvider
+# OpenAIProvider (base class for the local OpenAI-compatible llama.cpp adapter)
 # ---------------------------------------------------------------------------
 
 class TestOpenAIProvider:
@@ -383,138 +284,9 @@ class TestOpenAIProvider:
         assert result["ok"] is False
 
     def test_available_models(self):
+        from engine import config
         models = self.prov.available_models()
-        assert "gpt-4o" in models
-
-
-# ---------------------------------------------------------------------------
-# AnthropicProvider
-# ---------------------------------------------------------------------------
-
-class TestAnthropicProvider:
-    def setup_method(self):
-        self.prov = AnthropicProvider()
-        self.prov.api_key = "fake-anthropic-key"
-        self.prov.model = "claude-3-5-sonnet-20241022"
-
-    @patch("engine.anthropic.Anthropic")
-    def test_analyze_success(self, mock_anthropic):
-        mock_client = MagicMock()
-        mock_anthropic.return_value = mock_client
-        mock_block = MagicMock()
-        mock_block.text = (
-            '{"new_filename": "mountain_view", "topic": "mountain", "description": "view", '
-            '"tags": ["mountain", "view"], "overall_visual_summary": "Mountain view.", '
-            '"suggested_category": "landscapes_broll"}'
-        )
-        mock_response = MagicMock()
-        mock_response.content = [mock_block]
-        mock_client.messages.create.return_value = mock_response
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is True
-        assert result["data"]["new_filename"] == "mountain_view"
-
-    def test_analyze_no_api_key(self):
-        self.prov.api_key = ""
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is False
-        assert result["error"] == "api_key_missing"
-
-    @patch("engine.anthropic.Anthropic")
-    def test_analyze_api_error(self, mock_anthropic):
-        mock_anthropic.side_effect = Exception("403 Forbidden")
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is False
-        assert result["error"] == "anthropic_api_error"
-
-    def test_health_check_with_key(self):
-        result = self.prov.health_check()
-        assert result["ok"] is True
-
-    def test_health_check_no_key(self):
-        self.prov.api_key = ""
-        result = self.prov.health_check()
-        assert result["ok"] is False
-
-    def test_available_models(self):
-        models = self.prov.available_models()
-        assert "claude-3-5-sonnet-20241022" in models
-
-
-# ---------------------------------------------------------------------------
-# GroqProvider
-# ---------------------------------------------------------------------------
-
-class TestGroqProvider:
-    def setup_method(self):
-        self.prov = GroqProvider()
-        self.prov.api_key = "fake-groq-key"
-        self.prov.model = "llama-3.2-90b-vision-preview"
-
-    def test_inherits_from_openai(self):
-        assert isinstance(self.prov, OpenAIProvider)
-
-    def test_custom_base_url(self):
-        assert "groq.com" in self.prov._base_url
-
-    def test_available_models(self):
-        models = self.prov.available_models()
-        assert "llama-3.2-90b-vision-preview" in models
-
-    @patch("engine.openai.OpenAI")
-    def test_analyze_success(self, mock_openai):
-        mock_client = MagicMock()
-        mock_openai.return_value = mock_client
-        mock_choice = MagicMock()
-        mock_choice.message.content = (
-            '{"new_filename": "desert_dune", "topic": "desert", "description": "dune", '
-            '"tags": ["desert", "dune"], "overall_visual_summary": "Desert dune.", '
-            '"suggested_category": "landscapes_broll"}'
-        )
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        mock_client.chat.completions.create.return_value = mock_response
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is True
-        assert result["data"]["new_filename"] == "desert_dune"
-
-
-# ---------------------------------------------------------------------------
-# OpenRouterProvider
-# ---------------------------------------------------------------------------
-
-class TestOpenRouterProvider:
-    def setup_method(self):
-        self.prov = OpenRouterProvider()
-        self.prov.api_key = "fake-or-key"
-        self.prov.model = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
-
-    def test_inherits_from_openai(self):
-        assert isinstance(self.prov, OpenAIProvider)
-
-    def test_custom_base_url(self):
-        assert "openrouter.ai" in self.prov._base_url
-
-    def test_available_models(self):
-        models = self.prov.available_models()
-        assert "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" in models
-
-    @patch("engine.openai.OpenAI")
-    def test_analyze_success(self, mock_openai):
-        mock_client = MagicMock()
-        mock_openai.return_value = mock_client
-        mock_choice = MagicMock()
-        mock_choice.message.content = (
-            '{"new_filename": "sunset_ai", "topic": "sunset", "description": "ai", '
-            '"tags": ["sunset", "ai"], "overall_visual_summary": "Sunset by AI.", '
-            '"suggested_category": "landscapes_broll"}'
-        )
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        mock_client.chat.completions.create.return_value = mock_response
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is True
-        assert result["data"]["new_filename"] == "sunset_ai"
+        assert "gpt-4o" in models or not config.get("model", {}).get("providers", {}).get("openai", {}).get("models")
 
 
 # ---------------------------------------------------------------------------
@@ -535,14 +307,6 @@ class TestLlamaCppProvider:
     def test_dummy_api_key_set(self):
         # llama-server does not authenticate; a placeholder satisfies the client.
         assert self.prov._api_key == "local"
-
-    @patch("engine.load_api_key")
-    def test_get_provider_preserves_local_key(self, mock_key):
-        # get_provider() must NOT overwrite the local placeholder with a keyring
-        # lookup, or analyze() fails with api_key_missing (verified bug).
-        prov = get_provider("llamacpp")
-        assert prov.api_key == "local"
-        mock_key.assert_not_called()
 
     @patch("engine.openai.OpenAI")
     def test_available_models_down_returns_empty(self, mock_openai):
@@ -583,59 +347,6 @@ class TestLlamaCppDetection:
 
 
 # ---------------------------------------------------------------------------
-# API Key Storage (mocked keyring)
-# ---------------------------------------------------------------------------
-
-class TestApiKeyStorage:
-    @patch("engine.keyring.set_password")
-    def test_save_api_key(self, mock_kr):
-        save_api_key("test_provider", "test-key-123")
-        mock_kr.assert_called_once_with("ai-media-renamer", "test_provider", "test-key-123")
-
-    @patch("engine.keyring.get_password")
-    def test_load_api_key_exists(self, mock_kr):
-        mock_kr.return_value = "stored-key"
-        result = load_api_key("test_provider")
-        assert result == "stored-key"
-
-    @patch("engine.keyring.get_password")
-    def test_load_api_key_missing(self, mock_kr):
-        mock_kr.return_value = None
-        result = load_api_key("unknown_provider")
-        assert result == ""
-
-    @patch("engine.keyring.delete_password")
-    def test_delete_api_key(self, mock_kr):
-        delete_api_key("test_provider")
-        mock_kr.assert_called_once_with("ai-media-renamer", "test_provider")
-
-    @patch("engine.keyring.delete_password")
-    def test_delete_api_key_nonexistent(self, mock_kr):
-        import keyring as kr_mod
-        mock_kr.side_effect = kr_mod.errors.PasswordDeleteError("not found")
-        delete_api_key("missing")  # should not raise
-
-    @patch("engine.keyring.get_password")
-    @patch("engine.keyring.get_keyring")
-    def test_keyring_available(self, mock_get_keyring, mock_get_password):
-        mock_get_keyring.return_value = object()
-        mock_get_password.return_value = None
-        available, detail = keyring_available()
-        assert available is True
-        assert detail == ""
-        mock_get_keyring.assert_called_once()
-        mock_get_password.assert_called_once_with("ai-media-renamer", "__probe__")
-
-    @patch("engine.keyring.get_password", side_effect=RuntimeError("no keychain backend"))
-    @patch("engine.keyring.get_keyring")
-    def test_keyring_unavailable(self, mock_get_keyring, mock_get_password):
-        mock_get_keyring.side_effect = RuntimeError("no keychain backend")
-        available, detail = keyring_available()
-        assert available is False
-        assert "no keychain backend" in detail
-
-
-# ---------------------------------------------------------------------------
 # Provider routing (switch_ai_provider)
 # ---------------------------------------------------------------------------
 
@@ -660,11 +371,6 @@ class TestFormatAiError:
         from engine import _format_ai_error
         msg = _format_ai_error({"error": "openai_api_error", "detail": "401 Unauthorized"})
         assert "401" in msg or "openai" in msg.lower()
-
-    def test_anthropic_api_error(self):
-        from engine import _format_ai_error
-        msg = _format_ai_error({"error": "anthropic_api_error", "detail": "403 Forbidden"})
-        assert "403" in msg or "anthropic" in msg.lower()
 
     def test_api_key_missing(self):
         from engine import _format_ai_error

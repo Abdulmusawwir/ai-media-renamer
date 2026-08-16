@@ -9,7 +9,6 @@ from engine import (
     extract_text_csv,
     extract_text_docx,
     extract_text_from_file,
-    extract_text_pdf,
     extract_text_plain,
     extract_text_pptx,
     extract_text_xlsx,

@@ -83,7 +83,8 @@ That's it. A folder that took an afternoon to organize by hand is done while you
 
 - [x] **Security hardening pass** — done in v1.6.3: checksum-verified downloads, frozen lockfile, secret redaction, keychain fail-closed, loopback-only server with LAN opt-in, input-validation hardening, log path redaction
 - [x] **Stability & engine hardening** — done in v1.6.4: atomic config saves, import-safe startup, callback-driven engine switching, safer Clear All (sessions preserved), CLI argument validation
-- [ ] More AI models, cloud providers, and language support
+- [x] **Fully local & offline** — done in v1.7.0: cloud providers, API keys, and the keychain layer removed. Only local runtimes (Ollama / llama.cpp).
+- [ ] More AI models and language support
 - [ ] Auto-sorting into category folders
 - [ ] Bulk import from cloud drives
 - [ ] And whatever the community asks for next

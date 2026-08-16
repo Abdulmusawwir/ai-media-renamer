@@ -1,13 +1,9 @@
 """CLI helper function tests."""
 
-import json
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
-
 # Import from cli.py - these are module-level functions
 import sys
+from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cli import _sanitize_category

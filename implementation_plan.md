@@ -88,21 +88,16 @@
 ### 2.6 Multi-provider abstraction
 - [x] Create provider interface in `engine.py` with abstract `analyze()` method
 - [x] Implement `OllamaProvider` (existing code, refactored)
-- [x] Implement `OpenAIProvider` using `openai` Python client (vision API)
-- [x] Implement `AnthropicProvider` using `anthropic` Python client
-- [x] Implement `GroqProvider` (OpenAI-compatible, custom base URL)
-- [x] Implement `OpenRouterProvider` (OpenAI-compatible, custom base URL)
+- [x] Implement `OpenAIProvider` using `openai` Python client (OpenAI-compatible base, reused by `LlamaCppProvider`)
+- [x] Implement `LlamaCppProvider` (local llama-server, OpenAI-compatible)
 - [x] Add `provider` key to `config.json` model section
-- [x] Add keyring-based API key storage (system keychain, never plaintext on disk)
 - [x] Add provider selector UI in `app.py` sidebar
-- [x] Show API key field for cloud providers (password input, keyring-backed)
-- [x] Add `openai`, `anthropic`, and `keyring` to `requirements.txt`
-- [!] **Cloud providers are untested** — API keys unavailable for testing. Disabled in UI via `_on_provider_switch()`. Only Ollama is selectable.
+- [!] **REMOVED (v1.7.0):** `GeminiProvider`, `AnthropicProvider`, `GroqProvider`, `OpenRouterProvider`, keyring-based API key storage, and the API-key UI field were all removed from `engine.py`/`app.py`. The app is fully local/offline — only `ollama` and `llamacpp` register. `anthropic` and `keyring` were dropped from `requirements.txt`/lockfile/`build.spec`.
 
 ### 2.7 Model auto-detection
 - [x] On provider change or startup, call `ollama.list()` to auto-populate model dropdown
 - [x] If Ollama is unreachable, show red indicator and fall back to `config.json` model list
-- [x] For OpenAI/Anthropic, show known model list from config (no auto-detect available)
+- [x] For llama.cpp, show models advertised by the running llama-server (`/v1/models`)
 
 ---
 
@@ -472,13 +467,13 @@
   - `exiftool`: bool — check via `_resolve_binary_path("exiftool")`
   - `ollama_running`: bool — probe `http://localhost:11434/api/tags`
   - `model_available`: bool — parse `/api/tags` for `qwen2.5vl:7b`
-  - `cloud_configured`: bool — check config or session state for valid Gemini Flash API key
+  - `llamacpp_running`: bool — probe the llama-server OpenAI-compatible endpoint
 - [x] Create `_resolve_binary_path(name)` in `engine.py`:
   - Check `sys._MEIPASS / "bin" / name` first (PyInstaller bundled path)
   - Fall back to `shutil.which(name)`
   - Return full path string or `None`
 - [x] Create dedicated bootstrap panel in `app.py` that runs `check_environment()` at startup
-- [x] Smart routing: if Ollama/model missing but `cloud_configured=True`, show: *"Status: Local engine missing. Routing execution to pre-configured Cloud API."* — bypass download
+- [x] Smart routing: if Ollama/model missing but llama.cpp runtime available, route to the local llama-server
 - [x] If both missing: show interactive local downloader UI (see S.2)
 - [x] Store results in `st.session_state.env_check` to avoid re-running on every rerun
 
@@ -493,14 +488,14 @@
 - [x] On success: re-run `check_environment()` to confirm model is now available
 - [x] On error: show error message with retry button
 
-### S.3 Hybrid AI Switching
-- [x] Create `switch_ai_provider(new_provider, api_key=None)` in `engine.py`:
-  - `new_provider`: `"ollama"` | `"gemini"` | `"openai"` | `"anthropic"`
-  - **Local → Cloud**: call `ollama.generate(keep_alive=0)` to drop model weights from RAM/VRAM immediately; swap config to cloud provider
-  - **Cloud → Local**: re-trigger `check_environment()`; if Ollama/model missing, block pipeline and show `[Initialize Local AI Engine]` button (fires S.2)
-  - Update module-level constants (`MODEL_NAME`, provider function pointers)
-- [x] In `app.py` settings panel: add provider selector (radio or dropdown) with conditional API key field (password input)
-- [x] `[Initialize Local AI Engine]` button appears when cloud→local switch fails due to missing model
+### S.3 Local Engine Switching (was Hybrid AI Switching)
+- [x] Create `switch_ai_provider(new_provider)` in `engine.py` (local-only since v1.7.0: no `api_key` param):
+  - `new_provider`: `"ollama"` | `"llamacpp"`
+  - **Engine switch**: call `ollama.generate(keep_alive=0)` for Ollama to drop model weights from RAM/VRAM immediately; swap config engine; auto-start the llama.cpp daemon when selected but idle
+  - **Switching back**: re-trigger `check_environment()`; if the engine/model missing, block pipeline and show `[Initialize Local AI Engine]` button (fires S.2)
+  - Update module-level constants (`CURRENT_PROVIDER`, provider function pointers)
+- [x] In `app.py` settings panel: add engine selector (radio) with status indicators
+- [x] `[Initialize Local AI Engine]` button appears when switching fails due to missing model
 - [x] Log provider switches via `log_event()` with event type `"provider_switch"`
 
 ### S.4 Storage Lifecycle Utility
@@ -729,7 +724,7 @@
   - Try `AssetAnalysisResponse.model_validate_json(response_text)`
   - On `ValidationError`: attempt regex extraction of JSON block, retry Pydantic validation
   - On second failure: return fallback `{filename: original_name, category: "uncategorized", ...}`
-- [x] For cloud providers (OpenAI, Gemini, Groq): pass `response_format={"type": "json_schema", "json_schema": AssetAnalysisResponse}` when supported
+- [x] For OpenAI-compatible providers (Ollama, llama.cpp): pass `response_format={"type": "json_schema", "json_schema": AssetAnalysisResponse}` when supported
 - [x] Add retry logic: max 2 retries on malformed response before fallback
 
 ### 18.3 ExifTool batching
@@ -825,7 +820,7 @@ Phase N: 4.2                    → Naming templates — DONE (full template sys
 Phase O: 10.5, 10.6, 10.7       → Quality of life (polish) — DONE
 Phase P: 4.4, 4.5, 10.8         → Advanced Features expander + naming controls — DONE (consolidated into staging Naming Settings)
 Phase Q: 2.5                    → Multi-profile AI prompts — DONE
-Phase R: 2.6, 2.7               → Multi-provider + model auto-detect — DONE (providers implemented, cloud disabled in UI)
+Phase R: 2.6, 2.7               → Multi-provider + model auto-detect — DONE (local-only since v1.7.0: ollama + llamacpp, cloud providers removed)
 Phase S: S.1–S.5                → Desktop Bundling & Bootstrap Lifecycle Setup — DONE
 Phase T: 8.4                    → CLI subdirectories — DONE
 Phase U: 13.1, 13.2             → Duplicate detection + feedback — DONE

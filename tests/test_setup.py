@@ -10,7 +10,6 @@ import pytest
 
 import engine
 
-
 # ---------------------------------------------------------------------------
 # Use-case dependency matrix
 # ---------------------------------------------------------------------------
@@ -275,7 +274,7 @@ class TestCheckEnvironmentProfile:
         env = engine.check_environment()
         for key in ("ffmpeg", "exiftool", "ollama_running", "model_available",
                     "vision_models", "text_models", "text_model_available",
-                    "cloud_configured", "errors"):
+                    "errors"):
             assert key in env
 
     def test_text_model_detected(self, monkeypatch):

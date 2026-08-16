@@ -52,13 +52,13 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] Model selection wizard for first-time users (Qwen2.5-VL 3B/7B, Qwen3-VL 4B, Moondream)
 - [x] Per-asset rerun loop: one AI call per script execution, advanced via `st.rerun()`
 - [x] Structured AI response parsing with typed error handling
-- [x] Pydantic structured outputs — response schema for AI, `response_format` for cloud providers, retry with fallback
+- [x] Pydantic structured outputs — response schema for AI, `response_format` for OpenAI-compatible providers, retry with fallback
 - [x] Configurable AI prompt with cinematography analysis (shot type, camera movement, lighting, color palette, composition, mood)
 - [x] 40-category taxonomy validation — invalid suggestions fall back to uncategorized
 - [x] Stop Analysis button (immediate abort, preserves already-analyzed assets)
 - [x] Progress bar during extraction and analysis phases
 - [x] 8 AI prompt profiles (General Balanced, General B-Roll, Cinematography, Motion Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming, Audio Files) + Custom — selectable in web UI (main interface, before analysis) and CLI via `--profile`
-- [x] Multi-provider AI support (Ollama, llama.cpp, OpenAI, Anthropic, Groq, OpenRouter) with provider abstraction layer — cloud providers disabled in UI, untested
+- [x] Multi-provider AI support (Ollama, llama.cpp) with provider abstraction layer — fully local/offline, no cloud providers
 - [x] llama.cpp as default local runtime for new installs — wizard downloads `llama-server` + a GGUF vision/text model (verified HuggingFace URLs, `hf-mirror` fallback); existing Ollama installs are detected and reused
 - [x] Auto-detect available Ollama models via `ollama.list()` and populate dropdown
 - [x] "Re-analyze Selected" button (replaced per-asset + Re-analyze All buttons)
@@ -66,10 +66,10 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] Audio transcription via `faster-whisper` — extract audio track from video, transcribe locally, feed into text analysis pipeline
 
 ### Boot Diagnostics & Environment Lifecycle
-- [x] 4-Stage Bootstrap Checklist on app startup (Core utilities, Ollama daemon, model manifest, cloud config)
+- [x] 4-Stage Bootstrap Checklist on app startup (Core utilities, local AI daemon, model manifest, config)
 - [x] Interactive model download UI with real-time progress bar (`/api/pull` streaming)
-- [x] Hybrid AI switching (Local Ollama ↔ Cloud Gemini) with graceful RAM/VRAM decoupling (`keep_alive=0`)
-- [x] Boot panel smart routing: if Ollama/model missing but cloud key present, bypass download
+- [x] Local AI engine switching (Ollama ↔ llama.cpp) with graceful RAM/VRAM decoupling (`keep_alive=0`)
+- [x] Boot panel smart routing: if Ollama/model missing but llama.cpp runtime installed, route to it
 - [x] `[Wipe Local Model Cache]` button with confirmation guard in Configuration view
 - [x] PyInstaller bundle with embedded binary path resolution (`_resolve_binary_path()`)
 
@@ -137,7 +137,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - **AI-generated content detection** — No reliable way to detect AI content from frame analysis alone.
 - **Watch folders / automation** — No folder monitoring or auto-processing. Manual trigger via CLI or web UI.
 - **NLE XML exports** — No DaVinci Resolve CSV or FCPXML export. Users rely on OS-level file tags and NLE metadata panel.
-- **Cloud API parallelization** — Cloud providers (OpenAI, Anthropic, etc.) are implemented but disabled/untested. Parallel analysis for cloud is deferred until providers are validated.
+- **Cloud API support** — No cloud model providers. Analysis runs 100% locally (Ollama / llama.cpp); no API keys, no uploads, no subscriptions.
 
 ## Core Tech Stack & Assumptions
 
@@ -146,7 +146,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 |---|---|---|
 | **Frontend / UI** | Streamlit | Fastest path to interactive data-editor UI with file upload, progress bars, and charts |
 | **Backend** | Pure Python 3.10+ | Single-process, no web framework needed beyond Streamlit |
-| **AI Model / Providers** | Ollama + llama.cpp (local, primary), OpenAI, Anthropic, LM Studio | Local + cloud vision models via abstracted provider interface. llama.cpp is the default runtime for fresh installs (Ollama reused when detected). Multiple prompt profiles per use case |
+| **AI Model / Providers** | Ollama + llama.cpp (both local) | Local vision/text models via abstracted provider interface. llama.cpp is the default runtime for fresh installs (Ollama reused when detected). Multiple prompt profiles per use case |
 | **Metadata Engine** | ExifTool 12+ | Industry standard for cross-format metadata; `-stay_open` mode for persistent subprocess performance |
 | **Media Decoding** | FFmpeg 6+ | Hardware-accelerated frame extraction, downscaling, video storyboard grid generation |
 | **Desktop Bundler** | PyInstaller 6+ | Single-file executable distribution; `_resolve_binary_path()` for bundled FFmpeg/ExifTool |
@@ -156,7 +156,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 | **OS** | Windows 10/11 | Primary target (NLE ecosystem). Linux/macOS secondary (compatible but untested) |
 
 ### Assumptions
-- **AI provider available.** For Ollama/llama.cpp: the app must be running locally. For OpenAI/Anthropic: valid API key required. Auto-detection of available Ollama models at startup, and auto-start of the llama.cpp daemon when installed. First-time users can select from 4 model options with size/quality tradeoff descriptions.
+- **AI provider available.** The app must be running locally: Ollama daemon or the llama.cpp server (auto-started when installed). Auto-detection of available Ollama models at startup. First-time users can select from 4 model options with size/quality tradeoff descriptions.
 - **ExifTool and FFmpeg are in `PATH`.** Not bundled. Users install them independently. The EXE bundles both.
 - **Single user per session.** No state shared between browser tabs or users.
 - **Files are under 4 GB typical.** `LargeFileSupport=1` is enabled in ExifTool args for oversized files, but very large files (>10 GB) may cause longer processing times.
