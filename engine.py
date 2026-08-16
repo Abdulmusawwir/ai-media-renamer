@@ -113,6 +113,10 @@ def load_config(config_path: str = "config.json", quiet: bool = False) -> dict[s
         '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a',
         '.wma', '.opus', '.aiff', '.alac', '.ape', '.wv',
     ]))
+    cfg['document_extensions'] = tuple(cfg.get('document_extensions', [
+        '.pdf', '.docx', '.doc', '.txt', '.md', '.rtf',
+        '.xlsx', '.csv', '.pptx',
+    ]))
     cfg['allowed_categories'] = tuple(cfg.get('allowed_categories', []))
     return cfg
 
@@ -155,7 +159,7 @@ def _minimal_config() -> dict[str, Any]:
             "providers": {},
         },
         "preview": {"image_max_edge": 384, "video_grid_scale": 300, "extraction_workers": 0},
-        "naming": {"case_style": "snake_case", "max_filename_chars": 0},
+        "naming": {"case_style": "snake_case", "max_filename_chars": 0, "sort_folders": True},
         "naming_templates": {"default": "{topic}_{description}"},
         "logging": {"directory": "logs", "max_upload_size": 10737418240},
         "prompt_profiles": {"active": "general_balanced", "profiles": {}},
@@ -240,6 +244,7 @@ EXTRACTION_WORKERS = _resolve_workers(config['preview'].get('extraction_workers'
 
 DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'title_case')
 DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
+DEFAULT_SORT_FOLDERS = config.get('naming', {}).get('sort_folders', True)
 
 CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
 
@@ -288,6 +293,7 @@ def reload_config() -> None:
     global config, ALLOWED_CATEGORIES, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS, AUDIO_EXTENSIONS
     global MODEL_NAME, TEXT_MODEL_NAME, MODEL_TEMPERATURE, MODEL_NUM_CTX, MODEL_KEEP_ALIVE
     global EXTRACTION_WORKERS, DEFAULT_CASE_STYLE, DEFAULT_MAX_FILENAME_CHARS
+    global DEFAULT_SORT_FOLDERS
     global NAMED_TEMPLATES, DEFAULT_TEMPLATE_STRING, PROMPT_PROFILES, CURRENT_PROVIDER
     global IMAGE_PREVIEW_MAX_EDGE, VIDEO_GRID_SCALE, DOCUMENT_EXTENSIONS, CONFIG_LOAD_ERROR
     try:
@@ -314,6 +320,7 @@ def reload_config() -> None:
     EXTRACTION_WORKERS = _resolve_workers(config['preview'].get('extraction_workers', 0))
     DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'title_case')
     DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
+    DEFAULT_SORT_FOLDERS = config.get('naming', {}).get('sort_folders', True)
     NAMED_TEMPLATES = config.get('naming_templates', {
         "default": "{topic}_{description}",
         "short": "{topic}_{description}",

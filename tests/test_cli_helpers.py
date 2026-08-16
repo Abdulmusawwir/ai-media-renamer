@@ -3,6 +3,7 @@
 # Import from cli.py - these are module-level functions
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -62,3 +63,32 @@ class TestCommitAll:
         result = _commit_all([], tmp_dir, False, None, dry_run=True)
         # dry_run with empty list just prints preview and returns None
         assert result is None
+
+
+class TestSortFoldersResolution:
+    """Non-interactive CLI runs resolve sort_into_folders from flag or config default."""
+
+    def _run(self, tmp_dir, **kwargs):
+        from cli import _run_staging_phase
+        assets = [{
+            "original_name": "test.mp4",
+            "original_path": tmp_dir / "test.mp4",
+            "staged_name": "golden_hour_sunset",
+            "category": "landscapes_broll",
+            "tags": [],
+            "selected": True,
+        }]
+        with patch("cli._commit_all") as mock_commit:
+            _run_staging_phase(assets, tmp_dir, None, None, None, "snake_case", 0,
+                               False, non_interactive=True, **kwargs)
+        return mock_commit.call_args[0][2]
+
+    def test_non_interactive_uses_config_default(self, tmp_dir):
+        from engine import DEFAULT_SORT_FOLDERS
+        assert self._run(tmp_dir) is DEFAULT_SORT_FOLDERS
+
+    def test_non_interactive_explicit_true(self, tmp_dir):
+        assert self._run(tmp_dir, sort_folders=True) is True
+
+    def test_non_interactive_explicit_false(self, tmp_dir):
+        assert self._run(tmp_dir, sort_folders=False) is False

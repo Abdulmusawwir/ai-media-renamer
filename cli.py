@@ -12,6 +12,7 @@ from engine import (
     AUDIO_EXTENSIONS,
     CASE_STYLE_OPTIONS,
     DEFAULT_CASE_STYLE,
+    DEFAULT_SORT_FOLDERS,
     DOCUMENT_EXTENSIONS,
     EXTRACTION_WORKERS,
     IMAGE_EXTENSIONS,
@@ -133,6 +134,7 @@ def process_library(
     categories_override: dict[str, str] | None = None,
     output_file: str | None = None,
     show_progress: bool = True,
+    sort_folders: bool | None = None,
 ) -> None:
     """Run the full AI media renaming pipeline on a directory.
 
@@ -157,6 +159,8 @@ def process_library(
         categories_override: Mapping of filenames to forced category strings.
         output_file: Path to write a JSON commit summary.
         show_progress: Show rich progress bars during execution.
+        sort_folders: Sort committed files into category subfolders (None =
+            use the ``naming.sort_folders`` config default).
     """
     global _show_progress
     _show_progress = show_progress and _HAS_RICH
@@ -215,7 +219,9 @@ def process_library(
         # Skip to Phase 3
         _run_staging_phase(staged_assets, target_dir, logger, exif_session=None,
                            template_string=template_string, case_style=case_style,
-                           max_chars=max_chars, dry_run=dry_run, metadata_only=metadata_only)
+                           max_chars=max_chars, dry_run=dry_run, metadata_only=metadata_only,
+                           non_interactive=non_interactive,
+                           sort_folders=sort_folders)
         return
 
     # ------------------------------------------------------------------
@@ -401,7 +407,8 @@ def process_library(
                        template_string, case_style, max_chars, dry_run,
                        metadata_only=metadata_only,
                        non_interactive=non_interactive,
-                       categories_override=categories_override)
+                       categories_override=categories_override,
+                       sort_folders=sort_folders)
     exif_session.close()
 
     # Output summary file
@@ -438,6 +445,7 @@ def _run_staging_phase(
     metadata_only: bool = False,
     non_interactive: bool = False,
     categories_override: dict[str, str] | None = None,
+    sort_folders: bool | None = None,
 ) -> None:
     """Display the staging matrix and handle category overrides and commit execution.
 
@@ -453,6 +461,8 @@ def _run_staging_phase(
         metadata_only: Write metadata only, skip file renaming.
         non_interactive: Skip user prompts, apply defaults.
         categories_override: Mapping of filenames to forced categories.
+        sort_folders: Sort into category subfolders (None = interactive prompt,
+            or the ``naming.sort_folders`` config default in non-interactive mode).
     """
     print("\n" + "=" * 85)
     print("AI STAGING MATRIX SUMMARY VIEW")
@@ -465,7 +475,7 @@ def _run_staging_phase(
     print("=" * 85)
 
     if non_interactive:
-        sort_into_folders = False
+        sort_into_folders = DEFAULT_SORT_FOLDERS if sort_folders is None else sort_folders
         if categories_override:
             for asset in staged_assets:
                 override = categories_override.get(asset["original_name"])
@@ -478,10 +488,13 @@ def _run_staging_phase(
                     metadata_only=metadata_only)
         return
 
-    sort_folders_input = input(
-        "\nWould you like to sort these assets into categorized subfolders? [Y]es / [N]o: "
-    ).strip().lower()
-    sort_into_folders = sort_folders_input in ('y', 'yes')
+    if sort_folders is not None:
+        sort_into_folders = sort_folders
+    else:
+        sort_folders_input = input(
+            "\nWould you like to sort these assets into categorized subfolders? [Y]es / [N]o: "
+        ).strip().lower()
+        sort_into_folders = sort_folders_input in ('y', 'yes')
 
     # Category override step for uncategorized assets
     uncategorized_assets = [a for a in staged_assets if a['category'] == 'uncategorized']
@@ -964,6 +977,16 @@ if __name__ == "__main__":
         "--metadata-only", action="store_true",
         help="Write metadata tags only — keep original filenames, no rename."
     )
+    sort_group = parser.add_mutually_exclusive_group()
+    sort_group.add_argument(
+        "--sort-folders", dest="sort_folders", action="store_true",
+        help="Sort committed files into category subfolders (overrides config default)."
+    )
+    sort_group.add_argument(
+        "--no-sort-folders", dest="sort_folders", action="store_false",
+        help="Do not sort into category subfolders (overrides config default)."
+    )
+    parser.set_defaults(sort_folders=None)
     parser.add_argument(
         "-r", "--include-subdirectories", action="store_true",
         help="Scan subdirectories recursively for media files."
@@ -1052,4 +1075,5 @@ if __name__ == "__main__":
         categories_override=categories_override,
         output_file=args.output,
         show_progress=not args.no_progress,
+        sort_folders=args.sort_folders,
     )
