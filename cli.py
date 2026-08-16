@@ -10,6 +10,7 @@ from typing import Any
 
 from engine import (
     AUDIO_EXTENSIONS,
+    DEFAULT_CASE_STYLE,
     DOCUMENT_EXTENSIONS,
     EXTRACTION_WORKERS,
     IMAGE_EXTENSIONS,
@@ -928,9 +929,9 @@ if __name__ == "__main__":
              'Raw: e.g. "{date}_{category}_{topic}_{description}"'
     )
     parser.add_argument(
-        "--case-style", "--style", type=str, default="snake_case",
+        "--case-style", "--style", type=str, default=DEFAULT_CASE_STYLE,
         choices=CASE_STYLE_OPTIONS,
-        help="Filename case style (default: snake_case)."
+        help=f"Filename case style (default: {DEFAULT_CASE_STYLE})."
     )
     parser.add_argument(
         "--max-chars", "--max", type=int, default=0,
@@ -940,12 +941,13 @@ if __name__ == "__main__":
         "--force", action="store_true",
         help="Re-analyze all files, including previously processed ones."
     )
-    parser.add_argument(
+    csv_group = parser.add_mutually_exclusive_group()
+    csv_group.add_argument(
         "--export-csv", type=str, default=None,
         metavar="FILE",
         help="Export staging data to CSV after analysis."
     )
-    parser.add_argument(
+    csv_group.add_argument(
         "--import-csv", type=str, default=None,
         metavar="FILE",
         help="Skip AI analysis and load staging from CSV file."
@@ -978,11 +980,12 @@ if __name__ == "__main__":
         "--no-progress", action="store_true",
         help="Disable progress bars (for pipe-friendly output)."
     )
-    parser.add_argument(
+    exit_group = parser.add_mutually_exclusive_group()
+    exit_group.add_argument(
         "--rollback", action="store_true",
         help="Undo the last commit batch: move files back to original locations."
     )
-    parser.add_argument(
+    exit_group.add_argument(
         "--reset-config", action="store_true",
         help="Reset config.json to factory defaults and exit."
     )

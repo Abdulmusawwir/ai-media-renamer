@@ -421,6 +421,61 @@ def _on_text_model_change() -> None:
     save_config()
 
 
+def _on_engine_change() -> None:
+    """Persist a sidebar engine switch to config via switch_ai_provider.
+
+    Runs in a callback (not mid-render) so provider state and config writes
+    happen exactly once, when the radio actually changes. Skipped while a
+    rerun loop is actively analyzing so a mid-run click cannot break it.
+    """
+    if st.session_state.get("analysis_in_progress", False):
+        return
+    label = st.session_state.get("provider_radio", "")
+    env_now = st.session_state.get("env_check") or {}
+    llamacpp_installed = bool(config.get("model", {}).get("llamacpp", {}).get("gguf_path"))
+    llamacpp_visible = bool(env_now.get("llamacpp_running")) or llamacpp_installed
+    engine_labels = ["Local (Ollama)"]
+    engine_ids = ["ollama"]
+    if llamacpp_visible:
+        engine_labels.append("Local (llama.cpp)")
+        engine_ids.append("llamacpp")
+    if label not in engine_labels:
+        return
+    new_provider = engine_ids[engine_labels.index(label)]
+    if new_provider == st.session_state.get("provider_info"):
+        return
+    if new_provider == "llamacpp" and not env_now.get("llamacpp_running"):
+        ensure_llamacpp_server()
+        st.session_state.env_check = None
+    try:
+        switch_ai_provider(new_provider)
+    except RuntimeError as exc:
+        st.session_state.switch_error = str(exc)
+        return
+    st.session_state.provider_info = new_provider
+
+
+def _reset_analysis_state() -> None:
+    """Reset all pipeline-analysis session state to its idle baseline.
+
+    Shared by every path that abandons in-flight analysis: a file-list change,
+    Clear All, session restore, and the post-commit cleanup. Always clears the
+    analysis loop counters and duplicate-detection results so a later run
+    starts from a clean slate.
+    """
+    st.session_state.staged_assets = []
+    st.session_state.base64_cache = {}
+    st.session_state.text_cache = {}
+    st.session_state.audio_transcription_cache = {}
+    st.session_state.analysis_errors = []
+    st.session_state.hw_fallback_files = []
+    st.session_state.analysis_index = 0
+    st.session_state.analysis_done = False
+    st.session_state.analysis_in_progress = False
+    st.session_state.analysis_aborted = False
+    st.session_state.pop("duplicate_pairs", None)
+
+
 def _spawn_setup_wizard() -> None:
     """Re-open the bootstrap setup wizard (Tk) in a separate process."""
     import subprocess
@@ -462,28 +517,25 @@ with st.sidebar:
     if llamacpp_visible:
         engine_labels.append("Local (llama.cpp)")
         engine_ids.append("llamacpp")
-    default_idx = engine_ids.index(st.session_state.provider_info) \
-        if st.session_state.provider_info in engine_ids else 0
-    chosen = st.radio(
+    # Park the radio on a visible engine whenever the stored provider is not
+    # among the offered options (e.g. llama.cpp not installed), so it never
+    # points at a hidden engine id.
+    if st.session_state.provider_info not in engine_ids:
+        if "llamacpp" in engine_ids:
+            st.session_state.provider_info = "llamacpp"
+        else:
+            st.session_state.provider_info = "ollama"
+    default_idx = engine_ids.index(st.session_state.provider_info)
+    st.radio(
         "Engine",
         engine_labels,
         index=default_idx,
         key="provider_radio",
+        on_change=_on_engine_change,
+        disabled=analysis_active,
         help="Local modes use an on-device LLM server. Cloud modes are not yet available.",
     )
-    new_provider = engine_ids[engine_labels.index(chosen)]
-
-    # Persist the engine switch so analysis uses the same provider. Skipped
-    # while analysis runs so a mid-run radio click cannot break the rerun loop.
-    if not analysis_active and new_provider != st.session_state.provider_info:
-        if new_provider == "llamacpp" and not (env_now or {}).get("llamacpp_running"):
-            ensure_llamacpp_server()
-            st.session_state.env_check = None
-        try:
-            switch_ai_provider(new_provider)
-        except RuntimeError as exc:
-            st.session_state.switch_error = str(exc)
-        st.session_state.provider_info = new_provider
+    new_provider = st.session_state.provider_info
 
     cloud_names = {
         "gemini": "Gemini", "openai": "OpenAI", "anthropic": "Anthropic",
@@ -920,6 +972,9 @@ with tab_upload:
         existing = st.session_state.get("uploaded_files", {})
         new_names = {uf.name for uf in uploaded_files}
         if set(existing.keys()) != new_names:
+            old_temp = st.session_state.get("temp_dir")
+            if old_temp:
+                shutil.rmtree(old_temp, ignore_errors=True)
             st.session_state.temp_dir = tempfile.mkdtemp(prefix="renamer_upload_")
             saved = {}
             skipped_size = []
@@ -963,14 +1018,7 @@ with tab_upload:
                 progress_bar.empty()
 
             st.session_state.uploaded_files = saved
-            st.session_state.analysis_done = False
-            st.session_state.analysis_in_progress = False
-            st.session_state.analysis_aborted = False
-            st.session_state.staged_assets = []
-            st.session_state.base64_cache = {}
-            st.session_state.text_cache = {}
-            st.session_state.audio_transcription_cache = {}
-            st.session_state.hw_fallback_files = []
+            _reset_analysis_state()
 
     # Clear All button — always visible when files or staged assets exist
     if st.session_state.get("uploaded_files") or st.session_state.staged_assets:
@@ -978,13 +1026,9 @@ with tab_upload:
             temp_dir = st.session_state.get("temp_dir")
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
-            for s in list_sessions():
-                delete_session(s["path"])
-            for key in ["uploaded_files", "base64_cache", "text_cache", "staged_assets",
-                        "temp_dir", "analysis_errors", "hw_fallback_files"]:
+            _reset_analysis_state()
+            for key in ["uploaded_files", "temp_dir"]:
                 st.session_state.pop(key, None)
-            st.session_state.analysis_done = False
-            st.session_state.analysis_in_progress = False
             st.session_state.clear_counter += 1
             st.rerun()
 
@@ -1033,6 +1077,7 @@ with tab_upload:
                         except (ValueError, json.JSONDecodeError, OSError) as exc:
                             st.error(f"Session file is corrupt or unreadable: {exc}")
                             st.stop()
+                        _reset_analysis_state()
                         st.session_state.staged_assets = result["staged_assets"]
                         st.session_state.uploaded_files = result["uploaded_files"]
                         s = result["settings"]
@@ -1046,13 +1091,6 @@ with tab_upload:
                             st.session_state.template_string = s["template_string"]
                         if result["staged_assets"]:
                             st.session_state.analysis_done = True
-                        else:
-                            st.session_state.analysis_done = False
-                        st.session_state.analysis_in_progress = False
-                        st.session_state.analysis_index = 0
-                        st.session_state.base64_cache = {}
-                        st.session_state.text_cache = {}
-                        st.session_state.audio_transcription_cache = {}
                         if not result["staged_assets"] and result["missing_files"]:
                             st.warning(f"All {len(result['missing_files'])} file(s) missing from disk. "
                                        "Session restored with no assets. Re-upload files and re-analyze.",
@@ -1602,6 +1640,7 @@ with tab_upload:
             st.session_state.analysis_in_progress = True
             st.session_state.analysis_done = False
             st.session_state.analysis_errors = []
+            st.session_state.pop("duplicate_pairs", None)
             st.rerun()
 
         # Duplicate detection
@@ -1616,13 +1655,15 @@ with tab_upload:
 
         if st.session_state.get("duplicate_pairs"):
             with st.expander(f"Duplicates ({len(st.session_state.duplicate_pairs)} pairs)", expanded=True):
-                dupe_df = pd.DataFrame(st.session_state.duplicate_pairs)
-                dupe_df = dupe_df.rename(columns={
-                    "name_a": "File A", "name_b": "File B",
-                    "confidence": "Similarity %", "distance": "Distance"
-                })
-                st.dataframe(dupe_df[["File A", "File B", "Similarity %", "Distance"]],
-                             hide_index=True, width="stretch")
+                if st.checkbox("Load duplicate table", key="show_dupes_table",
+                               help="Build the duplicate DataFrame on demand instead of on every rerun."):
+                    dupe_df = pd.DataFrame(st.session_state.duplicate_pairs)
+                    dupe_df = dupe_df.rename(columns={
+                        "name_a": "File A", "name_b": "File B",
+                        "confidence": "Similarity %", "distance": "Distance"
+                    })
+                    st.dataframe(dupe_df[["File A", "File B", "Similarity %", "Distance"]],
+                                 hide_index=True, width="stretch")
                 if st.button(":material/clear_all: Clear Duplicates", key="clear_dupes"):
                     st.session_state.pop("duplicate_pairs", None)
                     st.rerun()
@@ -1647,17 +1688,21 @@ with tab_upload:
                     st.rerun()
 
         with st.expander("Show preview thumbnails"):
+            show_imgs = st.checkbox("Load image previews", key="show_thumbnails",
+                                    help="Decode base64 thumbnails on demand instead of on every rerun.")
             cols = st.columns(min(len(staged), 5))
             for i, asset in enumerate(staged):
                 col_idx = i % 5
                 with cols[col_idx]:
                     b64 = st.session_state.base64_cache.get(asset["original_name"])
                     txt = st.session_state.text_cache.get(asset["original_name"])
-                    if b64:
+                    if b64 and show_imgs:
                         st.image(base64.b64decode(b64), caption=asset["original_name"], width=150)
                     elif txt:
                         preview = txt[:150] + ("..." if len(txt) > 150 else "")
                         st.caption(f"{asset['original_name']}\n{preview}")
+                    elif b64:
+                        st.caption(f"Image: {asset['original_name']} (enable above to load)")
                     else:
                         st.caption(f"No preview: {asset['original_name']}")
 
@@ -1710,6 +1755,7 @@ with tab_upload:
                 confirm_commit(len(selected), metadata_only)
 
         if st.session_state.pop("commit_confirmed", False):
+            exif = None
             try:
                 selected = edited_df[edited_df["select"]]
                 if selected.empty:
@@ -1781,11 +1827,6 @@ with tab_upload:
 
                         progress.progress((commit_i + 1) / len(selected))
 
-                    try:
-                        exif.close()
-                    except Exception:
-                        pass
-
                     log_event(logger, "INFO", "session_end", details={
                         "committed": committed, "failed": failed, "total": len(selected), "mode": "web_batch"
                     })
@@ -1794,6 +1835,11 @@ with tab_upload:
                         log_commit_batch(batch_id, str(target_dir), undo_records)
 
                     if committed_names:
+                        # NOTE: deliberate divergence from the AGENTS.md commit-success
+                        # reset contract (clear all pipeline state). Failed rows are kept
+                        # for retry and unselected rows stay staged, so `uploaded_files`,
+                        # `temp_dir`, `output_dir` and `logger` are intentionally NOT
+                        # cleared here — the full reset path is Clear All.
                         st.session_state.staged_assets = [
                             a for a in st.session_state.staged_assets
                             if a["original_name"] not in committed_names
@@ -1825,6 +1871,12 @@ with tab_upload:
                     st.code(traceback.format_exc(), language="python")
                 log_event(logger, "ERROR", "commit_crashed",
                           details={"error": str(exc), "traceback": traceback.format_exc()})
+            finally:
+                if exif is not None:
+                    try:
+                        exif.close()
+                    except Exception:
+                        pass
 
 # -----------------------------------------------------------------------------
 # Tab 2: Analytics Dashboard

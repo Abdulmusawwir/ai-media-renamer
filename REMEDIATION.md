@@ -49,24 +49,26 @@
 
 ## Wave 2 — Medium backlog (Workstreams 2 + 3)
 
-- `app.py:435,461-466,495-501` — move provider reset / engine switch / config writes into callbacks.
-- `app.py:1154-1199` — AI profile selector placement relative to Run button.
-- `app.py:1751-1775` — align commit-success reset to AGENTS.md contract (or document divergence).
-- `app.py:940-941` — Clear All silently deletes saved sessions → confirm dialog / exclude.
-- `app.py:1677-1776` — `exif.close()` via `finally`; `app.py:882` temp-dir leak (`rmtree` old dir).
-- `app.py:1604-1617, 1794-2004` — guard expander / analytics heavy work with tab/`details.open` gating.
-- `engine.py:941,962-973` — locking on `_whisper_model_cache`.
-- `engine.py:2109,2130` — respect `config["model"]["last_provider"]` instead of hardcoded `"ollama"`.
-- `engine.py:1213` — `sanitize_name` stops stripping the words `grid`/`sequence`.
-- `engine.py:1199` — `validate_category` uses `get_active_categories()`.
-- `engine.py:1138` — `.doc` handled truthfully (log `unsupported_doc`, report `False`).
-- `engine.py:3348, 3313` — Ollama/llama.cpp ports from config/env, not hardcoded.
-- `engine.py:212` — atomic `save_config` (temp + `os.replace`).
-- `engine.py:902` — replace `tempfile.mktemp`.
-- `engine.py:647-648` — `ExifToolSession.__init__` raises instead of `print` + `sys.exit`; callers catch.
-- `engine.py:83-93, 117` — defer config validation so imports don't `print`/`sys.exit`.
-- `app.py:925-932` etc. — single `_reset_analysis_state()` helper; clear `analysis_index`, `duplicate_pairs`.
-- `cli.py:908-985` — argparse mutually-exclusive groups; sync `--case-style` default to `DEFAULT_CASE_STYLE`.
+> **STATUS: ALL DONE (branch `feat/wave2-engine-fixes`, committed in two batches: `79e3556` engine, then web/CLI).** 333 tests pass, ruff unchanged from baseline, all `py_compile` clean.
+
+- ~~`app.py:435,461-466,495-501` — move provider reset / engine switch / config writes into callbacks.~~ **DONE** — `_on_engine_change()` callback (radio uses `on_change`, `disabled` during analysis); provider switch/config writes no longer happen mid-render.
+- ~~`app.py:1154-1199` — AI profile selector placement relative to Run button.~~ **DONE (verified)** — selector already sits in the main interface directly before "Run AI Analysis" with an `on_change` → `set_active_profile()`.
+- ~~`app.py:1751-1775` — align commit-success reset to AGENTS.md contract (or document divergence).~~ **DONE** — divergence documented inline: failed rows kept for retry and unselected rows stay staged, so `uploaded_files`/`temp_dir`/`output_dir`/`logger` are intentionally NOT cleared (full reset is Clear All).
+- ~~`app.py:940-941` — Clear All silently deletes saved sessions → confirm dialog / exclude.~~ **DONE** — Clear All no longer calls `delete_session` at all; sessions are only deleted via the explicit Delete control in the Session expander (user-approved scope: "stop deleting sessions").**
+- ~~`app.py:1677-1776` — `exif.close()` via `finally`; `app.py:882` temp-dir leak (`rmtree` old dir).~~ **DONE** — `exif` opened after `exif=None`, closed in a `finally`; file-change path `rmtree`s the old `temp_dir` before `mkdtemp`.
+- ~~`app.py:1604-1617, 1794-2004` — guard expander / analytics heavy work with tab/`details.open` gating.~~ **DONE** — thumbnails behind "Load image previews" checkbox; duplicate table behind "Load duplicate table" checkbox; eager analytics kept (cached `load_log_entries`, user-approved "cache + lazy previews").
+- ~~`engine.py:941,962-973` — locking on `_whisper_model_cache`.~~ **DONE** — `_whisper_model_lock` + double-checked lazy load.
+- ~~`engine.py:2109,2130` — respect `config["model"]["last_provider"]` instead of hardcoded `"ollama"`.~~ **DONE** — `get_provider(CURRENT_PROVIDER)` with `ValueError` → `"ollama"` fallback in both analyze entry points.
+- ~~`engine.py:1213` — `sanitize_name` stops stripping the words `grid`/`sequence`.~~ **DONE** — tests updated (`test_sanitize_name_keeps_grid_and_sequence`).
+- ~~`engine.py:1199` — `validate_category` uses `get_active_categories()`.~~ **DONE**.
+- ~~`engine.py:1138` — `.doc` handled truthfully (log `unsupported_doc`, report `False`).~~ **DONE** — `.doc` removed from `_TEXT_EXTRACTORS`/metadata writer; extraction returns `None`, callers log `extraction_failed`.
+- ~~`engine.py:3348, 3313` — Ollama/llama.cpp ports from config/env, not hardcoded.~~ **DONE** — `OLLAMA_DEFAULT_URL`, `_ollama_base_url()` (env `OLLAMA_HOST` or config), `_llamacpp_host_port()`; `ensure_llamacpp_server`/`switch_ai_provider`/app.py captions use them.
+- ~~`engine.py:212` — atomic `save_config` (temp + `os.replace`).~~ **DONE** — temp `.json.tmp` + `flush`/`os.fsync` + `os.replace`.
+- ~~`engine.py:902` — replace `tempfile.mktemp`.~~ **DONE** — `mkstemp` + `os.close(fd)`.
+- ~~`engine.py:647-648` — `ExifToolSession.__init__` raises instead of `print` + `sys.exit`; callers catch.~~ **DONE** — `RuntimeError`; `rollback_last_batch` catches; `cli.py` wraps at CLI level.
+- ~~`engine.py:83-93, 117` — defer config validation so imports don't `print`/`sys.exit`.~~ **DONE** — `load_config(quiet=...)` raises `RuntimeError`, `CONFIG_LOAD_ERROR` + `_minimal_config()` module fallback; `reload_config` keeps old config on failure.
+- ~~`app.py:925-932` etc. — single `_reset_analysis_state()` helper; clear `analysis_index`, `duplicate_pairs`.~~ **DONE** — shared by file-change reset, Clear All, and session restore; re-analyze also pops `duplicate_pairs` and resets `analysis_index`.
+- ~~`cli.py:908-985` — argparse mutually-exclusive groups; sync `--case-style` default to `DEFAULT_CASE_STYLE`.~~ **DONE** — `{--export-csv | --import-csv}` and `{--rollback | --reset-config}` groups; default now `title_case` (from config).
 
 ## Wave 3 — CLI, docs, config & lint hygiene
 
