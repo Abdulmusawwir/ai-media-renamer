@@ -10,6 +10,7 @@ from typing import Any
 
 from engine import (
     AUDIO_EXTENSIONS,
+    CASE_STYLE_OPTIONS,
     DEFAULT_CASE_STYLE,
     DOCUMENT_EXTENSIONS,
     EXTRACTION_WORKERS,
@@ -17,7 +18,6 @@ from engine import (
     NAMED_TEMPLATES,
     PROMPT_PROFILES,
     VIDEO_EXTENSIONS,
-    CASE_STYLE_OPTIONS,
     ExifToolSession,
     _format_ai_error,
     analyze_asset_with_ai,
@@ -27,6 +27,7 @@ from engine import (
     detect_hw_accel,
     execute_commit,
     export_staging_csv,
+    extract_text_from_file,
     import_staging_csv,
     is_already_processed,
     log_commit_batch,
@@ -34,16 +35,17 @@ from engine import (
     normalize_category,
     process_image_to_base64,
     process_video_to_base64,
+    restore_default_config,
     sanitize_name,
     set_active_profile,
     setup_logging,
+    transcribe_audio,
     truncate_filename,
-    restore_default_config,
     validate_category,
 )
 
 try:
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
     _HAS_RICH = True
 except ImportError:
     _HAS_RICH = False
@@ -756,7 +758,7 @@ def _interactive_commit(
                 print(f" failed: {_format_ai_error(ai_result)}")
 
         elif sub_choice in ('e', 'edit'):
-            new_name = input(f"  Enter new name (without extension): ").strip().lower()
+            new_name = input("  Enter new name (without extension): ").strip().lower()
             if new_name:
                 safe = sanitize_name(new_name)
                 if safe:
@@ -912,7 +914,9 @@ def _preview_dry_run(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AI Media Renamer — CLI Pipeline")
-    parser.add_argument("dir", type=str, help="Path to target directory folder.")
+    parser.add_argument("dir", type=str, nargs="?", default=None,
+                        help="Path to target directory folder (optional with --import-csv; "
+                             "defaults to the CSV file's folder).")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug output.")
     parser.add_argument(
         "--workers", "-w", type=int, default=None,
@@ -1021,9 +1025,23 @@ if __name__ == "__main__":
             print(f"Error: Categories override file '{args.categories_override}' not found.")
             sys.exit(1)
         categories_override = _json.loads(override_path.read_text(encoding="utf-8"))
+        if not isinstance(categories_override, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in categories_override.items()
+        ):
+            print("Error: Categories override must be a JSON object mapping filenames to "
+                  "category strings (e.g. {\"video.mp4\": \"landscapes_broll\"}).")
+            sys.exit(1)
+
+    target_dir = args.dir
+    if not target_dir:
+        if args.import_csv:
+            target_dir = str(Path(args.import_csv).resolve().parent)
+        else:
+            print("Error: directory argument is required when not using --import-csv.")
+            sys.exit(1)
 
     process_library(
-        args.dir, verbose=args.verbose, template_string=tmpl,
+        target_dir, verbose=args.verbose, template_string=tmpl,
         workers=args.workers, profile=args.profile,
         case_style=args.case_style, max_chars=args.max_chars,
         force=args.force, export_csv=args.export_csv,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -10,18 +9,17 @@ from pathlib import Path
 import pytest
 
 from engine import (
-    _NO_WINDOW,
+    UNDO_LOG_FILE,
     ExifToolSession,
     _build_commit_args,
+    _write_document_metadata,
     _write_docx_metadata,
     _write_xlsx_metadata,
-    _write_document_metadata,
     execute_commit,
     execute_commit_batch,
-    log_commit_batch,
     list_undo_batches,
+    log_commit_batch,
     rollback_last_batch,
-    UNDO_LOG_FILE,
 )
 
 HAS_EXIFTOOL = shutil.which("exiftool") is not None

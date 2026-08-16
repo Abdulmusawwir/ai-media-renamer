@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from engine import SESSION_DIR, delete_session, load_session, list_sessions, save_session
+from engine import delete_session, list_sessions, load_session, save_session
 
 
 class TestSaveSession:

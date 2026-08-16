@@ -1,5 +1,18 @@
 # Changelog
 
+## [v1.7.0] — 2026-08-16
+
+### Breaking Change: fully local & offline
+- **Cloud providers removed** — `GeminiProvider`, `AnthropicProvider`, `GroqProvider`, and `OpenRouterProvider` are deleted from `engine.py`; the provider registry is now `ollama` + `llamacpp` only. `OpenAIProvider` (the OpenAI-compatible base) is kept solely as the local `LlamaCppProvider` engine. No API keys, no keychain, no cloud.
+- **Keyring/API-key layer removed** — `save_api_key`/`load_api_key`/`delete_api_key`/`CURRENT_API_KEY`/`KEYRING_SERVICE` and `import keyring` are gone; `app.py` no longer renders the cloud caption, API-key input, keyring warning, or `has_key` badges. `get_provider`/`switch_ai_provider` (no longer takes `api_key`) and `_format_ai_error` are local-only; `check_environment()` no longer reports `cloud_configured`.
+- **Config scrubbed** — `config.json` / `config.default.json` drop the cloud provider blocks, the `cloud` list, and the dead `preview.video_grid_tile` / `video_frame_count` keys; the missing `model.llamacpp` block was added back to `config.json`.
+- **Dependencies trimmed** — `anthropic` and `keyring` (plus transitive `jaraco.*` / `more-itertools`) removed from `requirements.txt`, `requirements.lock`, `build.spec`, and `pyproject.toml`.
+- **CLI crash fix** — `transcribe_audio` / `extract_text_from_file` were used but never imported (real F821 runtime `NameError` when analyzing audio/documents via CLI); `--import-csv` no longer requires a positional `dir` (defaults to the CSV's folder); `--categories-override` is validated as a string→string dict.
+- **Tests** — `test_providers.py` rewritten for the local-only registry (cloud + keyring classes removed, LlamaCpp/OpenAICompat local tests kept); `test_setup.py` no longer expects `cloud_configured`. 298 passed, 1 skipped. Ruff down to 21 repo-wide findings (all pre-existing test E501), below the 27-engine/app/cli baseline.
+- **Wave 3 hygiene** — `save_session` handles timestamp collisions (`_1`, `_2`, … suffixes); `load_session` / `list_sessions` tolerate malformed non-list/dict blocks instead of raising.
+
+---
+
 ## [v1.6.4] — 2026-08-16
 
 ### Code Quality

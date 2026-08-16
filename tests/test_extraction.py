@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from engine import (
     _NO_WINDOW,
-    extract_audio_from_video,
     _has_audio_track,
+    extract_audio_from_video,
     process_image_to_base64,
     process_video_to_base64,
     transcribe_audio,

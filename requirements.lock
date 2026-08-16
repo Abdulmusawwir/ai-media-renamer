@@ -1,5 +1,4 @@
 altgraph==0.17.5
-anthropic==0.116.0
 anyio==4.14.1
 bottle==0.13.4
 certifi==2026.6.17
@@ -15,14 +14,9 @@ huggingface_hub==1.26.0
 idna==3.18
 ImageHash==4.3.2
 itsdangerous==2.2.0
-jaraco.classes==3.4.0
-jaraco.context==6.1.2
-jaraco.functools==4.5.0
 Jinja2==3.1.6
-keyring==25.7.0
 lxml==6.1.1
 markdown-it-py==4.2.0
-more-itertools==11.1.0
 mypy==2.3.0
 numpy==2.5.1
 ollama==0.6.2

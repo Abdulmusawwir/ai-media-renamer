@@ -31,5 +31,5 @@ warn_unused_configs = true
 exclude = ["tests/", "dist/", "build/"]
 
 [[tool.mypy.overrides]]
-module = ["openai.*", "anthropic.*", "numpy.*", "ollama.*"]
+module = ["openai.*", "numpy.*", "ollama.*"]
 ignore_errors = true

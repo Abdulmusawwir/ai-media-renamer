@@ -2,27 +2,24 @@
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from engine import (
+    CONFIG_PATH,
     get_active_categories,
     get_active_profile,
     get_active_prompt,
     get_profile_labels,
     load_config,
-    restore_default_config,
     save_config,
     set_active_profile,
-    CONFIG_PATH,
 )
 
 
 class TestRestoreDefaultConfig:
     def test_restore_returns_true_when_default_exists(self):
         """restore_default_config returns True when config.default.json exists."""
-        from pathlib import Path
         # The real config.default.json exists in the project root
         default_path = Path(__file__).parent.parent / "config.default.json"
         assert default_path.exists(), "config.default.json must exist for this test"
@@ -32,7 +29,6 @@ class TestRestoreDefaultConfig:
     def test_restore_default_config_file_exists(self):
         """config.default.json exists and is valid JSON."""
         import json
-        from pathlib import Path
         default_path = Path(__file__).parent.parent / "config.default.json"
         data = json.loads(default_path.read_text(encoding="utf-8"))
         assert "model" in data

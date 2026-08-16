@@ -72,10 +72,12 @@
 
 ## Wave 3 — CLI, docs, config & lint hygiene
 
-- **CLI**: `--import-csv` should not require a positional `dir`; `--categories-override` validated as dict.
+> **STATUS: mostly DONE (v1.7.0 local-only refactor).** Cloud providers, keyring, API-key UI, and cloud config keys removed — the app is fully local/offline (branch `feat/wave3-hygiene`).
+
+- **CLI**: `--import-csv` should not require a positional `dir`; `--categories-override` validated as dict. **DONE** — dir defaults to the CSV's folder; dict validated as string→string.
 - **Telemetry divergence**: `implementation_plan.md` Layer 15 + CHANGELOG + `README_TECH.md:82-83` claim telemetry that does not exist (PRIVACY.md says none). Document reality; re-scope 20.5. **RESOLVED (v1.6.3):** 20.5 re-scoped in `implementation_plan.md` — no `track_event()` exists, PRIVACY.md already documents "no telemetry", purge item marked N/A. **Stale claims cleaned (v1.6.3 docs sync):** `README_TECH.md` Telemetry section replaced with a "no telemetry" note + a Security (v1.6.3) section; `CHANGELOG.md` v1.5.0 gained a "Removed: all PostHog telemetry" entry; `implementation_plan.md` Phase Z line annotated REMOVED.
-- **Config**: fix `model.providers.gemini.selected_model` (`llama-3.2-90b-vision-preview` → real Gemini model); drop dead `preview.video_grid_tile` / `video_frame_count`.
-- **Ruff**: fix 70 lint errors (43 auto-fixable; mostly `tests/` F401/E501/I001).
-- **Single source of truth**: `NAMED_TEMPLATES`, llama.cpp URLs/digests duplicated in code vs config.
-- **`save_session` timestamp collisions** (`engine.py:2483`); `load_session` KeyError on malformed files.
-- **Docs sync**: `task.md`, `audit.md` §1/§3, `implementation_plan.md` checkboxes per AGENTS.md.
+- **Config**: fix `model.providers.gemini.selected_model` (`llama-3.2-90b-vision-preview` → real Gemini model); drop dead `preview.video_grid_tile` / `video_frame_count`. **DONE (v1.7.0)** — cloud provider blocks removed entirely; dead preview keys dropped; missing `model.llamacpp` block restored in `config.json`.
+- **Ruff**: fix 70 lint errors (43 auto-fixable; mostly `tests/` F401/E501/I001). **DONE (v1.7.0)** — down to 21 repo-wide findings, all pre-existing E501 in tests; below the 27 engine/app/cli baseline.
+- **Single source of truth**: `NAMED_TEMPLATES`, llama.cpp URLs/digests duplicated in code vs config. **DONE** — `NAMED_TEMPLATES` is config-backed (`config.json::naming_templates`); llama.cpp runtime URLs (`LLAMACPP_RUNTIME_PINNED`) + digest map + `LLAMACPP_GGUF_CATALOG` live solely in `engine.py` and are imported by `bootstrap.py` (single import, no config duplicate).
+- **`save_session` timestamp collisions** (`engine.py:2483`); `load_session` KeyError on malformed files. **DONE (v1.7.0)** — collision suffixing + non-list/non-dict coercion in load/list; tests updated.
+- **Docs sync**: `task.md`, `audit.md` §1/§3, `implementation_plan.md` checkboxes per AGENTS.md. **DONE (v1.7.0)** — task.md repointed, audit.md §1 notes + §3 divergence resolved, implementation_plan Phase R/2.6/2.7/S.1/S.3 annotated, PRD cloud references scrubbed, README/README_TECH/CHANGELOG updated for the local-only statement.

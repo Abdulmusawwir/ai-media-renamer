@@ -53,7 +53,7 @@ streamlit run app.py
 
 ### AI Analysis
 - **9 prompt profiles** — General Balanced, General B-Roll, Cinematography, Motion & Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming, Audio Files, and Custom
-- **2 local + 5 cloud AI providers** — Ollama (local), llama.cpp (local, default for new installs), Gemini, OpenAI, Anthropic, Groq, OpenRouter
+- **2 local AI providers** — Ollama and llama.cpp (default for new installs). Fully offline: no cloud models, no API keys, no keychain required.
 - **Single-frame extraction** — one representative frame per video for accurate analysis
 - **Image analysis** — downscaled in memory, no disk writes
 - **Audio transcription** — local Whisper transcription for audio files and video audio tracks
@@ -85,8 +85,8 @@ There is **no telemetry**. The app never collects or transmits usage data — no
 ### Security (v1.6.3)
 
 - **Checksum-verified downloads** — every binary the setup wizard fetches (FFmpeg, ExifTool, llama.cpp runtime, GGUF models) is verified against its published SHA-256 digest before use; plain-HTTP URLs are rejected.
-- **Secret redaction** — API keys are masked in exception messages, JSONL logs, and the Configuration-tab JSON view.
-- **Keychain fail-closed** — if the OS keychain is unavailable the app shows a warning instead of falling back to plaintext key storage.
+- **Secret redaction** — sensitive values are masked in exception messages, JSONL logs, and the Configuration-tab JSON view.
+- **No secrets stored** — the app is entirely local (Ollama / llama.cpp) and stores no API keys; the OS-keychain layer was removed in v1.7.0 along with all cloud providers.
 - **Loopback-only by default** — the server binds `127.0.0.1` unless you opt into LAN exposure via `config.server.lan_expose` (an in-UI toggle with a warning). Docker Compose host ports also bind to loopback unless changed.
 - **Input validation** — CSV import/export neutralizes spreadsheet formula injection; session restore schema-validates and rejects symlinks; staged filenames can never traverse directories on commit.
 - **Log path privacy** — absolute paths are redacted from JSONL logs by default (`config.logging.redact_paths`).
@@ -164,7 +164,7 @@ Interactive mode per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze`, `[E]di
 - **Commit** — Write metadata (XMP, QuickTime, EXIF, IPTC, ID3, Vorbis) and optionally sort into categorized subfolders
 - **Undo/Rollback** — Revert the last commit batch from the Analytics tab
 - **Analytics Dashboard** — Auto-refreshing stats cards, Plotly charts, filterable event timeline from JSONL logs, Reset All button
-- **Sidebar** — Engine (Ollama / llama.cpp) + model selection, API key management, environment health check indicators
+- **Sidebar** — Engine (Ollama / llama.cpp) + model selection, environment health check indicators
 
 ### Output Directory
 

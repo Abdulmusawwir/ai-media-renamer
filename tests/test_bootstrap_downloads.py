@@ -1,7 +1,4 @@
-import io
 import zipfile
-
-import pytest
 
 import bootstrap
 

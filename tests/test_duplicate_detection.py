@@ -1,11 +1,9 @@
 """Duplicate detection tests: find_duplicates, compute_asset_hash."""
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-import pytest
-
-from engine import find_duplicates, _chromaprint_similarity
+from engine import _chromaprint_similarity, find_duplicates
 
 
 def _fake_phash(path):
