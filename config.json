@@ -206,7 +206,8 @@
   },
   "naming": {
     "case_style": "title_case",
-    "max_filename_chars": 0
+    "max_filename_chars": 0,
+    "sort_folders": true
   },
   "preview": {
     "image_max_edge": 1024,

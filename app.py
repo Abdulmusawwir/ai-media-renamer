@@ -24,6 +24,7 @@ from engine import (
     CASE_STYLE_OPTIONS,
     DEFAULT_CASE_STYLE,
     DEFAULT_MAX_FILENAME_CHARS,
+    DEFAULT_SORT_FOLDERS,
     DEFAULT_TEMPLATE_STRING,
     DOCUMENT_EXTENSIONS,
     EXTRACTION_WORKERS,
@@ -259,6 +260,9 @@ if "case_style" not in st.session_state:
 if "max_filename_chars" not in st.session_state:
     st.session_state.max_filename_chars = DEFAULT_MAX_FILENAME_CHARS
 
+if "sort_folders" not in st.session_state:
+    st.session_state.sort_folders = DEFAULT_SORT_FOLDERS
+
 if "template_string" not in st.session_state:
     st.session_state.template_string = DEFAULT_TEMPLATE_STRING
 
@@ -371,6 +375,13 @@ def _model_option_label(model: str, installed: set[str]) -> str:
 # -----------------------------------------------------------------------------
 # Sidebar: AI Provider & Environment
 # -----------------------------------------------------------------------------
+
+def _on_sort_folders_change() -> None:
+    """Persist the sort-into-category-subfolders preference to config."""
+    config.setdefault("naming", {})["sort_folders"] = bool(st.session_state.sort_folders)
+    save_config()
+    reload_config()
+
 
 def _on_server_lan_expose_change(prev_value: bool) -> None:
     """Persist the LAN-exposure toggle to config (takes effect on restart)."""
@@ -1626,7 +1637,10 @@ with tab_upload:
                     else:
                         st.caption(f"No preview: {asset['original_name']}")
 
-        sort_folders = st.checkbox("Sort assets into categorized subfolders", value=True)
+        sort_folders = st.checkbox("Sort assets into categorized subfolders",
+                                   value=st.session_state.sort_folders, key="sort_folders",
+                                   on_change=_on_sort_folders_change,
+                                   help="Persisted to config.json and applied to future commits.")
         metadata_only = st.checkbox("Metadata only — keep original filenames",
                                     help="Write AI-generated tags and summary to files without renaming them.")
 

@@ -3,7 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from engine import ALLOWED_CATEGORIES, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, load_config
+from engine import (
+    ALLOWED_CATEGORIES,
+    DEFAULT_SORT_FOLDERS,
+    DOCUMENT_EXTENSIONS,
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    load_config,
+)
 
 
 class TestLoadConfig:
@@ -34,5 +41,17 @@ class TestExtensionsAndCategories:
     def test_image_extensions_are_tuple(self):
         assert isinstance(IMAGE_EXTENSIONS, tuple)
 
+    def test_document_extensions_are_tuple(self):
+        assert isinstance(DOCUMENT_EXTENSIONS, tuple)
+
     def test_allowed_categories_are_tuple(self):
         assert isinstance(ALLOWED_CATEGORIES, tuple)
+
+
+class TestSortFoldersConfig:
+    def test_default_sort_folders_is_true(self):
+        assert DEFAULT_SORT_FOLDERS is True
+
+    def test_config_carries_sort_folders_default(self):
+        cfg = load_config()
+        assert cfg.get("naming", {}).get("sort_folders", True) is True
