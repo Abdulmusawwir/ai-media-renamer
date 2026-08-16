@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+import openai
 import pytest
 
 from engine import (
@@ -327,6 +328,50 @@ class TestLlamaCppProvider:
         models = self.prov.available_models()
         assert "qwen3-vl:14b" in models
         assert "llama-3.2:3b" in models
+
+
+class TestOpenAICompatStructuredFallback:
+    """Strict ``json_schema`` response_format may 400 on local llama-server builds.
+
+    ``_request_completion`` must fall back to a plain completion on a 400
+    (OpenAI SDK ``BadRequestError``) so analysis still works against older
+    llama.cpp binaries; anything else propagates.
+    """
+
+    @patch("engine.openai.OpenAI")
+    def test_falls_back_on_400_badrequest(self, mock_openai):
+        mock_client = mock_openai.return_value
+        err = openai.BadRequestError(
+            message="Either \"json_schema\" or \"grammar\" can be specified",
+            response=MagicMock(status_code=400),
+            body=None,
+        )
+        mock_client.chat.completions.create.side_effect = [err, MagicMock()]
+        prov = OpenAIProvider(base_url="http://127.0.0.1:8080/v1")
+        prov._api_key = "local"
+        prov._request_completion(mock_client, "qwen3-vl:14b", [{"role": "user", "content": "hi"}])
+
+        assert mock_client.chat.completions.create.call_count == 2
+        first_kwargs = mock_client.chat.completions.create.call_args_list[0].kwargs
+        second_kwargs = mock_client.chat.completions.create.call_args_list[1].kwargs
+        assert first_kwargs["response_format"]["type"] == "json_schema"
+        assert "response_format" not in second_kwargs
+
+    @patch("engine.openai.OpenAI")
+    def test_rejects_other_badrequests(self, mock_openai):
+        mock_client = mock_openai.return_value
+        from openai import BadRequestError
+        err = BadRequestError(
+            message="model not found",
+            response=MagicMock(status_code=404),
+            body=None,
+        )
+        mock_client.chat.completions.create.side_effect = err
+        prov = OpenAIProvider(base_url="http://127.0.0.1:8080/v1")
+        prov._api_key = "local"
+        with pytest.raises(BadRequestError):
+            prov._request_completion(mock_client, "qwen3-vl:14b", [{"role": "user", "content": "hi"}])
+        assert mock_client.chat.completions.create.call_count == 1
 
 
 class TestLlamaCppDetection:

@@ -1801,6 +1801,44 @@ class OpenAIProvider(AIProvider):
             kwargs["base_url"] = self._base_url
         return openai.OpenAI(**kwargs)
 
+    def _request_completion(self, client: Any, model_name: str, messages: list[dict[str, Any]],
+                            max_tokens: int = 1024) -> Any:
+        """Run a chat-completions call, tolerating servers that reject strict ``json_schema``.
+
+        Some local OpenAI-compatible servers (notably older ``llama-server``
+        llama.cpp builds, which historically answered 400 "Either json_schema or
+        grammar can be specified, but not both", and others that do not fully
+        implement OpenAI Structured Outputs) reject ``response_format`` with a 400.
+        On such a 400 this retries once WITHOUT ``response_format`` and relies on
+        the prompt's JSON instruction + ``_parse_and_validate`` to enforce shape.
+
+        Args:
+            client: OpenAPI ``OpenAI`` client instance.
+            model_name: Model id the server has loaded.
+            messages: Chat messages list.
+            max_tokens: Completion budget.
+
+        Returns:
+            The chat-completions response object.
+        """
+        fmt = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "asset_analysis",
+                "strict": True,
+                "schema": AssetAnalysisResponse.model_json_schema(),
+            },
+        }
+        try:
+            return client.chat.completions.create(
+                model=model_name, messages=messages, response_format=fmt,
+                max_tokens=max_tokens)
+        except openai.BadRequestError as exc:
+            if getattr(exc, "status_code", None) == 400:
+                return client.chat.completions.create(
+                    model=model_name, messages=messages, max_tokens=max_tokens)
+            raise
+
     def analyze(self, base64_img: str, verbose: bool = False,
                 prompt_override: str | None = None) -> dict[str, Any]:
         """Analyze an image using the OpenAI vision API.
@@ -1822,8 +1860,9 @@ class OpenAIProvider(AIProvider):
             prompt = prompt_override or get_active_prompt()
             client = self._make_client()
             model_name = self._model or "gpt-4o"
-            response = client.chat.completions.create(
-                model=model_name,
+            response = self._request_completion(
+                client,
+                model_name,
                 messages=[{
                     "role": "user",
                     "content": [
@@ -1831,15 +1870,6 @@ class OpenAIProvider(AIProvider):
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
                     ]
                 }],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "asset_analysis",
-                        "strict": True,
-                        "schema": AssetAnalysisResponse.model_json_schema(),
-                    },
-                },
-                max_tokens=1024
             )
             raw_text = response.choices[0].message.content or ""
             return self._parse_and_validate(raw_text)
@@ -1869,21 +1899,13 @@ class OpenAIProvider(AIProvider):
         try:
             client = self._make_client()
             model_name = self.text_model or self._model or "gpt-4o"
-            response = client.chat.completions.create(
-                model=model_name,
+            response = self._request_completion(
+                client,
+                model_name,
                 messages=[{
                     "role": "user",
                     "content": [{"type": "text", "text": prompt}],
                 }],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "asset_analysis",
-                        "strict": True,
-                        "schema": AssetAnalysisResponse.model_json_schema(),
-                    },
-                },
-                max_tokens=1024
             )
             raw_text = response.choices[0].message.content or ""
             return self._parse_and_validate(raw_text)
