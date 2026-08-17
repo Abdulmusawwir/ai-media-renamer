@@ -1414,7 +1414,8 @@ def main():
                 win.update()
                 subprocess.Popen(
                     [ollama_binary, "serve"],
-                    creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 if wait_for_ollama_service(timeout=30):

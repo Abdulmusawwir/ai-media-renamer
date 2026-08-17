@@ -3501,11 +3501,33 @@ def ensure_llamacpp_server(timeout: int = 40) -> bool:
     if mmproj and Path(mmproj).exists():
         args += ["--mmproj", mmproj]
     try:
+        log_dir = Path(LOG_DIR)
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        server_log = log_dir / "llamacpp_server.log"
+        try:
+            log_fh = open(server_log, "w", encoding="utf-8", errors="replace")
+        except OSError:
+            log_fh = None
+        # CREATE_NO_WINDOW alone (never DETACHED_PROCESS): for a console
+        # subsystem binary spawned from a windowed/console-less parent,
+        # CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS,
+        # so Windows may refuse to open the exe ("Error when opening the
+        # exe"). Redirect stdin too — a console child with no console and an
+        # inherited invalid stdin handle fails with [Error 6] handle
+        # invalid. stderr goes to a log file so a real server crash is
+        # diagnosable instead of a silent dead-end.
         subprocess.Popen(
             args,
-            creationflags=_NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=_NO_WINDOW,
+            stdin=subprocess.DEVNULL,
+            stdout=log_fh if log_fh else subprocess.DEVNULL,
+            stderr=log_fh if log_fh else subprocess.DEVNULL,
         )
+        if log_fh is not None:
+            log_fh.close()
         import time as _time
         deadline = _time.time() + timeout
         while _time.time() < deadline:

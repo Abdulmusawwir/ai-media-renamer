@@ -325,6 +325,40 @@ class TestEnsureLlamaCppServer:
         engine.config["model"]["llamacpp"] = {"gguf_path": str(tmp_path / "missing.gguf")}
         assert engine.ensure_llamacpp_server() is False
 
+    def test_launches_with_safe_creationflags_and_stdin(self, tmp_path, monkeypatch, restore_config, silent_save):
+        """llama-server is a console exe spawned from a windowed parent.
+
+        It must be launched with CREATE_NO_WINDOW alone (never DETACHED_PROCESS,
+        which makes Windows ignore the no-window flag and can refuse to open the
+        exe) and with stdin redirected (a console child inheriting an invalid
+        stdin handle fails with [Error 6]).
+        """
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"\x00")
+        running = [False]
+
+        def fake_running():
+            if not running[0]:
+                running[0] = True
+                return False
+            return True
+
+        monkeypatch.setattr(engine, "_llamacpp_server_running", fake_running)
+        monkeypatch.setattr(engine, "_resolve_binary_path",
+                            lambda name: "C:/tools/llama-server.exe" if name == "llama-server.exe" else None)
+        monkeypatch.setattr(engine, "LOG_DIR", tmp_path)
+        engine.config["model"]["llamacpp"] = {"gguf_path": str(gguf), "gguf_name": "", "mmproj_path": ""}
+
+        with patch("engine.subprocess.Popen") as mock_popen:
+            assert engine.ensure_llamacpp_server(timeout=10) is True
+
+        _, kwargs = mock_popen.call_args
+        assert kwargs["creationflags"] == engine._NO_WINDOW
+        detach = getattr(engine.subprocess, "DETACHED_PROCESS", None)
+        assert detach is None or not (kwargs["creationflags"] & detach)
+        assert kwargs["stdin"] == engine.subprocess.DEVNULL
+        assert kwargs["stderr"] is not engine.subprocess.DEVNULL
+
 
 # ---------------------------------------------------------------------------
 # LlamaCppProvider OpenAI-compatible text + override path
