@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import threading
 
+from fastapi import HTTPException, Request
+
 import engine
+from server import auth
 
 # In-memory staging set for the active session. Holds the same dict schema the
 # engine/CLI use, with ``original_path`` coerced to ``str`` for JSON safety.
@@ -78,3 +81,23 @@ def get_engine_config() -> dict:
 def make_exiftool_session():
     """Create a fresh ExifTool IPC session from the engine."""
     return engine.ExifToolSession()
+
+
+async def require_auth(request: Request) -> None:
+    """Env-gated auth dependency for sensitive routes.
+
+    When ``AMR_AUTH_ENABLED`` is truthy, this extracts the
+    ``Authorization: Bearer <token>`` header, verifies it via
+    :func:`server.auth.verify_token`, and raises ``HTTPException(401)`` on
+    missing or invalid tokens. When auth is disabled it is a no-op, preserving
+    the unauthenticated local dev flow.
+    """
+    if not auth.AUTH_ENABLED:
+        return
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = header[len("Bearer "):].strip()
+    claims = auth.verify_token(token)
+    if claims is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")

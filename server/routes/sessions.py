@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 import engine
 from server import deps
@@ -25,7 +25,7 @@ def list_sessions() -> dict:
     return {"sessions": serialized}
 
 
-@router.post("/sessions")
+@router.post("/sessions", dependencies=[Depends(deps.require_auth)])
 def create_session(req: SessionCreateRequest) -> dict:
     """Save the current staging set as a session file."""
     if not deps.ACTIVE_STAGING:
@@ -47,7 +47,7 @@ def load_session_by_id(session_id: str) -> dict:
     return {"loaded": session_id, "asset_count": len(staged)}
 
 
-@router.delete("/sessions/{session_id}")
+@router.delete("/sessions/{session_id}", dependencies=[Depends(deps.require_auth)])
 def delete_session_by_id(session_id: str) -> dict:
     """Delete a saved session file."""
     candidate = SESSION_DIR / session_id

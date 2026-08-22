@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 import engine
 from server import deps
@@ -29,7 +29,7 @@ def _prepare_assets(assets: list[dict]) -> list[dict]:
     return prepared
 
 
-@router.post("/commit")
+@router.post("/commit", dependencies=[Depends(deps.require_auth)])
 def commit(req: CommitRequest) -> dict:
     """Commit the provided (or active) staging set to ``target_dir``."""
     assets = req.assets if req.assets else deps.ACTIVE_STAGING
@@ -71,7 +71,7 @@ def commit(req: CommitRequest) -> dict:
     return {"committed": len(results), "results": result_strings}
 
 
-@router.post("/rollback")
+@router.post("/rollback", dependencies=[Depends(deps.require_auth)])
 def rollback(req: RollbackRequest | None = None) -> dict:
     """Roll back the most recent commit batch."""
     try:

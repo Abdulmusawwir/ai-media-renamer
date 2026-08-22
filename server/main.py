@@ -8,6 +8,7 @@ present; otherwise the API is reachable on its own.
 
 from __future__ import annotations
 
+import os
 import socket
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 import engine
+from server import auth as amr_auth
+from server import security as amr_security
 from server.routes import register_routes
 
 # Built frontend output (from ``frontend/`` via ``npm run build``). When present
@@ -25,7 +28,8 @@ _DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 # NOTE: Allowing all origins is acceptable for a local single-user tool driven
 # from localhost. If you expose this server on a LAN (e.g. --host 0.0.0.0),
 # restrict ``allow_origins`` to trusted frontend origins and enable auth
-# (see server/auth.py, env AMR_AUTH_ENABLED=1).
+# (see server/auth.py, env AMR_AUTH_ENABLED=1). The config key
+# ``server.cors_origins`` (a list) overrides this default when present.
 CORS_ALLOW_ORIGINS = ["*"]
 
 
@@ -33,15 +37,36 @@ def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""
     app = FastAPI(title="AI Media Renamer API", version="2.0.0")
 
+    # CORS origins: prefer an explicit ``server.cors_origins`` list from config
+    # when present, otherwise fall back to the open default.
+    cfg_origins = engine.config.get("server", {}).get("cors_origins")
+    allow_origins = cfg_origins if isinstance(cfg_origins, list) and cfg_origins else CORS_ALLOW_ORIGINS
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=CORS_ALLOW_ORIGINS,
+        allow_origins=allow_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
+    # Optional per-IP rate limiting. Enabled only when AMR_RATE_LIMIT is a
+    # positive integer; otherwise this middleware is not installed.
+    rate_limit = os.environ.get("AMR_RATE_LIMIT", "").strip()
+    if rate_limit.isdigit() and int(rate_limit) > 0:
+        app.add_middleware(
+            amr_security.RateLimitMiddleware, max_requests=int(rate_limit)
+        )
+
     register_routes(app)
+
+    # LAN-mode auth token issuer. When auth is disabled this reports the state
+    # without issuing a token so clients can detect the mode.
+    @app.post("/api/auth/token", tags=["auth"])
+    def auth_token() -> dict:
+        if not amr_auth.AUTH_ENABLED:
+            return {"enabled": False}
+        return {"enabled": True, "token": amr_auth.create_access_token({})}
 
     # Serve the built React frontend if it has been built. API routes are already
     # registered, so ``/api/*`` and ``/health`` take precedence over this mount.

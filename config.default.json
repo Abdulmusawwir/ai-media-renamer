@@ -168,7 +168,8 @@
     ".wv"
   ],
   "server": {
-    "lan_expose": false
+    "lan_expose": false,
+    "cors_origins": []
   },
   "model": {
     "name": "qwen2.5vl:7b",

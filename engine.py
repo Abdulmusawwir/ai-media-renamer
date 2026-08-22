@@ -3083,6 +3083,71 @@ def _llamacpp_gguf_paths(model_name: str) -> tuple[Path, Path]:
     return LLAMACPP_MODELS_DIR / gguf_file, mmproj
 
 
+def _llamacpp_model_dir() -> Path:
+    """Return the directory GGUF models are downloaded into.
+
+    Reads ``model.llamacpp.model_dir`` from config when present, otherwise
+    defaults to ``~/.cache/ai-media-renamer/models``.
+    """
+    configured = config.get("model", {}).get("llamacpp", {}).get("model_dir")
+    if configured:
+        return Path(configured).expanduser()
+    return Path(os.path.expanduser("~/.cache/ai-media-renamer/models"))
+
+
+def _maybe_mirror_url(url: str) -> str:
+    """Rewrite a HuggingFace URL to a mirror if ``AMR_HF_MIRROR`` is set.
+
+    Used so air-gapped / slow-HF regions can fetch GGUF files from a mirror
+    (e.g. ``hf-mirror.com``) without changing the catalog.
+    """
+    mirror = os.environ.get("AMR_HF_MIRROR", "").strip()
+    if mirror:
+        return url.replace("https://huggingface.co", mirror.rstrip("/"))
+    return url
+
+
+def download_llamacpp_model(name: str,
+                            on_progress: Callable[[int, int], None] | None = None) -> str:
+    """Download a GGUF model from the ``LLAMACPP_GGUF_CATALOG`` to the model dir.
+
+    The model directory is resolved via :func:`_llamacpp_model_dir` (config
+    ``model.llamacpp.model_dir`` or ``~/.cache/ai-media-renamer/models``). The
+    download streams in chunks and invokes ``on_progress(downloaded, total)``
+    when provided. The downloaded bytes are verified against the catalog's
+    published SHA-256.
+
+    Args:
+        name: Catalog model name (e.g. ``'qwen2.5vl:7b'``).
+        on_progress: Optional callback receiving (bytes_downloaded, total_bytes).
+
+    Returns:
+        Absolute path (str) to the downloaded main GGUF file.
+
+    Raises:
+        ValueError: If ``name`` is not present in the catalog.
+    """
+    entry = next((m for m in LLAMACPP_GGUF_CATALOG if m["name"] == name), None)
+    if entry is None:
+        available = ", ".join(m["name"] for m in LLAMACPP_GGUF_CATALOG)
+        raise ValueError(f"Unknown model '{name}'. Available: {available}")
+
+    model_dir = _llamacpp_model_dir()
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    gguf_file = LLAMACPP_GGUF_FILENAMES.get(name, (name.replace(":", "-") + ".gguf", ""))[0]
+    dest = model_dir / gguf_file
+
+    url = _maybe_mirror_url(entry["url"])
+    download_file(
+        url,
+        dest,
+        progress_callback=on_progress,
+        expected_sha256=entry.get("sha256"),
+    )
+    return str(dest)
+
+
 def configure_llamacpp_install(model_name: str, gguf_path: Path,
                                mmproj_path: Path | None = None,
                                make_default: bool = True) -> None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 import engine
 from server import deps
@@ -17,7 +17,7 @@ def get_config() -> dict:
     return deps.get_engine_config()
 
 
-@router.put("/config")
+@router.put("/config", dependencies=[Depends(deps.require_auth)])
 def put_config(req: ConfigPutRequest) -> dict:
     """Merge a partial config patch, persist it, then reload from disk."""
     patch = req.patch
