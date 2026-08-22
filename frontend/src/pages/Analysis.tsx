@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
@@ -313,6 +313,14 @@ export default function Analysis() {
   const cancel = () => {
     wsRef.current?.cancel();
   };
+
+  // Allow the global Ctrl/Cmd+Enter shortcut (registered in App) to run the
+  // exact same pipeline as the Run button.
+  useEffect(() => {
+    const handler = () => runAnalysis();
+    window.addEventListener("amr:run-analysis", handler);
+    return () => window.removeEventListener("amr:run-analysis", handler);
+  }, [runAnalysis]);
 
   const pct =
     progress.total > 0

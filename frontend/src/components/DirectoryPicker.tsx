@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronRight, File, Folder, FolderOpen, Plus } from "lucide-react";
+import { ChevronRight, File, Folder, FolderOpen, Plus, Clock } from "lucide-react";
 import { browseFolder, type BrowseEntry, type BrowseResponse } from "../api/client";
 import { useToast } from "../store";
+
+const RECENTS_KEY = "amr:recent-dirs";
+const MAX_RECENTS = 8;
+
+function loadRecents(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((d) => typeof d === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 interface DirectoryPickerProps {
   onAddFile: (entry: BrowseEntry) => void;
@@ -12,7 +25,21 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
   const [browse, setBrowse] = useState<BrowseResponse | null>(null);
   const [path, setPath] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [recents, setRecents] = useState<string[]>(() => loadRecents());
   const toast = useToast();
+
+  const pushRecent = useCallback((dir: string) => {
+    if (!dir) return;
+    setRecents((prev) => {
+      const next = [dir, ...prev.filter((d) => d !== dir)].slice(0, MAX_RECENTS);
+      try {
+        localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore persistence failures */
+      }
+      return next;
+    });
+  }, []);
 
   const doBrowse = useCallback(
     async (target?: string) => {
@@ -21,13 +48,15 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
         const res = await browseFolder(target);
         setBrowse(res);
         setPath(res.path);
+        // Record user-initiated navigations (skip the initial empty load).
+        if (target) pushRecent(res.path);
       } catch (err) {
         toast.error(`Browse failed: ${String(err)}`);
       } finally {
         setBusy(false);
       }
     },
-    [toast]
+    [toast, pushRecent]
   );
 
   useEffect(() => {
@@ -40,6 +69,25 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
         <FolderOpen size={16} />
         Folder picker (backend host)
       </div>
+
+      {recents.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <span className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-text-dim">
+            <Clock size={12} /> Recent
+          </span>
+          {recents.map((dir) => (
+            <button
+              key={dir}
+              type="button"
+              title={dir}
+              onClick={() => doBrowse(dir)}
+              className="max-w-[200px] truncate rounded-full border border-border bg-bg px-2.5 py-1 text-xs text-text-dim hover:border-accent hover:text-text"
+            >
+              {dir.split(/[\\/]/).filter(Boolean).slice(-1)[0] || dir}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="mb-3 flex flex-wrap items-center gap-1 rounded-md border border-border bg-bg px-2 py-1.5 text-xs text-text-dim">
         <button

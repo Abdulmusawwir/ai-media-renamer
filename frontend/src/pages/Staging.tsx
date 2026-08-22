@@ -1,12 +1,17 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
   useReactTable,
   type RowSelectionState,
+  type SortingState,
+  type FilterFn,
 } from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   PieChart,
   Pie,
@@ -45,6 +50,23 @@ const PIE_COLORS = [
 
 const columnHelper = createColumnHelper<StagedAsset>();
 
+// Case-insensitive match across the most relevant text columns.
+const globalFilterFn: FilterFn<StagedAsset> = (row, _columnId, value) => {
+  const q = String(value).toLowerCase().trim();
+  if (!q) return true;
+  const a = row.original;
+  const hay = [
+    a.original_name,
+    a.staged_name,
+    a.category,
+    (a.tags ?? []).join(" "),
+    a.description ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+  return hay.includes(q);
+};
+
 export default function Staging() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -81,7 +103,16 @@ export default function Staging() {
   const serverRows = query.data?.assets ?? [];
   const [rows, setRows] = useState<StagedAsset[]>([]);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [globalFilter, setGlobalFilter] = useState("");
   const [bulkCategory, setBulkCategory] = useState<string>("");
+  const lastClicked = useRef<number | null>(null);
+  const parentRef = useRef<HTMLDivElement>(null);
+  const [hoverThumb, setHoverThumb] = useState<{
+    src: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Sync server rows into local editable state when the query resolves.
   const [syncedKey, setSyncedKey] = useState<string>("");
@@ -114,6 +145,7 @@ export default function Staging() {
     () => [
       columnHelper.display({
         id: "select",
+        enableSorting: false,
         header: ({ table }) => (
           <input
             type="checkbox"
@@ -206,11 +238,98 @@ export default function Staging() {
   const table = useReactTable({
     data: rows,
     columns,
-    state: { rowSelection },
+    state: { rowSelection, sorting, globalFilter },
     onRowSelectionChange: setRowSelection,
+    onSortingChange: setSorting,
+    onGlobalFilterChange: setGlobalFilter,
+    globalFilterFn,
     getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     getRowId: (_, index) => String(index),
   });
+
+  const visibleRows = table.getRowModel().rows;
+
+  const rowVirtualizer = useVirtualizer({
+    count: visibleRows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 44,
+    overscan: 12,
+  });
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+  const paddingBottom =
+    virtualItems.length > 0
+      ? rowVirtualizer.getTotalSize() -
+        virtualItems[virtualItems.length - 1].end
+      : 0;
+
+  const handleRowClick = (
+    e: React.MouseEvent,
+    index: number
+  ) => {
+    const tag = (e.target as HTMLElement).tagName;
+    if (
+      tag === "INPUT" ||
+      tag === "SELECT" ||
+      tag === "BUTTON" ||
+      tag === "TEXTAREA"
+    ) {
+      return;
+    }
+    const meta = e.metaKey || e.ctrlKey;
+    const shift = e.shiftKey;
+    setRowSelection((prev) => {
+      const next: RowSelectionState = { ...prev };
+      if (shift && lastClicked.current !== null) {
+        const [a, b] = [lastClicked.current, index].sort((x, y) => x - y);
+        for (let i = a; i <= b; i++) next[String(i)] = true;
+      } else if (meta) {
+        next[String(index)] = !prev[String(index)];
+      } else {
+        Object.keys(next).forEach((k) => (next[k] = false));
+        next[String(index)] = true;
+      }
+      return next;
+    });
+    if (!shift) lastClicked.current = index;
+  };
+
+  const handleRowEnter = (
+    e: React.MouseEvent,
+    asset: StagedAsset
+  ) => {
+    const src = asset.base64_data ?? (asset as { thumbnail?: string }).thumbnail;
+    if (typeof src === "string" && src.startsWith("data:image")) {
+      setHoverThumb({ src, x: e.clientX, y: e.clientY });
+    }
+  };
+
+  // Global keyboard hooks: delete selected rows / escape (dismiss hover).
+  useEffect(() => {
+    const onDelete = () => {
+      if (selectedNames.length === 0) {
+        toast.info("No rows selected.");
+        return;
+      }
+      setRows((prev) =>
+        prev.filter((r) => !selectedNames.includes(r.original_name))
+      );
+      setRowSelection({});
+      lastClicked.current = null;
+      toast.success(`Removed ${selectedNames.length} row(s).`);
+    };
+    const onEscape = () => setHoverThumb(null);
+    window.addEventListener("amr:delete-selected", onDelete);
+    window.addEventListener("amr:escape", onEscape);
+    return () => {
+      window.removeEventListener("amr:delete-selected", onDelete);
+      window.removeEventListener("amr:escape", onEscape);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNames, toast]);
 
   const applyBulk = async () => {
     if (selectedNames.length === 0 || !bulkCategory) {
@@ -319,6 +438,13 @@ export default function Staging() {
         </span>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            value={globalFilter}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            placeholder="Filter by name / category / tag / description…"
+            className="w-56 rounded-md border border-border bg-bg px-3 py-1.5 text-sm placeholder:text-text-dim"
+          />
           <button
             className="flex items-center gap-1.5 rounded-md border border-border bg-bg-elev-2 px-3 py-1.5 text-sm hover:bg-bg"
             onClick={onSave}
@@ -346,36 +472,80 @@ export default function Staging() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
         {/* Table */}
-        <div className="overflow-x-auto rounded-lg border border-border bg-bg-elev lg:col-span-3">
+        <div
+          ref={parentRef}
+          className="max-h-[600px] overflow-auto rounded-lg border border-border bg-bg-elev lg:col-span-3"
+        >
           <table className="w-full border-collapse text-sm">
             <thead>
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id} className="border-b border-border">
-                  {hg.headers.map((h) => (
-                    <th
-                      key={h.id}
-                      className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-text-dim"
-                    >
-                      {flexRender(h.column.columnDef.header, h.getContext())}
-                    </th>
-                  ))}
+                  {hg.headers.map((h) => {
+                    const canSort = h.column.getCanSort();
+                    const sorted = h.column.getIsSorted();
+                    return (
+                      <th
+                        key={h.id}
+                        className="sticky top-0 z-10 bg-bg-elev px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-text-dim"
+                      >
+                        <button
+                          type="button"
+                          disabled={!canSort}
+                          onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
+                          className={`flex items-center gap-1 ${
+                            canSort ? "cursor-pointer hover:text-text" : "cursor-default"
+                          }`}
+                        >
+                          {flexRender(h.column.columnDef.header, h.getContext())}
+                          {sorted === "asc" && <span>▲</span>}
+                          {sorted === "desc" && <span>▼</span>}
+                          {canSort && !sorted && <span className="opacity-40">↕</span>}
+                        </button>
+                      </th>
+                    );
+                  })}
                 </tr>
               ))}
             </thead>
             <tbody>
-              {table.getRowModel().rows.map((row) => (
-                <tr
-                  key={row.id}
-                  className="border-b border-border/60 hover:bg-bg-elev-2"
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-3 py-1.5 align-top">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
+              {paddingTop > 0 && (
+                <tr aria-hidden>
+                  <td colSpan={columns.length} style={{ height: paddingTop }} />
                 </tr>
-              ))}
-              {rows.length === 0 && (
+              )}
+              {virtualItems.map((vi) => {
+                const row = visibleRows[vi.index];
+                return (
+                  <tr
+                    key={row.id}
+                    className={`border-b border-border/60 hover:bg-bg-elev-2 ${
+                      row.getIsSelected() ? "bg-accent/10" : ""
+                    }`}
+                    onClick={(e) => handleRowClick(e, row.index)}
+                    onMouseEnter={(e) => handleRowEnter(e, row.original)}
+                    onMouseMove={(e) =>
+                      setHoverThumb((prev) =>
+                        prev
+                          ? { ...prev, x: e.clientX, y: e.clientY }
+                          : prev
+                      )
+                    }
+                    onMouseLeave={() => setHoverThumb(null)}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id} className="px-3 py-1.5 align-top">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+              {paddingBottom > 0 && (
+                <tr aria-hidden>
+                  <td colSpan={columns.length} style={{ height: paddingBottom }} />
+                </tr>
+              )}
+              {visibleRows.length === 0 && (
                 <tr>
                   <td
                     colSpan={columns.length}
@@ -429,6 +599,22 @@ export default function Staging() {
           )}
         </div>
       </div>
+
+      {hoverThumb && (
+        <div
+          className="pointer-events-none fixed z-50 w-48 rounded-md border border-border bg-bg-elev p-1 shadow-lg"
+          style={{
+            left: Math.min(hoverThumb.x + 12, window.innerWidth - 200),
+            top: Math.min(hoverThumb.y + 12, window.innerHeight - 200),
+          }}
+        >
+          <img
+            src={hoverThumb.src}
+            alt="preview"
+            className="h-40 w-full rounded object-contain"
+          />
+        </div>
+      )}
     </div>
   );
 }

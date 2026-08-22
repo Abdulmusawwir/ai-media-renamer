@@ -11,8 +11,8 @@ import {
   Boxes,
   Cpu,
 } from "lucide-react";
-import { useEnvironment, useConfig } from "./hooks/api";
-import { useStore } from "./store";
+import { useEnvironment, useConfig, useSaveSession } from "./hooks/api";
+import { useStore, useToast } from "./store";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 const NAV_ITEMS = [
@@ -32,6 +32,8 @@ export default function App() {
 
   const envQuery = useEnvironment();
   const configQuery = useConfig();
+  const saveSessionMutation = useSaveSession();
+  const toast = useToast();
 
   useEffect(() => {
     if (envQuery.data) setEnvironment(envQuery.data);
@@ -57,6 +59,74 @@ export default function App() {
   }, []);
 
   const location = useLocation();
+
+  // Global keyboard shortcuts. Modals/dialogs close on Escape; Delete removes
+  // staged rows; Ctrl/Cmd+Enter runs analysis; Ctrl/Cmd+S saves; Ctrl/Cmd+Z undo.
+  useEffect(() => {
+    const isEditable = (el: EventTarget | null) => {
+      const node = el as HTMLElement | null;
+      if (!node) return false;
+      const tag = node.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        node.isContentEditable
+      );
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      const path = location.pathname;
+      const editable = isEditable(e.target);
+
+      if (e.key === "Escape") {
+        if (editable) {
+          (e.target as HTMLElement).blur();
+          return;
+        }
+        window.dispatchEvent(new CustomEvent("amr:escape"));
+        return;
+      }
+
+      if (e.key === "Delete") {
+        if (editable) return;
+        if (path.startsWith("/staging")) {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent("amr:delete-selected"));
+          toast.info("Deleted selected rows.");
+        }
+        return;
+      }
+
+      if (meta) {
+        if (e.key === "Enter") {
+          if (path === "/analysis") {
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent("amr:run-analysis"));
+            toast.info("Running analysis…");
+          }
+          return;
+        }
+        if (e.key.toLowerCase() === "s") {
+          e.preventDefault();
+          saveSessionMutation
+            .mutateAsync({})
+            .then(() => toast.success("Session saved."))
+            .catch((err) => toast.error(String(err)));
+          return;
+        }
+        if (e.key.toLowerCase() === "z") {
+          e.preventDefault();
+          toast.info("Undo not available.");
+          return;
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [location.pathname, saveSessionMutation, toast]);
 
   return (
     <div className="flex min-h-screen bg-bg text-text">
