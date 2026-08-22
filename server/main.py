@@ -68,11 +68,6 @@ def create_app() -> FastAPI:
             return {"enabled": False}
         return {"enabled": True, "token": amr_auth.create_access_token({})}
 
-    # Serve the built React frontend if it has been built. API routes are already
-    # registered, so ``/api/*`` and ``/health`` take precedence over this mount.
-    if _DIST.is_dir():
-        app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="frontend")
-
     @app.on_event("startup")
     def _startup() -> None:
         # Ensure the engine config is loaded and environment probes are usable.
@@ -86,6 +81,11 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["meta"])
     def health() -> dict:
         return {"status": "ok", "version": "2.0.0"}
+
+    # Serve the built React frontend LAST so API routes and /health (registered
+    # above) match first and are not swallowed by the catch-all mount.
+    if _DIST.is_dir():
+        app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="frontend")
 
     return app
 

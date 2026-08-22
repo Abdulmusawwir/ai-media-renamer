@@ -54,7 +54,9 @@ def make_event(type_: str, **fields) -> dict:
     """Build a typed WebSocket event payload."""
     payload: dict = {"type": type_}
     for key, value in fields.items():
-        if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        # Convert non-dict iterables (sets, tuples, generators) to lists, but
+        # leave dicts and lists untouched so nested objects survive JSON.
+        if not isinstance(value, (str, bytes, dict)) and isinstance(value, Iterable):
             value = list(value)
         payload[key] = value
     return payload

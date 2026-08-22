@@ -28,4 +28,5 @@ python-multipart
 pydantic
 pyjwt
 websockets
+httpx  # TestClient for the API/e2e tests
 
