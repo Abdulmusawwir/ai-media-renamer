@@ -30,7 +30,6 @@ a = Analysis(
         ('icon.ico', '.'),
     ],
     hiddenimports=[
-        'ollama',
         'PIL',
         'PIL._tkinter_finder',
         'tkinter',

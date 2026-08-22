@@ -260,21 +260,19 @@ class TestConfigureLlamaCppInstall:
         assert engine.config["model"]["text_model"] == "qwen2.5vl:7b"
         assert engine.config["model"]["last_provider"] == "llamacpp"
 
-    def test_non_default_keeps_ollama_model(self, tmp_path, monkeypatch, restore_config, silent_save):
+    def test_non_default_keeps_provider(self, tmp_path, monkeypatch, restore_config, silent_save):
         engine.configure_llamacpp_install("qwen2.5:3b", tmp_path / "text.gguf",
                                           make_default=False)
-        assert engine.config["model"]["last_provider"] != "llamacpp"
         assert engine.config["model"]["providers"]["llamacpp"]["selected_model"] == "qwen2.5:3b"
 
 
 # ---------------------------------------------------------------------------
-# Wizard plan runtime awareness (bootstrap._build_plan)
+# Wizard plan (bootstrap._build_plan) — always llama.cpp runtime
 # ---------------------------------------------------------------------------
 
 class TestLlamaBuildPlan:
-    def test_no_ollama_defaults_to_llamacpp_runtime(self, monkeypatch, tmp_path):
+    def test_plan_uses_llamacpp_runtime(self, monkeypatch, tmp_path):
         import bootstrap
-        monkeypatch.setattr(bootstrap, "_ollama_binary", lambda: None)
         monkeypatch.setattr(bootstrap, "_resolve_binary_path", lambda name: None)
         monkeypatch.setattr(bootstrap, "_installed_models", lambda: set())
         monkeypatch.setattr(bootstrap, "_llamacpp_gguf_paths",
@@ -289,18 +287,6 @@ class TestLlamaBuildPlan:
         assert runtime_row["status"] == "download"
         vision_row = next(p for p in plan if p["label"] == "Vision AI model")
         assert vision_row["status"] == "download"
-
-    def test_ollama_installed_reuses_ollama(self, monkeypatch, tmp_path):
-        import bootstrap
-        monkeypatch.setattr(bootstrap, "_ollama_binary", lambda: "C:/ollama/ollama.exe")
-        monkeypatch.setattr(bootstrap, "_resolve_binary_path", lambda name: None)
-        monkeypatch.setattr(bootstrap, "_installed_models", lambda: set())
-        plan = bootstrap._build_plan(["documents"], {"text_model"}, {"text": "qwen2.5:3b"})
-        labels = [p["label"] for p in plan]
-        assert "Ollama runtime" in labels
-        assert "llama.cpp runtime (AI server)" not in labels
-        ollama_row = next(p for p in plan if p["label"] == "Ollama runtime")
-        assert ollama_row["status"] == "ready"
 
 
 # ---------------------------------------------------------------------------

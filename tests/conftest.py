@@ -25,7 +25,6 @@ def sample_config(tmp_dir):
             "name": "qwen2.5vl:7b",
             "temperature": 0.15,
             "num_ctx": 8192,
-            "keep_alive": "1h",
         },
         "naming": {"case_style": "title_case", "max_filename_chars": 0},
         "naming_templates": {

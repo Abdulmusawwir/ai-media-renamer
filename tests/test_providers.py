@@ -7,7 +7,6 @@ from engine import (
     TEXT_MODEL_NAME,
     AIProvider,
     LlamaCppProvider,
-    OllamaProvider,
     OpenAIProvider,
     _llamacpp_server_running,
     get_provider,
@@ -20,14 +19,9 @@ from engine import (
 # ---------------------------------------------------------------------------
 
 class TestProviderRegistry:
-    def test_list_includes_local_providers(self):
+    def test_list_includes_llamacpp(self):
         names = list_providers()
-        assert "ollama" in names
         assert "llamacpp" in names
-
-    def test_get_ollama(self):
-        prov = get_provider("ollama")
-        assert isinstance(prov, OllamaProvider)
 
     def test_get_llamacpp(self):
         prov = get_provider("llamacpp")
@@ -56,113 +50,61 @@ class TestProviderRegistry:
 
 class TestParseAndValidate:
     def test_valid_json(self):
-        prov = OllamaProvider()
+        prov = LlamaCppProvider()
         raw = '{"new_filename": "test_file", "topic": "test"}'
         result = prov._parse_and_validate(raw)
         assert result["ok"] is True
         assert result["data"]["new_filename"] == "test_file"
 
     def test_invalid_json(self):
-        prov = OllamaProvider()
+        prov = LlamaCppProvider()
         result = prov._parse_and_validate("not json")
         assert result["ok"] is False
         assert result["error"] == "json_parse_error"
 
     def test_missing_new_filename(self):
-        prov = OllamaProvider()
+        prov = LlamaCppProvider()
         result = prov._parse_and_validate('{"topic": "test"}')
         assert result["ok"] is False
         assert result["error"] == "missing_keys"
 
     def test_empty_string(self):
-        prov = OllamaProvider()
+        prov = LlamaCppProvider()
         result = prov._parse_and_validate("")
         assert result["ok"] is False
         assert result["error"] == "empty_response"
 
     def test_json_with_code_block(self):
-        prov = OllamaProvider()
+        prov = LlamaCppProvider()
         raw = '```json\n{"new_filename": "test", "topic": "x"}\n```'
         result = prov._parse_and_validate(raw)
         assert result["ok"] is True
 
     def test_json_with_plain_block(self):
-        prov = OllamaProvider()
+        prov = LlamaCppProvider()
         raw = '```\n{"new_filename": "test", "topic": "x"}\n```'
         result = prov._parse_and_validate(raw)
         assert result["ok"] is True
 
 
 # ---------------------------------------------------------------------------
-# OllamaProvider
+# LlamaCppProvider (local llama.cpp llama-server runtime)
 # ---------------------------------------------------------------------------
 
-class TestOllamaProvider:
+class TestLlamaCppProvider:
     def setup_method(self):
-        self.prov = OllamaProvider()
+        self.prov = LlamaCppProvider()
 
-    @patch("engine.ollama.generate")
-    def test_analyze_success(self, mock_gen):
-        payload = '{"new_filename": "sunset_beach", "topic": "beach", "description": "sunset", '
-        payload += '"tags": ["sunset", "beach"], "overall_visual_summary": "A beautiful sunset at the beach.", '
-        payload += '"suggested_category": "landscapes_broll"}'
-        mock_gen.return_value = {"response": payload}
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is True
-        assert result["data"]["new_filename"] == "sunset_beach"
+    def test_inherits_from_openai(self):
+        assert isinstance(self.prov, OpenAIProvider)
 
-    @patch("engine.ollama.generate")
-    def test_analyze_ollama_error(self, mock_gen):
-        import ollama as ollama_mod
-        mock_gen.side_effect = ollama_mod.ResponseError("Model not found")
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is False
-        assert result["error"] == "ollama_error"
+    def test_base_url_points_at_local_server(self):
+        assert self.prov._base_url.startswith("http")
+        assert self.prov._base_url.endswith("/v1")
 
-    @patch("engine.ollama.generate")
-    def test_analyze_connection_error(self, mock_gen):
-        mock_gen.side_effect = ConnectionError("Connection refused")
-        result = self.prov.analyze("fake_base64")
-        assert result["ok"] is False
-        assert result["error"] == "ollama_error"
-
-    @patch("engine.ollama.list")
-    def test_health_check_running(self, mock_list):
-        mock_list.return_value = {"models": []}
-        result = self.prov.health_check()
-        assert result["ok"] is True
-
-    @patch("engine.ollama.list")
-    def test_health_check_down(self, mock_list):
-        mock_list.side_effect = Exception("Connection refused")
-        result = self.prov.health_check()
-        assert result["ok"] is False
-
-    @patch("engine.ollama.list")
-    def test_available_models(self, mock_list):
-        mock_list.return_value = {"models": [{"name": "qwen2.5vl:7b"}, {"name": "llava:13b"}]}
-        models = self.prov.available_models()
-        assert "qwen2.5vl:7b" in models
-        assert "llava:13b" in models
-
-    @patch("engine.ollama.list")
-    def test_available_models_all(self, mock_list):
-        mock_list.return_value = {"models": [
-            {"name": "qwen2.5vl:7b"}, {"name": "deepseek-coder-v2:16b"}, {"name": "llava:13b"}
-        ]}
-        models = self.prov.available_models()
-        assert "qwen2.5vl:7b" in models
-        assert "llava:13b" in models
-        assert "deepseek-coder-v2:16b" in models
-        assert len(models) == 3
-
-    @patch("engine.ollama.list")
-    def test_available_models_down_returns_empty(self, mock_list):
-        # Critical: when the daemon is down we must NOT fall back to the config
-        # catalog, or every catalog model falsely shows as "installed".
-        mock_list.side_effect = Exception("Down")
-        models = self.prov.available_models()
-        assert models == []
+    def test_dummy_api_key_set(self):
+        # llama-server does not authenticate; a placeholder satisfies the client.
+        assert self.prov._api_key == "local"
 
     def test_model_property(self):
         self.prov.model = "test-model"
@@ -171,40 +113,90 @@ class TestOllamaProvider:
     def test_text_model_default(self):
         assert self.prov.text_model == TEXT_MODEL_NAME
 
-    @patch("engine.ollama.generate")
-    def test_analyze_text_uses_text_model(self, mock_gen):
-        payload = ('{"new_filename": "report_summary", "topic": "report", "description": "summary", '
-                   '"tags": ["report"], "overall_visual_summary": "Report summary", '
-                   '"suggested_category": "documents_broll"}')
-        mock_gen.return_value = {"response": payload}
+    @patch("engine.openai.OpenAI")
+    def test_analyze_success(self, mock_openai):
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        mock_choice = MagicMock()
+        mock_choice.message.content = (
+            '{"new_filename": "sunset_beach", "topic": "beach", "description": "sunset", '
+            '"tags": ["sunset", "beach"], "overall_visual_summary": "A beautiful sunset at the beach.", '
+            '"suggested_category": "landscapes_broll"}'
+        )
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_response
+        result = self.prov.analyze("fake_base64")
+        assert result["ok"] is True
+        assert result["data"]["new_filename"] == "sunset_beach"
+
+    @patch("engine.openai.OpenAI")
+    def test_analyze_api_error(self, mock_openai):
+        mock_openai.side_effect = Exception("Connection refused")
+        result = self.prov.analyze("fake_base64")
+        assert result["ok"] is False
+        assert result["error"] == "openai_api_error"
+
+    @patch("engine.openai.OpenAI")
+    def test_analyze_text_uses_text_model(self, mock_openai):
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        mock_choice = MagicMock()
+        mock_choice.message.content = (
+            '{"new_filename": "report_summary", "topic": "report", "description": "summary", '
+            '"tags": ["report"], "overall_visual_summary": "Report summary", '
+            '"suggested_category": "documents_broll"}'
+        )
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_response
         self.prov.text_model = "qwen2.5:3b"
         result = self.prov.analyze_text("Some document text")
         assert result["ok"] is True
-        assert mock_gen.call_args.kwargs["model"] == "qwen2.5:3b"
-        assert "images" not in mock_gen.call_args.kwargs
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["model"] == "qwen2.5:3b"
+        content = kwargs["messages"]
+        assert not any(isinstance(p, dict) and p.get("type") == "image_url" for p in content)
 
-    @patch("engine.ollama.generate")
-    def test_analyze_text_falls_back_to_vision_model(self, mock_gen):
-        payload = ('{"new_filename": "report_summary", "topic": "report", "description": "summary", '
-                   '"tags": ["report"], "overall_visual_summary": "Report summary", '
-                   '"suggested_category": "documents_broll"}')
-        mock_gen.return_value = {"response": payload}
+    @patch("engine.openai.OpenAI")
+    def test_analyze_text_falls_back_to_vision_model(self, mock_openai):
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        mock_choice = MagicMock()
+        mock_choice.message.content = (
+            '{"new_filename": "report_summary", "topic": "report", "description": "summary", '
+            '"tags": ["report"], "overall_visual_summary": "Report summary", '
+            '"suggested_category": "documents_broll"}'
+        )
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_response
         self.prov.text_model = ""
         result = self.prov.analyze_text("Some document text")
         assert result["ok"] is True
-        assert mock_gen.call_args.kwargs["model"] == self.prov._model
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["model"] == self.prov._model
 
-    @patch("engine.ollama.generate")
-    def test_analyze_sends_vision_model_for_images(self, mock_gen):
-        payload = ('{"new_filename": "sunset_beach", "topic": "beach", "description": "sunset", '
-                   '"tags": ["sunset", "beach"], "overall_visual_summary": "A beautiful sunset.", '
-                   '"suggested_category": "landscapes_broll"}')
-        mock_gen.return_value = {"response": payload}
+    @patch("engine.openai.OpenAI")
+    def test_analyze_sends_vision_model_for_images(self, mock_openai):
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        mock_choice = MagicMock()
+        mock_choice.message.content = (
+            '{"new_filename": "sunset_beach", "topic": "beach", "description": "sunset", '
+            '"tags": ["sunset", "beach"], "overall_visual_summary": "A beautiful sunset.", '
+            '"suggested_category": "landscapes_broll"}'
+        )
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_response
         self.prov.text_model = "qwen2.5:3b"
         result = self.prov.analyze("fake_base64")
         assert result["ok"] is True
-        assert mock_gen.call_args.kwargs["model"] == self.prov._model
-        assert "images" in mock_gen.call_args.kwargs
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["model"] == self.prov._model
+        parts = kwargs["messages"][0]["content"]
+        assert any(isinstance(p, dict) and p.get("type") == "image_url" for p in parts)
 
     def test_analyze_document_with_ai_uses_config_text_model(self, monkeypatch):
         import engine as engine_mod
@@ -224,11 +216,31 @@ class TestOllamaProvider:
         monkeypatch.setattr(engine_mod, "get_provider", lambda name: FakeProv())
         monkeypatch.setitem(engine_mod.config, "model", {
             "name": "vision-model", "text_model": "tiny-text",
-            "temperature": 0.15, "num_ctx": 8192, "keep_alive": "1h",
+            "temperature": 0.15, "num_ctx": 8192,
         })
         engine_mod.analyze_document_with_ai("doc text")
         assert calls["model"] == "vision-model"
         assert calls["text_model"] == "tiny-text"
+
+    @patch("engine.openai.OpenAI")
+    def test_available_models_down_returns_empty(self, mock_openai):
+        mock_openai.side_effect = Exception("connection refused")
+        assert self.prov.available_models() == []
+
+    @patch("engine.openai.OpenAI")
+    def test_available_models_lists_loaded_models(self, mock_openai):
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        m1 = MagicMock()
+        m1.id = "qwen3-vl:14b"
+        m2 = MagicMock()
+        m2.id = "llama-3.2:3b"
+        resp = MagicMock()
+        resp.data = [m1, m2]
+        mock_client.models.list.return_value = resp
+        models = self.prov.available_models()
+        assert "qwen3-vl:14b" in models
+        assert "llama-3.2:3b" in models
 
     def test_api_key_property(self):
         self.prov.api_key = "test-key"
@@ -291,44 +303,8 @@ class TestOpenAIProvider:
 
 
 # ---------------------------------------------------------------------------
-# LlamaCppProvider (local llama.cpp llama-server runtime fallback)
+# Structured-output compatibility fallback (local llama-server builds)
 # ---------------------------------------------------------------------------
-
-class TestLlamaCppProvider:
-    def setup_method(self):
-        self.prov = LlamaCppProvider()
-
-    def test_inherits_from_openai(self):
-        assert isinstance(self.prov, OpenAIProvider)
-
-    def test_base_url_points_at_local_server(self):
-        assert self.prov._base_url.startswith("http")
-        assert self.prov._base_url.endswith("/v1")
-
-    def test_dummy_api_key_set(self):
-        # llama-server does not authenticate; a placeholder satisfies the client.
-        assert self.prov._api_key == "local"
-
-    @patch("engine.openai.OpenAI")
-    def test_available_models_down_returns_empty(self, mock_openai):
-        mock_openai.side_effect = Exception("connection refused")
-        assert self.prov.available_models() == []
-
-    @patch("engine.openai.OpenAI")
-    def test_available_models_lists_loaded_models(self, mock_openai):
-        mock_client = MagicMock()
-        mock_openai.return_value = mock_client
-        m1 = MagicMock()
-        m1.id = "qwen3-vl:14b"
-        m2 = MagicMock()
-        m2.id = "llama-3.2:3b"
-        resp = MagicMock()
-        resp.data = [m1, m2]
-        mock_client.models.list.return_value = resp
-        models = self.prov.available_models()
-        assert "qwen3-vl:14b" in models
-        assert "llama-3.2:3b" in models
-
 
 class TestOpenAICompatStructuredFallback:
     """Strict ``json_schema`` response_format may 400 on local llama-server builds.
@@ -342,7 +318,7 @@ class TestOpenAICompatStructuredFallback:
     def test_falls_back_on_400_badrequest(self, mock_openai):
         mock_client = mock_openai.return_value
         err = openai.BadRequestError(
-            message="Either \"json_schema\" or \"grammar\" can be specified",
+            message='Either "json_schema" or "grammar" can be specified',
             response=MagicMock(status_code=400),
             body=None,
         )
@@ -398,17 +374,17 @@ class TestLlamaCppDetection:
 class TestProviderRouting:
     @patch("engine.switch_ai_provider")
     def test_switch_returns_result(self, mock_switch):
-        mock_switch.return_value = {"ok": True, "message": "Switched to ollama."}
+        mock_switch.return_value = {"ok": True, "message": "Switched to local llama.cpp."}
         from engine import switch_ai_provider as real_switch
         with patch("engine.check_environment") as mock_env:
-            mock_env.return_value = {"ollama_running": True, "model_available": True, "errors": []}
+            mock_env.return_value = {"llamacpp_running": True, "model_available": True, "errors": []}
             with patch("engine.save_config"):
-                result = real_switch("ollama")
+                result = real_switch("llamacpp")
                 assert result["ok"] is True
 
 
 # ---------------------------------------------------------------------------
-# _format_ai_error (new error types)
+# _format_ai_error (error types)
 # ---------------------------------------------------------------------------
 
 class TestFormatAiError:
@@ -429,5 +405,5 @@ class TestFormatAiError:
 
     def test_verbose_includes_raw(self):
         from engine import _format_ai_error
-        msg = _format_ai_error({"error": "ollama_error", "detail": "fail", "raw_response": "RAW DATA"}, verbose=True)
+        msg = _format_ai_error({"error": "openai_api_error", "detail": "fail", "raw_response": "RAW DATA"}, verbose=True)
         assert "RAW DATA" in msg

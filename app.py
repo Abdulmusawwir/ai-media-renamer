@@ -29,9 +29,9 @@ from engine import (
     DOCUMENT_EXTENSIONS,
     EXTRACTION_WORKERS,
     IMAGE_EXTENSIONS,
+    LLAMACPP_GGUF_CATALOG,
     LOG_DIR,
     MAX_UPLOAD_SIZE,
-    MODEL_CATALOG,
     NAMED_TEMPLATES,
     PROMPT_PROFILES,
     SETUP_USE_CASES,
@@ -46,7 +46,6 @@ from engine import (
     apply_naming_template,
     check_environment,
     check_for_updates,
-    check_ollama_health,
     config,
     delete_session,
     detect_hw_accel,
@@ -76,12 +75,10 @@ from engine import (
     save_session,
     set_active_profile,
     setup_logging,
-    stream_model_download,
     switch_ai_provider,
     transcribe_audio,
     truncate_filename,
     validate_category,
-    wipe_local_model,
 )
 
 _ICON_PATH = Path(sys._MEIPASS) / "icon.ico" if getattr(sys, "frozen", False) else Path(__file__).parent / "icon.ico"
@@ -267,7 +264,7 @@ if "template_string" not in st.session_state:
     st.session_state.template_string = DEFAULT_TEMPLATE_STRING
 
 if "provider_info" not in st.session_state:
-    st.session_state.provider_info = config.get("model", {}).get("last_provider", "ollama")
+    st.session_state.provider_info = config.get("model", {}).get("last_provider", "llamacpp")
 
 if "env_check" not in st.session_state:
     st.session_state.env_check = None
@@ -311,62 +308,6 @@ if st.session_state.env_check is None and not st.session_state.model_downloading
     st.session_state.setup_profile = setup_profile.get("profile", [])
     st.session_state.env_check = check_environment(st.session_state.setup_profile)
 
-# -----------------------------------------------------------------------------
-# Model download progress (fragment auto-refresh — no full-page flash)
-# -----------------------------------------------------------------------------
-
-@st.fragment(run_every="1s")
-def _download_model_fragment() -> None:
-    """Poll the Ollama pull stream in place. Only this fragment re-runs every
-    second, so the rest of the page stays static instead of flashing."""
-    if not st.session_state.get("model_downloading", False):
-        return
-    download_model = st.session_state.get("download_model_name", "qwen2.5vl:7b")
-    with st.status(f"Downloading {download_model}", expanded=True) as download_status:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        if st.button(":material/cancel: Cancel Download", key="cancel_download",
-                     help="Cancels UI polling — Ollama download continues in background"):
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-            st.rerun()
-
-        gen = st.session_state.get("model_download_gen")
-        if gen is None:
-            gen = stream_model_download(download_model)
-            st.session_state.model_download_gen = gen
-
-        try:
-            update = next(gen)
-        except StopIteration:
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-            st.rerun()
-
-        if update["status"] == "progress":
-            pct = update.get("percentage", 0) or 0
-            progress_bar.progress(int(pct) / 100.0)
-            completed_gb = (update.get("completed") or 0) / (1024 ** 3)
-            total_gb = (update.get("total") or 0) / (1024 ** 3)
-            status_text.text(f"Downloading: {completed_gb:.1f}GB / {total_gb:.1f}GB ({pct:.0f}%)")
-            st.session_state.model_download_gen = gen
-        elif update["status"] == "status":
-            status_text.text(f"{update['detail']}...")
-            st.session_state.model_download_gen = gen
-        elif update["status"] == "success":
-            progress_bar.progress(1.0)
-            status_text.success("Download complete! Model installed. Refreshing environment...")
-            download_status.update(label="Download complete", state="complete")
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-            st.session_state.env_check = None
-            st.rerun()
-        elif update["status"] == "error":
-            status_text.error(f"Download failed: {update['message']}")
-            st.session_state.model_downloading = False
-            st.session_state.model_download_gen = None
-            st.rerun()
-
 
 def _model_option_label(model: str, installed: set[str]) -> str:
     """Dropdown label with an install-state marker for the given model."""
@@ -404,7 +345,7 @@ def _on_model_change() -> None:
 
 def _on_text_model_change() -> None:
     """Persist the selected text model to config when its dropdown changes."""
-    model = st.session_state.get("text_model_ollama", "")
+    model = st.session_state.get("text_model_llamacpp", "")
     config["model"]["text_model"] = model
     save_config()
 
@@ -420,13 +361,8 @@ def _on_engine_change() -> None:
         return
     label = st.session_state.get("provider_radio", "")
     env_now = st.session_state.get("env_check") or {}
-    llamacpp_installed = bool(config.get("model", {}).get("llamacpp", {}).get("gguf_path"))
-    llamacpp_visible = bool(env_now.get("llamacpp_running")) or llamacpp_installed
-    engine_labels = ["Local (Ollama)"]
-    engine_ids = ["ollama"]
-    if llamacpp_visible:
-        engine_labels.append("Local (llama.cpp)")
-        engine_ids.append("llamacpp")
+    engine_labels = ["Local (llama.cpp)"]
+    engine_ids = ["llamacpp"]
     if label not in engine_labels:
         return
     new_provider = engine_ids[engine_labels.index(label)]
@@ -440,7 +376,7 @@ def _on_engine_change() -> None:
     except RuntimeError as exc:
         st.session_state.switch_error = str(exc)
         return
-    st.session_state.provider_info = new_provider
+    st.session_state.provider_info = "llamacpp"
 
 
 def _reset_analysis_state() -> None:
@@ -486,35 +422,17 @@ with st.sidebar:
     analysis_active = st.session_state.get("analysis_in_progress", False)
 
     env_now = st.session_state.env_check
-    # The llama.cpp engine is offered when its server is running OR when the
-    # setup wizard has installed it (gguf on disk) but the server is idle.
-    llamacpp_installed = bool(config.get("model", {}).get("llamacpp", {}).get("gguf_path"))
-    llamacpp_visible = bool(env_now and env_now.get("llamacpp_running")) or llamacpp_installed
 
-    engine_labels = ["Local (Ollama)"]
-    engine_ids = ["ollama"]
-    if llamacpp_visible:
-        engine_labels.append("Local (llama.cpp)")
-        engine_ids.append("llamacpp")
-    # Park the radio on a visible engine whenever the stored provider is not
-    # among the offered options (e.g. llama.cpp not installed), so it never
-    # points at a hidden engine id.
-    if st.session_state.provider_info not in engine_ids:
-        if "llamacpp" in engine_ids:
-            st.session_state.provider_info = "llamacpp"
-        else:
-            st.session_state.provider_info = "ollama"
-    default_idx = engine_ids.index(st.session_state.provider_info)
     st.radio(
         "Engine",
-        engine_labels,
-        index=default_idx,
+        ["Local (llama.cpp)"],
+        index=0,
         key="provider_radio",
         on_change=_on_engine_change,
         disabled=analysis_active,
-        help="Local modes use an on-device LLM server (Ollama or llama.cpp).",
+        help="Local mode uses an on-device llama.cpp LLM server.",
     )
-    new_provider = st.session_state.provider_info
+    new_provider = "llamacpp"
 
     if st.session_state.get("switch_error"):
         st.error(st.session_state.switch_error)
@@ -531,7 +449,7 @@ with st.sidebar:
         installed = set(models)
         model_key = f"model_{new_provider}"
         vision_options = list(models)
-        for m in MODEL_CATALOG:
+        for m in LLAMACPP_GGUF_CATALOG:
             if m["kind"] == "vision" and m["name"] not in vision_options:
                 vision_options.append(m["name"])
 
@@ -540,78 +458,50 @@ with st.sidebar:
 
         if vision_options:
             cur_val = st.session_state.get(model_key, p.model or vision_options[0])
-            if new_provider == "ollama" and cur_val and not _is_vision_model(cur_val):
+            if cur_val and not _is_vision_model(cur_val):
                 vl_first = next((m for m in vision_options if _is_vision_model(m)), None)
                 if vl_first:
                     cur_val = vl_first
-                    config["model"]["providers"].setdefault("ollama", {})["selected_model"] = vl_first
+                    config["model"]["providers"].setdefault("llamacpp", {})["selected_model"] = vl_first
                     config["model"]["name"] = vl_first
                     save_config()
             m_idx = vision_options.index(cur_val) if cur_val in vision_options else 0
             st.selectbox("Model", vision_options, index=m_idx, key=model_key,
                          on_change=_on_model_change, format_func=_fmt_model)
-            if new_provider == "ollama" and cur_val not in installed:
-                if st.button(f":material/download: Download {cur_val}",
-                             key="download_vision_model_btn",
-                             help="Downloads the selected model via Ollama."):
-                    st.session_state.download_model_name = cur_val
-                    st.session_state.model_downloading = True
-                    st.rerun()
         else:
             st.caption("No models available.")
 
         # Text model for documents & audio (text-only analysis)
-        if new_provider == "ollama":
-            text_models = [m for m in models if not _is_vision_model(m)]
-            text_cur = config["model"].get("text_model", "")
-            if text_cur and text_cur not in text_models:
-                text_models = [text_cur] + text_models
-            for m in MODEL_CATALOG:
-                if m["kind"] == "text" and m["name"] not in text_models:
-                    text_models.append(m["name"])
-            if text_models:
-                t_idx = text_models.index(text_cur) if text_cur in text_models else 0
-                st.selectbox(
-                    "Text model (documents & audio)",
-                    text_models,
-                    index=t_idx,
-                    key="text_model_ollama",
-                    on_change=_on_text_model_change,
-                    format_func=_fmt_model,
-                    help="Used for text-only analysis of documents and audio transcripts. "
-                         "A small non-vision model (e.g. qwen2.5:3b) is much faster on CPU.",
-                )
-                text_target = text_cur if text_cur in text_models else text_models[0]
-                if text_target not in installed:
-                    if st.button(":material/download: Download this text model", type="secondary",
-                                 key="download_text_model",
-                                 help=f"Download '{text_target}' via Ollama."):
-                        st.session_state.download_model_name = text_target
-                        st.session_state.model_downloading = True
-                        st.rerun()
-                if text_cur and _is_vision_model(text_cur):
-                    st.caption(":material/warning: Current text model is a vision model — "
-                               "install a small text model for faster analysis "
-                               "(`ollama pull qwen2.5:3b`).")
-            else:
-                st.caption("No text models installed — add one via `ollama pull qwen2.5:3b`.")
+        text_models = [m for m in models if not _is_vision_model(m)]
+        text_cur = config["model"].get("text_model", "")
+        if text_cur and text_cur not in text_models:
+            text_models = [text_cur] + text_models
+        for m in LLAMACPP_GGUF_CATALOG:
+            if m["kind"] == "text" and m["name"] not in text_models:
+                text_models.append(m["name"])
+        if text_models:
+            t_idx = text_models.index(text_cur) if text_cur in text_models else 0
+            st.selectbox(
+                "Text model (documents & audio)",
+                text_models,
+                index=t_idx,
+                key="text_model_llamacpp",
+                on_change=_on_text_model_change,
+                format_func=_fmt_model,
+                help="Used for text-only analysis of documents and audio transcripts. "
+                     "A small non-vision model (e.g. qwen2.5:3b) is much faster on CPU.",
+            )
+            if text_cur and _is_vision_model(text_cur):
+                st.caption(":material/warning: Current text model is a vision model — "
+                           "install a small text model for faster analysis.")
+        else:
+            st.caption("No text models installed — add one via the setup wizard.")
 
         # Warn if selected model is not vision-capable
-        if new_provider == "ollama" and models:
+        if models:
             cur_val = st.session_state.get(model_key, p.model or models[0])
             if cur_val and not _is_vision_model(cur_val):
                 st.caption(":material/warning: This model may not support vision analysis.")
-
-        # Ollama health status (refreshed via the "Refresh Status" button below)
-        if new_provider == "ollama":
-            health = st.session_state.get("ollama_health")
-            if health is None:
-                health = check_ollama_health()
-                st.session_state.ollama_health = health
-            if health["connected"]:
-                st.markdown(f":material/check_circle: **Ollama** — {health['model_count']} models")
-            else:
-                st.markdown(":material/error: **Ollama** — disconnected")
 
 
     st.space()
@@ -619,57 +509,35 @@ with st.sidebar:
 
     env = st.session_state.env_check
     if env:
-        if new_provider == "ollama":
-            for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool"),
-                               ("ollama_running", "Ollama Daemon"), ("model_available", "Vision Model"),
-                               ("text_model_available", "Text Model")]:
-                ok = env.get(key, False)
-                status = "green" if ok else "red"
-                st.badge(label, color=status)
+        for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool"),
+                           ("llamacpp_running", "llama.cpp Server"), ("model_available", "Vision Model")]:
+            ok = env.get(key, False)
+            status = "green" if ok else "red"
+            st.badge(label, color=status)
 
-            vision_models = env.get("vision_models", [])
-            if vision_models:
-                names = ", ".join(vision_models[:3])
-                if len(vision_models) > 3:
-                    names += f" (+{len(vision_models) - 3} more)"
-                st.caption(f"Vision: {names}")
-            elif not env.get("ollama_running"):
-                st.error("Ollama is not running. Start Ollama and click Refresh.")
-            elif not env.get("model_available"):
-                st.info("No vision model installed yet.")
+        vision_models = env.get("vision_models", [])
+        if vision_models:
+            names = ", ".join(vision_models[:3])
+            if len(vision_models) > 3:
+                names += f" (+{len(vision_models) - 3} more)"
+            st.caption(f"Vision: {names}")
+        elif not env.get("llamacpp_running"):
+            _lp_host, _lp_port = _llamacpp_host_port()
+            st.error(f"llama.cpp server is not running at {_lp_host}:{_lp_port}. "
+                     "Start `llama-server` and click Refresh.")
+        elif not env.get("model_available"):
+            st.info("No vision model loaded in llama.cpp. "
+                    "Run `llama-server -m your-vision-model.gguf --mmproj mmproj.gguf`.")
 
-            text_models = env.get("text_models", [])
-            if text_models:
-                tnames = ", ".join(text_models[:3])
-                if len(text_models) > 3:
-                    tnames += f" (+{len(text_models) - 3} more)"
-                st.caption(f"Text: {tnames}")
-            elif env.get("ollama_running"):
-                st.caption("Text model not installed — `ollama pull qwen2.5:3b`")
-        elif new_provider == "llamacpp":
-            for key, label in [("ffmpeg", "FFmpeg"), ("exiftool", "ExifTool"),
-                               ("llamacpp_running", "llama.cpp Server"), ("model_available", "Vision Model")]:
-                ok = env.get(key, False)
-                status = "green" if ok else "red"
-                st.badge(label, color=status)
-
-            vision_models = env.get("vision_models", [])
-            if vision_models:
-                names = ", ".join(vision_models[:3])
-                if len(vision_models) > 3:
-                    names += f" (+{len(vision_models) - 3} more)"
-                st.caption(f"Vision: {names}")
-            elif not env.get("llamacpp_running"):
-                _lp_host, _lp_port = _llamacpp_host_port()
-                st.error(f"llama.cpp server is not running at {_lp_host}:{_lp_port}. "
-                         "Start `llama-server` and click Refresh.")
-            elif not env.get("model_available"):
-                st.info("No vision model loaded in llama.cpp. "
-                        "Run `llama-server -m your-vision-model.gguf --mmproj mmproj.gguf`.")
+        text_models = env.get("text_models", [])
+        if text_models:
+            tnames = ", ".join(text_models[:3])
+            if len(text_models) > 3:
+                tnames += f" (+{len(text_models) - 3} more)"
+            st.caption(f"Text: {tnames}")
 
     if st.button(":material/refresh: Refresh Status", key="refresh_status"):
         st.session_state.env_check = None
-        st.session_state.ollama_health = None
         st.rerun()
 
     st.space()
@@ -686,25 +554,20 @@ with st.sidebar:
 
     st.space()
 
-    if new_provider == "ollama" and env and env.get("ollama_running") and not env.get("model_available"):
-        if st.button(":material/download: Download Vision Model", type="primary", key="download_model"):
-            st.session_state.model_downloading = True
-            st.rerun()
-
 # -----------------------------------------------------------------------------
 # Bootstrap diagnostics panel (blocks upload if critical dependency missing)
 # -----------------------------------------------------------------------------
 
 env = st.session_state.env_check
 
-_local_provider_ids = ("ollama", "llamacpp")
+_local_provider_ids = ("llamacpp",)
 
 
 def _setup_cta() -> None:
     """Render a one-click path back into the desktop setup wizard."""
     with st.expander("Setup incomplete — install missing components"):
         st.write("The desktop setup wizard downloads and configures everything "
-                 "locally (Ollama or llama.cpp, FFmpeg, ExifTool, models) once.")
+                 "locally (llama.cpp, FFmpeg, ExifTool, models) once.")
         if st.button(":material/settings: Open setup wizard", type="primary",
                      key="setup_cta_button", use_container_width=True):
             _spawn_setup_wizard()
@@ -723,22 +586,12 @@ if env and env.get("errors"):
         _setup_cta()
         st.stop()
 
-if st.session_state.model_downloading:
-    _download_model_fragment()
-    st.stop()
-
 if st.session_state.provider_info in _local_provider_ids:
-    nfoe_id = "llamacpp_running" if st.session_state.provider_info == "llamacpp" else "ollama_running"
-    if env and not env.get(nfoe_id):
-        if st.session_state.provider_info == "llamacpp":
-            _lp_host, _lp_port = _llamacpp_host_port()
-            st.warning(f"llama.cpp server is not reachable at {_lp_host}:{_lp_port}. "
-                       "Start `llama-server` with your model, or use the setup "
-                       "wizard to install Ollama instead.", icon=":material/warning:")
-        else:
-            st.warning("Ollama is not running. Start the Ollama application, then "
-                       "click 'Refresh Status' in the sidebar — or open the setup "
-                       "wizard below if it isn't installed yet.", icon=":material/warning:")
+    if env and not env.get("llamacpp_running"):
+        _lp_host, _lp_port = _llamacpp_host_port()
+        st.warning(f"llama.cpp server is not reachable at {_lp_host}:{_lp_port}. "
+                   "Start `llama-server` with your model, or use the setup "
+                   "wizard to configure it.", icon=":material/warning:")
         if st.button("Open setup wizard", key="_setup_cta_warn"):
             _spawn_setup_wizard()
     elif st.session_state.provider_info == "llamacpp":
@@ -882,8 +735,8 @@ with tab_upload:
 
     if st.session_state.provider_info in _local_provider_ids and env and not env.get("model_available"):
         st.info("No vision model is available on the selected engine. "
-                "Use the download button in the sidebar (Ollama) or load a "
-                "vision GGUF in llama.cpp before uploading files.",
+                "Load a vision GGUF in llama.cpp before uploading files, "
+                "or run the setup wizard to configure one.",
                 icon=":material/warning:")
         uploaded_files = None
     else:
@@ -2226,28 +2079,6 @@ with tab_config:
         st.success(f"Saved {len(video_exts)} video + {len(image_exts)} image + {len(doc_exts)} document + {len(audio_exts)} audio extensions.")
         log_event(logger, "INFO", "extensions_updated",
                   details={"video": len(video_exts), "image": len(image_exts), "document": len(doc_exts), "audio": len(audio_exts)})
-
-    st.space()
-
-    # -- S.4: Wipe local model cache --
-    st.subheader(":material/smart_toy: Model Management")
-    st.caption("Manage the local AI model used for analysis")
-
-    with st.expander("Wipe local model cache", expanded=False):
-        st.warning("This will permanently delete the local Qwen2.5-VL model (~5GB). "
-                   "Re-download will be required to use local mode.")
-        confirm_wipe = st.checkbox("I understand this will delete the model", key="confirm_model_wipe")
-        if st.button(":material/delete_forever: Wipe Local Model", type="secondary", disabled=not confirm_wipe,
-                     key="btn_wipe_model"):
-            result = wipe_local_model()
-            if result.get("ok"):
-                st.success(result.get("message", "Model wiped successfully."))
-                st.session_state.env_check = None
-                log_event(logger, "INFO", "model_wipe",
-                          details={"message": result.get("message", "")})
-                st.rerun()
-            else:
-                st.error(result.get("message", "Failed to wipe model."))
 
     st.space()
 

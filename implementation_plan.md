@@ -1,6 +1,149 @@
 # Implementation Plan — AI Media Renamer
 
-> **Status:** v1.5.0 shipped. All Layers 1-19 complete.
+> **Status:** v1.x (Streamlit era) complete — Layers 1–20 shipped through v1.7.0. **Next major: v2.0.0 — Streamlit → React + FastAPI rewrite, llama.cpp-only.**
+
+---
+
+## v2.0.0 — Streamlit → React + FastAPI, llama.cpp-only (PLAN)
+
+> **Status:** IN PROGRESS — Phase 0 (Ollama removal) **complete** (commit: `v2: remove Ollama runtime, llama.cpp is the only provider`). Now starting Phase 1 (FastAPI backend). Branch: `v2/frontend-rewrite`. This supersedes the Streamlit-era plan below (kept for history).
+
+### Overview
+
+- **Replace** Streamlit UI (`app.py`, 2,318 lines) with a React 18 + TypeScript frontend and a FastAPI backend (`server/`).
+- **Keep** `engine.py` (the crown jewel — providers, ExifTool, FFmpeg, session, commit, rollback) and `cli.py` **untouched by the rewrite** (CLI has zero Ollama references — verified via grep; it works through the provider registry).
+- **Remove Ollama entirely** — llama.cpp is the only runtime. ~1,000 lines deleted across `engine.py` / `bootstrap.py` / configs / tests.
+- **Version:** v2.0.0 (semver major). Existing v1.x tags stay on GitHub as historical snapshots.
+- **Target:** beautiful, snappy, fluid, best-on-GitHub. WebSocket-driven real-time progress (no `st.rerun()` hacks), virtualized staging table, native desktop feel via optional Tauri wrapper (stretch).
+
+### Part 1 — Ollama removal scope
+
+| File | Remove |
+|---|---|
+| `engine.py` | `import ollama`; `OllamaProvider` class (L1658–1788); `_model_tag_exists`; `validate_ollama_model`; `_ollama_base_url`; `check_ollama_health`; `stream_model_download`; `wipe_local_model`; `wait_for_ollama_service`; `OLLAMA_DEFAULT_URL`; `MODEL_KEEP_ALIVE`; `MODEL_CATALOG`; `register_provider("ollama")`. Edit: `_minimal_config`, `check_environment`, `switch_ai_provider`, provider fallbacks, `SETUP_DEPENDENCIES` → llama.cpp primary. |
+| `bootstrap.py` | `import ollama`; `_ollama_binary()`; all `if runtime == "ollama"` branches; `validate_ollama_model`/`wait_for_ollama_service` imports (~300 lines). Wizard: always llama.cpp runtime. |
+| `app.py` | Ollama engine radio option, health status, model download UI (file deleted in Phase 2 anyway). |
+| `config.json` / `config.default.json` | `model.providers.ollama`, `model.name` (Ollama tag), `model.keep_alive`. `last_provider: "llamacpp"`. |
+| `requirements.txt` / `build.spec` / `pyproject.toml` | Drop `ollama`; drop from hidden imports + mypy overrides. Add `fastapi`, `uvicorn`, `httpx`. |
+| `tests/test_providers.py` | Remove Ollama test classes. |
+
+**Guarantee:** CLI works identically after removal (`python cli.py "dir" --profile cinematography`). Verified: zero Ollama symbols in `cli.py`.
+
+### Part 2 — llama.cpp reliability (failure modes → mitigations)
+
+| # | Failure | Mitigation | Existing? |
+|---|---|---|---|
+| 1 | Server won't start (port busy / exe missing) | Auto-port 8080→8090; pre-start `GET /health`; reuse already-running llama-server | Partial (port scan new) |
+| 2 | Wrong/corrupt model format | Curated `LLAMACPP_GGUF_CATALOG` only; SHA256 verify; validate mmproj for vision models | Yes |
+| 3 | Download fails | HF mirror fallback; resume via Range; progress bar; retry button | Yes |
+| 4 | No GPU | Detect CUDA/Vulkan/Metal at setup; warn + recommend smaller model; `--ngl 0` CPU fallback | Partial |
+| 5 | Server crashes mid-analysis | WebSocket detects disconnect; auto-restart via `ensure_llamacpp_server()`; 3-strike limit → "check logs/llamacpp_server.log" | Partial |
+| 6 | exe missing (fresh install) | Wizard downloads; manual-download link on failure | Yes |
+| 7 | User has Ollama | Info: "Ollama detected but not supported in v2.0.0 — use built-in llama.cpp." Migration note in README | New |
+
+### Part 3 — Models & onboarding
+
+- **Catalog unchanged:** `LLAMACPP_GGUF_CATALOG` — `qwen2.5vl:7b`+mmproj (~4.5GB, default), `qwen2.5vl:3b`+mmproj (~2GB, low-VRAM), `qwen2.5:3b` text-only (~2GB). Download infra (`_download_hf_with_mirror`, SHA256) stays.
+- **Stage 1 — Tk wizard (`bootstrap.py`):** detect/install FFmpeg + ExifTool → use-case questionnaire → recommend model → download llama-server + GGUF → start server → **launch uvicorn + open browser** (was Streamlit).
+- **Stage 2 — React Setup page:** env status dashboard (FFmpeg/ExifTool/llama-server/model ✓/✗), "Change Model" catalog picker, "Start Server" button, real-time download progress via WebSocket.
+
+### Part 4 — Cons → workarounds
+
+| # | Con | Workaround |
+|---|---|---|
+| 1 | Browser-only / no native feel | Tauri wrapper (Phase 7 stretch); browser auto-opens on launch |
+| 2 | No native file dialogs | Custom React directory picker via `GET /api/browse` (cross-platform, tree-view) |
+| 3 | No auto-update | `GET /api/updates/check` → GitHub releases; "Update available" banner; `pip install -U` |
+| 4 | No system tray | Phase 7 (Tauri) |
+| 5 | CORS complexity | Vite dev proxy; FastAPI serves built `dist/` in prod (single origin) |
+| 6 | Upload size limits | Streaming upload endpoint; local dirs read directly (no upload) |
+| 7 | LAN security | JWT token auth when `lan_expose=true` (random token printed on startup); disabled on localhost |
+| 8 | Port conflicts | Auto-detect 8000→8010; `server.port` override |
+| 9 | Python packaging | pip install + Docker image + git clone; pre-built `frontend/dist/` in package (no Node needed at install) |
+| 10 | No Python required | Docker image; `start.bat` (winget install Python); Tauri (Phase 7) eliminates |
+| 11 | Frontend build pipeline | `npm run build` → `dist/`, pre-built + shipped; end users never need Node |
+| 12 | Session persistence | SQLite at `USER_DATA_DIR/sessions.db`; migration from `session_*.json` |
+| 13 | Ollama removal | ~1,000 lines removed; CLI unaffected (verified) |
+
+### Part 5 — Phases
+
+#### Phase 0: Preparation (1–2 days) — ✅ COMPLETE
+- Branch `v2/frontend-rewrite` from `main`.
+- Remove Ollama per Part 1. Run full suite → 300+ pass. Update `prd.md` scope.
+- Commit: `v2: remove Ollama runtime, llama.cpp is the only provider`
+
+#### Phase 1: FastAPI Backend (3–5 days)
+```
+server/
+├── main.py          # app, CORS, static mount, lifecycle, auto-port
+├── auth.py          # JWT for LAN mode
+├── deps.py          # ExifTool session, provider injection
+├── ws.py            # WebSocket manager
+└── routes/          # analysis, assets, staging, commit, config, sessions, environment, models, browse
+```
+- Endpoints: `/api/environment` GET; `/api/config` GET/PUT; `/api/upload` POST (streaming); `/api/browse` GET; `/api/assets` GET/DELETE; `/api/analyze` POST; `/api/analyze/stream` WS; `/api/staging` GET/PUT; `/api/staging/bulk` POST; `/api/staging/export|import`; `/api/commit` POST; `/api/rollback` POST; `/api/sessions` GET/POST/DELETE; `/api/models` GET; `/api/models/download` POST; `/api/updates/check` GET.
+- **WS analysis flow** (replaces the Phase 1→Phase 2 rerun hack): client connects, sends `{files, profile, settings}`; server streams `extraction_progress`, `asset_analyzed`, `complete` events; client can send `{action:"cancel"}`.
+- JWT auth when LAN-exposed; auto-port 8000→8010; SQLite for sessions.
+- Tests: pytest + httpx.AsyncClient per endpoint. **Verify CLI still runs a full cycle.**
+- Commit: `v2: FastAPI backend with REST + WebSocket API`
+
+#### Phase 2: React Frontend (5–8 days)
+- **Stack:** React 18, TypeScript, Vite, Tailwind CSS, TanStack Table v8, Zustand, TanStack Query, Framer Motion, React Dropzone, Recharts, React Router v6, Lucide React.
+- **Structure:** `api/` (client+WS), `hooks/` (useAnalysis, useWebSocket, useConfig, useStaging), `components/` (layout, upload, analysis, staging, commit, config, analytics, sessions, browse, shared), `pages/` (Analyze, Analytics, Config), `stores/` (Zustand), `lib/`.
+- **Critical components:**
+  - StagingTable — virtualized (10k+ rows), inline editing, shift-click range select, column sort, text filter, bulk actions, thumbnail hover, keyboard nav.
+  - AnalysisProgress — WS-driven real-time bar, per-file status, cancel, error badge, ETA.
+  - DirectoryPicker — custom tree-view via `/api/browse`, breadcrumbs, recent dirs, default `~/Desktop/RenamedMedia`.
+- **Design:** dark default (DaVinci Resolve aesthetic), light toggle, 4px grid, Inter, 200ms transitions.
+- **Shortcuts:** Ctrl+Enter analyze, Ctrl+S save session, Ctrl+Z undo, Delete remove, Escape close.
+- Commit: `v2: React frontend with full feature parity`
+
+#### Phase 3: Integration & Polish (3–5 days)
+WS pipeline wired, cancel/abort, reconnection + state resume, toast system, skeletons/spinners, error boundaries, responsive (min 1024px).
+- Commit: `v2: integration polish, keyboard shortcuts, error boundaries`
+
+#### Phase 4: Packaging & Distribution (2–3 days)
+- `bootstrap.py` `_launch_app()` → uvicorn + open browser; Tk wizard unchanged.
+- `pyproject.toml` entry point `ai-media-renamer`; pre-built `dist/` in package.
+- Docker: multi-stage (python-slim + ffmpeg + exiftool + built frontend); media volume mount.
+- `start.bat` (winget Python fallback). README rewrite (screenshots, pip/Docker/clone, `/docs`).
+- Commit: `v2: pip package, Docker image, updated bootstrap`
+
+#### Phase 5: Testing & QA (2–3 days)
+Backend endpoint/WS/auth tests; Vitest + RTL component tests; Playwright E2E (upload→analyze→commit→verify); cross-browser Chrome/Firefox/Edge; perf (100 files <5min, 1000 rows <500ms); **CLI regression full cycle.**
+- Commit: `v2: comprehensive test suite`
+
+#### Phase 6: Release v2.0.0 (1–2 days)
+`VERSION="v2.0.0"`; CHANGELOG entry; README final; tag `v2.0.0`; GitHub release; optional PyPI + Docker Hub.
+
+#### Phase 7 (stretch): Tauri Desktop Wrapper (5–10 days)
+Tauri wrapping React frontend; Python backend sidecar; native dialogs/tray/updater; package `.exe`/`.dmg`/`.deb`.
+
+### File impact
+
+| Action | Files | Lines |
+|---|---|---|
+| Delete | `app.py` | −2,318 |
+| Edit (remove Ollama) | `engine.py`, `bootstrap.py`, configs, tests | −1,000 |
+| New | `server/` | +800 |
+| New | `frontend/` | +4,000 |
+| New | tests | +500 |
+| Edit | packaging, docs | +200 |
+
+**CLI: zero changes.** Net: −2,300 removed, +5,500 added.
+
+### Timeline
+
+| Phase | Days | Deliverable |
+|---|---|---|
+| 0 | 1–2 | Ollama removed |
+| 1 | 3–5 | API working, CLI verified |
+| 2 | 5–8 | Full UI parity |
+| 3 | 3–5 | Wired + polished |
+| 4 | 2–3 | pip + Docker |
+| 5 | 2–3 | Tests |
+| 6 | 1–2 | v2.0.0 shipped |
+| **Total** | **17–28** | |
 
 ---
 

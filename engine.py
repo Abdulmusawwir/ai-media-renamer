@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import datetime
-import functools
 import hashlib
 import json
 import logging
@@ -19,7 +18,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import ollama
 import openai
 import requests
 from pydantic import BaseModel, ValidationError
@@ -150,12 +148,11 @@ def _minimal_config() -> dict[str, Any]:
         "audio_extensions": (),
         "document_extensions": (),
         "model": {
-            "name": "qwen2.5:7b",
+            "name": "qwen2.5vl:7b",
             "text_model": "qwen2.5:3b",
             "temperature": 0.1,
             "num_ctx": 8192,
-            "keep_alive": "1h",
-            "last_provider": "ollama",
+            "last_provider": "llamacpp",
             "providers": {},
         },
         "preview": {"image_max_edge": 384, "video_grid_scale": 300, "extraction_workers": 0},
@@ -237,7 +234,6 @@ MODEL_NAME = config['model']['name']
 TEXT_MODEL_NAME = config['model'].get('text_model', 'qwen2.5:3b')
 MODEL_TEMPERATURE = config['model']['temperature']
 MODEL_NUM_CTX = config['model']['num_ctx']
-MODEL_KEEP_ALIVE = config['model']['keep_alive']
 IMAGE_PREVIEW_MAX_EDGE = config['preview']['image_max_edge']
 VIDEO_GRID_SCALE = config['preview']['video_grid_scale']
 EXTRACTION_WORKERS = _resolve_workers(config['preview'].get('extraction_workers', 0))
@@ -246,7 +242,7 @@ DEFAULT_CASE_STYLE = config.get('naming', {}).get('case_style', 'title_case')
 DEFAULT_MAX_FILENAME_CHARS = config.get('naming', {}).get('max_filename_chars', 0)
 DEFAULT_SORT_FOLDERS = config.get('naming', {}).get('sort_folders', True)
 
-CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
+CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'llamacpp')
 
 NAMED_TEMPLATES = config.get('naming_templates', {
     "default": "{topic}_{description}",
@@ -291,7 +287,7 @@ def reload_config() -> None:
     error is recorded in ``CONFIG_LOAD_ERROR`` for the UI to surface.
     """
     global config, ALLOWED_CATEGORIES, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS, AUDIO_EXTENSIONS
-    global MODEL_NAME, TEXT_MODEL_NAME, MODEL_TEMPERATURE, MODEL_NUM_CTX, MODEL_KEEP_ALIVE
+    global MODEL_NAME, TEXT_MODEL_NAME, MODEL_TEMPERATURE, MODEL_NUM_CTX
     global EXTRACTION_WORKERS, DEFAULT_CASE_STYLE, DEFAULT_MAX_FILENAME_CHARS
     global DEFAULT_SORT_FOLDERS
     global NAMED_TEMPLATES, DEFAULT_TEMPLATE_STRING, PROMPT_PROFILES, CURRENT_PROVIDER
@@ -314,7 +310,6 @@ def reload_config() -> None:
     TEXT_MODEL_NAME = config['model'].get('text_model', 'qwen2.5:3b')
     MODEL_TEMPERATURE = config['model']['temperature']
     MODEL_NUM_CTX = config['model']['num_ctx']
-    MODEL_KEEP_ALIVE = config['model']['keep_alive']
     IMAGE_PREVIEW_MAX_EDGE = config['preview']['image_max_edge']
     VIDEO_GRID_SCALE = config['preview']['video_grid_scale']
     EXTRACTION_WORKERS = _resolve_workers(config['preview'].get('extraction_workers', 0))
@@ -328,7 +323,7 @@ def reload_config() -> None:
     })
     DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}")
     PROMPT_PROFILES = get_profile_labels()
-    CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'ollama')
+CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'llamacpp')
 
 # -----------------------------------------------------------------------------
 # 1b. SETUP / ONBOARDING (use-case → one-time dependency matrix)
@@ -368,8 +363,8 @@ SETUP_USE_CASES: dict[str, dict[str, Any]] = {
 }
 
 SETUP_DEPENDENCIES: dict[str, dict[str, Any]] = {
-    "ollama": {
-        "label": "Ollama runtime",
+    "llamacpp": {
+        "label": "llama.cpp runtime",
         "desc": "Runs your AI models locally \u2014 required for every use case.",
         "always": True,
     },
@@ -394,52 +389,6 @@ SETUP_DEPENDENCIES: dict[str, dict[str, Any]] = {
         "desc": "Transcribes audio tracks and audio files.",
     },
 }
-
-# Model catalog shared by the setup wizard and the in-app model dropdowns.
-# `kind` selects the category; recommended_* flags pick a default per hardware.
-MODEL_CATALOG: list[dict[str, Any]] = [
-    # ---- vision models ----
-    {
-        "name": "qwen2.5vl:7b", "label": "Qwen 2.5 VL 7B", "kind": "vision",
-        "size": "6.0 GB", "size_gb": 6.0, "quality": "Best", "speed": "Moderate",
-        "desc": "Best quality for structured JSON extraction and visual analysis.",
-        "recommended_gpu": True,
-    },
-    {
-        "name": "qwen2.5vl:3b", "label": "Qwen 2.5 VL 3B", "kind": "vision",
-        "size": "3.2 GB", "size_gb": 3.2, "quality": "Good", "speed": "Fast",
-        "desc": "Lighter model \u2014 good quality, faster on CPU or low VRAM.",
-        "recommended_cpu": True,
-    },
-    {
-        "name": "qwen3-vl:4b", "label": "Qwen 3 VL 4B", "kind": "vision",
-        "size": "~3 GB", "size_gb": 3.0, "quality": "Good", "speed": "Fast",
-        "desc": "Newer architecture with improved reasoning.",
-    },
-    {
-        "name": "moondream:latest", "label": "Moondream 2", "kind": "vision",
-        "size": "1.8 GB", "size_gb": 1.8, "quality": "Basic", "speed": "Very fast",
-        "desc": "Smallest option \u2014 basic visual understanding for very low VRAM.",
-    },
-    # ---- text models ----
-    {
-        "name": "qwen2.5:3b", "label": "Qwen 2.5 3B", "kind": "text",
-        "size": "1.9 GB", "size_gb": 1.9, "quality": "Good", "speed": "Fast",
-        "desc": "Recommended text model \u2014 fast on CPU, great for documents and transcripts.",
-        "recommended_cpu": True, "recommended_gpu": True,
-    },
-    {
-        "name": "qwen2.5:7b", "label": "Qwen 2.5 7B", "kind": "text",
-        "size": "4.7 GB", "size_gb": 4.7, "quality": "Best", "speed": "Moderate",
-        "desc": "Highest text quality \u2014 slower on CPU.",
-        "recommended_gpu": True,
-    },
-    {
-        "name": "qwen2.5:1.5b", "label": "Qwen 2.5 1.5B", "kind": "text",
-        "size": "986 MB", "size_gb": 0.99, "quality": "Basic", "speed": "Very fast",
-        "desc": "Lightest option for very old hardware.",
-    },
-]
 
 # GGUF models downloaded by the setup wizard for the llama.cpp runtime. These
 # are raw model files served by llama-server; a vision entry carries an mmproj
@@ -522,19 +471,7 @@ def recommended_models(profile: list[str]) -> dict[str, str]:
     Returns:
         Dict with optional 'vision' and 'text' model names.
     """
-    needs = use_cases_needs(profile)
-    has_gpu = _has_gpu()
-    out: dict[str, str] = {}
-    for kind in ("vision", "text"):
-        if f"{kind}_model" not in needs:
-            continue
-        cands = [m for m in MODEL_CATALOG if m["kind"] == kind]
-        preferred = next(
-            (m for m in cands if m.get("recommended_gpu" if has_gpu else "recommended_cpu")),
-            None,
-        )
-        out[kind] = (preferred or cands[0])["name"]
-    return out
+    return recommended_llamacpp_models(profile)
 
 
 def recommended_llamacpp_models(profile: list[str]) -> dict[str, str]:
@@ -559,28 +496,6 @@ def recommended_llamacpp_models(profile: list[str]) -> dict[str, str]:
         )
         out[kind] = (preferred or cands[0])["name"]
     return out
-
-
-@functools.lru_cache(maxsize=128)
-def _model_tag_exists(name: str, tag: str) -> bool | None:
-    """True/False if the tag exists in Ollama's registry, None if offline."""
-    try:
-        resp = requests.get(
-            f"https://registry.ollama.ai/v2/library/{name}/tags/list", timeout=10
-        )
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        tags = [t.get("name", t) if isinstance(t, dict) else t for t in data.get("tags", [])]
-        return tag in tags
-    except Exception:
-        return None
-
-
-def validate_ollama_model(model_name: str) -> bool | None:
-    """Confirm a model tag exists on Ollama's registry (None when offline)."""
-    name, _, tag = model_name.partition(":")
-    return _model_tag_exists(name, tag or "latest")
 
 
 def pre_download_whisper(model_size: str = "base") -> bool:
@@ -615,7 +530,7 @@ def save_setup_profile(profile: list[str] | None = None, onboarded: bool = True,
     Args:
         profile: Use-case keys chosen in onboarding ('', to clear).
         onboarded: True once the questionnaire has been answered.
-        runtime: Chosen local AI runtime ('ollama' or 'llamacpp').
+        runtime: Chosen local AI runtime ('llamacpp').
     """
     data = load_setup_profile()
     if profile is not None:
@@ -1655,138 +1570,6 @@ class AIProvider(ABC):
         return result
 
 
-class OllamaProvider(AIProvider):
-    def __init__(self) -> None:
-        """Initialize Ollama provider with the configured model name."""
-        super().__init__()
-        self._model = MODEL_NAME
-        self._retries = 2
-
-    def analyze(self, base64_img: str, verbose: bool = False,
-                prompt_override: str | None = None) -> dict[str, Any]:
-        """Send a base64 image to Ollama for AI analysis with retry logic.
-
-        Args:
-            base64_img: Base64-encoded JPEG image data.
-            verbose: If True, include raw response in error details.
-            prompt_override: Optional custom prompt to use instead of get_active_prompt().
-
-        Returns:
-            Result dict with parsed data or error information.
-        """
-        result = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
-        last_exc = None
-        prompt = prompt_override or get_active_prompt()
-        for attempt in range(self._retries):
-            try:
-                response = ollama.generate(
-                    model=self._model,
-                    prompt=prompt,
-                    images=[base64_img],
-                    keep_alive=MODEL_KEEP_ALIVE,
-                    options={"temperature": MODEL_TEMPERATURE, "num_ctx": MODEL_NUM_CTX}
-                )
-                raw_text = response.get('response', '')
-                parsed = self._parse_and_validate(raw_text)
-                if parsed['ok'] or attempt == self._retries - 1:
-                    return parsed
-                last_exc = parsed.get('detail')
-            except (ollama.ResponseError, ConnectionError, TimeoutError, OSError) as exc:
-                last_exc = exc
-                if attempt < self._retries - 1:
-                    continue
-                result['error'] = 'ollama_error'
-                result['detail'] = f'Ollama request failed: {exc}'
-                return result
-            except Exception as exc:
-                result['error'] = 'ollama_error'
-                result['detail'] = f'Unexpected AI error: {exc}'
-                return result
-        if last_exc:
-            result['error'] = 'ollama_error'
-            result['detail'] = f'Ollama request failed after retry: {last_exc}'
-        return result
-
-    def _analyze_prompt_only(self, prompt: str, verbose: bool = False) -> dict[str, Any]:
-        """Send a text-only prompt to Ollama (no images) for document analysis.
-
-        Args:
-            prompt: Full prompt text to send.
-            verbose: If True, include raw response in error details.
-
-        Returns:
-            Result dict with parsed data or error information.
-        """
-        result: dict[str, Any] = {'ok': False, 'data': None, 'error': None, 'detail': None, 'raw_response': None}
-        last_exc = None
-        model = self.text_model or self._model
-        for attempt in range(self._retries):
-            try:
-                response = ollama.generate(
-                    model=model,
-                    prompt=prompt,
-                    keep_alive=MODEL_KEEP_ALIVE,
-                    options={"temperature": MODEL_TEMPERATURE, "num_ctx": MODEL_NUM_CTX}
-                )
-                raw_text = response.get('response', '')
-                parsed = self._parse_and_validate(raw_text)
-                if parsed['ok'] or attempt == self._retries - 1:
-                    return parsed
-                last_exc = parsed.get('detail')
-            except (ollama.ResponseError, ConnectionError, TimeoutError, OSError) as exc:
-                last_exc = exc
-                if attempt < self._retries - 1:
-                    continue
-                result['error'] = 'ollama_error'
-                result['detail'] = f'Ollama request failed: {exc}'
-                return result
-            except Exception as exc:
-                result['error'] = 'ollama_error'
-                result['detail'] = f'Unexpected AI error: {exc}'
-                return result
-        if last_exc:
-            result['error'] = 'ollama_error'
-            result['detail'] = f'Ollama request failed after retry: {last_exc}'
-        return result
-
-    def health_check(self) -> dict[str, Any]:
-        """Verify Ollama server is reachable and responsive.
-
-        Returns:
-            Dict with 'ok' boolean and 'message' string.
-        """
-        try:
-            ollama.list()
-            return {"ok": True, "message": "Ollama is running."}
-        except Exception as exc:
-            return {"ok": False, "message": f"Ollama not reachable: {exc}"}
-
-    def available_models(self) -> list[str]:
-        """List all models available on the Ollama server.
-
-        Returns:
-            List of model name strings.
-        """
-        try:
-            tags = ollama.list()
-            models = []
-            for m in tags.get('models', []):
-                if isinstance(m, dict):
-                    name = m.get('name', '')
-                elif hasattr(m, 'model'):
-                    name = m.model
-                else:
-                    name = str(m)
-                if name:
-                    models.append(name)
-            return models
-        except Exception:
-            # Only report models that actually exist on the server. Falling back
-            # to the config catalog here made every catalog entry look
-            # "installed" when the daemon was down (see audit.md §1).
-            return []
-
-
 class OpenAIProvider(AIProvider):
     def __init__(self, base_url: str | None = None) -> None:
         """Initialize OpenAI provider with optional base URL override.
@@ -1939,22 +1722,6 @@ class OpenAIProvider(AIProvider):
 
 
 LLAMACPP_DEFAULT_URL = "http://localhost:8080"
-OLLAMA_DEFAULT_URL = "http://localhost:11434"
-
-
-def _ollama_base_url() -> str:
-    """Return the base URL for a local Ollama server.
-
-    Reads ``OLLAMA_HOST`` from the environment (or config ``model.ollama.base_url``)
-    so a non-default host/port is supported; defaults to ``127.0.0.1:11434``.
-    """
-    env_url = os.environ.get("OLLAMA_HOST", "").strip()
-    if env_url:
-        return env_url.rstrip("/")
-    cfg_url = config.get("model", {}).get("ollama", {}).get("base_url", "")
-    if cfg_url:
-        return cfg_url.rstrip("/")
-    return OLLAMA_DEFAULT_URL
 
 
 def _llamacpp_base_url() -> str:
@@ -2062,7 +1829,7 @@ class LlamaCppProvider(OpenAIProvider):
     Uses the same OpenAI-compatible surface as ``OpenAIProvider`` pointed at
     the local server. A dummy API key satisfies the OpenAI client; llama-server
     does not authenticate. ``available_models()`` lists only the models the
-    running server has loaded, mirroring Ollama's honest reporting.
+    running server has loaded, mirroring llama.cpp's honest reporting.
     """
 
     def __init__(self) -> None:
@@ -2089,7 +1856,7 @@ def register_provider(name: str, cls: type[AIProvider]) -> None:
     """Register a provider class in the global provider registry.
 
     Args:
-        name: Short identifier for the provider (e.g. 'ollama').
+        name: Short identifier for the provider (e.g. 'llamacpp').
         cls: Provider class that subclasses AIProvider.
     """
     PROVIDER_REGISTRY[name] = cls
@@ -2126,7 +1893,6 @@ def list_providers() -> list[str]:
     return list(PROVIDER_REGISTRY.keys())
 
 
-register_provider("ollama", OllamaProvider)
 register_provider("llamacpp", LlamaCppProvider)
 
 
@@ -2150,7 +1916,7 @@ def analyze_asset_with_ai(
     try:
         provider = get_provider(CURRENT_PROVIDER)
     except ValueError:
-        provider = get_provider("ollama")
+        provider = get_provider("llamacpp")
     provider.model = config["model"]["name"]
     prompt_override = None
     if audio_transcription:
@@ -2174,7 +1940,7 @@ def analyze_document_with_ai(text_content: str, verbose: bool = False) -> dict[s
     try:
         provider = get_provider(CURRENT_PROVIDER)
     except ValueError:
-        provider = get_provider("ollama")
+        provider = get_provider("llamacpp")
     provider.model = config["model"]["name"]
     provider.text_model = config["model"].get("text_model", TEXT_MODEL_NAME)
     return provider.analyze_text(text_content, verbose=verbose)
@@ -2196,7 +1962,6 @@ def _format_ai_error(ai_result: dict[str, Any], verbose: bool = False) -> str:
         'json_parse_error': f'AI response was not valid JSON -- {detail}',
         'missing_keys': detail,
         'empty_response': detail,
-        'ollama_error': detail,
         'api_key_missing': detail,
         'openai_api_error': detail,
     }
@@ -3089,53 +2854,6 @@ def _resolve_binary_path(name: str) -> str | None:
     return resolved
 
 
-def check_ollama_health() -> dict[str, Any]:
-    """Probe the Ollama server for connectivity and list vision-capable models.
-
-    Retries once on transient failures so a busy daemon doesn't flash a
-    false "disconnected" state before returning.
-
-    Returns:
-        Dict with 'connected', 'models', 'all_models', counts, and 'error'.
-    """
-    errors = []
-    for attempt in range(2):
-        try:
-            tags = ollama.list()
-            models = tags.get('models', [])
-            all_names = []
-            vision_names = []
-            for m in models:
-                if isinstance(m, dict):
-                    name = m.get('name', '')
-                elif hasattr(m, 'model'):
-                    name = m.model
-                else:
-                    name = str(m)
-                if name:
-                    all_names.append(name)
-                    if _is_vision_model(name):
-                        vision_names.append(name)
-            return {
-                "connected": True,
-                "models": vision_names,
-                "all_models": all_names,
-                "model_count": len(all_names),
-                "vision_count": len(vision_names),
-                "error": None,
-            }
-        except Exception as exc:
-            errors.append(str(exc))
-    return {
-        "connected": False,
-        "models": [],
-        "all_models": [],
-        "model_count": 0,
-        "vision_count": 0,
-        "error": errors[-1] if errors else "Unknown error",
-    }
-
-
 def _llamacpp_server_running() -> bool:
     """Return True if a local llama.cpp ``llama-server`` answers on its API port."""
     host, port = _llamacpp_host_port()
@@ -3157,13 +2875,12 @@ def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
             e.g. a documents-only user is not blocked by a missing FFmpeg.
 
     Returns:
-        Dict with availability flags for ffmpeg, exiftool, Ollama, and error list.
+        Dict with availability flags for ffmpeg, exiftool, llama.cpp, and error list.
     """
     profile = profile or []
     needs = use_cases_needs(profile) if profile else {"ffmpeg", "exiftool"}
     ffmpeg_path = _resolve_binary_path("ffmpeg")
     exiftool_path = _resolve_binary_path("exiftool")
-    ollama_running = False
     model_available = False
     vision_models: list[str] = []
     text_models: list[str] = []
@@ -3175,32 +2892,11 @@ def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
     if not exiftool_path and "exiftool" in needs:
         errors.append("ExifTool not found. Install ExifTool and add it to your PATH.")
 
-    try:
-        tags = ollama.list()
-        ollama_running = True
-        models = tags.get('models', [])
-        for m in models:
-            if isinstance(m, dict):
-                name = m.get('name', '')
-            elif hasattr(m, 'model'):
-                name = m.model
-            else:
-                name = str(m)
-            if _is_vision_model(name):
-                vision_models.append(name)
-                model_available = True
-            else:
-                text_models.append(name)
-        # A documents-only profile can run on a text model alone.
-        if not model_available and profile and models and "vision_model" not in needs:
-            model_available = True
-    except Exception:
-        ollama_running = False
-        errors.append("Ollama is not running. Start Ollama and try again.")
-
-    # Fallback runtime: a local llama.cpp llama-server (OpenAI-compatible).
+    # Primary (now only) local runtime: a llama.cpp llama-server (OpenAI-compatible).
     llamacpp_running = _llamacpp_server_running()
-    if not ollama_running and llamacpp_running:
+    if not llamacpp_running:
+        errors.append("llama.cpp server is not running. Run the setup wizard or start llama-server.")
+    else:
         provider = get_provider("llamacpp")
         local_models = provider.available_models()
         for name in local_models:
@@ -3209,13 +2905,13 @@ def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
                 model_available = True
             else:
                 text_models.append(name)
+        # A documents-only profile can run on a text model alone.
         if not model_available and profile and local_models and "vision_model" not in needs:
             model_available = True
 
     return {
         "ffmpeg": bool(ffmpeg_path),
         "exiftool": bool(exiftool_path),
-        "ollama_running": ollama_running,
         "llamacpp_running": llamacpp_running,
         "model_available": model_available,
         "vision_models": vision_models,
@@ -3223,43 +2919,6 @@ def check_environment(profile: list[str] | None = None) -> dict[str, Any]:
         "text_model_available": bool(text_models),
         "errors": errors,
     }
-
-
-def stream_model_download(model_name: str = "qwen2.5vl:7b") -> Any:
-    """Stream download progress for an Ollama model pull.
-
-    Args:
-        model_name: Ollama model tag to download.
-
-    Yields:
-        Dicts with 'status' key and progress/message details.
-    """
-    try:
-        current_stream = ollama.pull(model_name, stream=True)
-        for chunk in current_stream:
-            status = chunk.get('status', '')
-            if status == 'success':
-                yield {"status": "success", "message": f"Model {model_name} ready"}
-                return
-
-            completed = chunk.get('completed', 0) or 0
-            total = chunk.get('total', 0) or 0
-            if total and completed:
-                percentage = (completed / total) * 100.0
-                yield {
-                    "status": "progress",
-                    "completed": completed,
-                    "total": total,
-                    "percentage": percentage,
-                    "detail": status,
-                }
-            else:
-                yield {"status": "status", "detail": status,
-                       "completed": completed, "total": total}
-
-        yield {"status": "success", "message": f"Model {model_name} ready"}
-    except Exception as exc:
-        yield {"status": "error", "message": str(exc)}
 
 
 def _parse_version(version: str) -> tuple[int, int, int]:
@@ -3517,17 +3176,17 @@ def ensure_llamacpp_server(timeout: int = 40) -> bool:
     return False
 
 
-def wait_for_ollama_service(timeout: int = 120) -> bool:
-    """Poll the Ollama HTTP endpoint until it responds or timeout is reached.
+def wait_for_llamacpp_service(timeout: int = 120) -> bool:
+    """Poll the llama.cpp HTTP endpoint until it responds or timeout is reached.
 
     Args:
         timeout: Maximum seconds to wait.
 
     Returns:
-        True if Ollama responded within the timeout.
+        True if llama.cpp responded within the timeout.
     """
     import time
-    url = f"{_ollama_base_url()}/api/tags"
+    url = f"{_llamacpp_base_url()}/models"
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -3541,21 +3200,15 @@ def wait_for_ollama_service(timeout: int = 120) -> bool:
 
 
 def switch_ai_provider(new_provider: str) -> dict[str, Any]:
-    """Switch the active local AI runtime, release old model weights, and persist choice.
+    """Switch the active local AI runtime and persist the choice.
 
     Args:
-        new_provider: Provider name to switch to ('ollama' or 'llamacpp').
+        new_provider: Provider name to switch to (only 'llamacpp' is supported).
 
     Returns:
         Dict with 'ok', 'message', and optionally 'require_download'.
     """
     global CURRENT_PROVIDER
-
-    if CURRENT_PROVIDER == "ollama" and new_provider != "ollama":
-        try:
-            ollama.generate(model=config["model"]["name"], keep_alive=0)
-        except Exception:
-            pass
 
     provider = get_provider(new_provider)
 
@@ -3577,28 +3230,7 @@ def switch_ai_provider(new_provider: str) -> dict[str, Any]:
                     "message": "No vision model available. Load a vision GGUF in llama-server."}
         return {"ok": True, "message": "Switched to local llama.cpp."}
 
-    env = check_environment()
-    if not env["ollama_running"]:
-        return {"ok": False, "require_download": False, "message": "Ollama is not running. Start Ollama first."}
-    if not env["model_available"]:
-        return {"ok": False, "require_download": True, "message": "No vision model found. Download required."}
-    return {"ok": True, "message": "Switched to local Ollama."}
-
-
-def wipe_local_model(model_name: str = "qwen2.5vl:7b") -> dict[str, Any]:
-    """Delete a local Ollama model to free disk space.
-
-    Args:
-        model_name: Ollama model tag to remove.
-
-    Returns:
-        Dict with 'ok' and 'message'.
-    """
-    try:
-        ollama.delete(model_name)
-        return {"ok": True, "message": f"Model {model_name} deleted."}
-    except Exception as exc:
-        return {"ok": False, "message": str(exc)}
+    return {"ok": False, "message": f"Unknown provider: {new_provider}"}
 
 
 # -----------------------------------------------------------------------------

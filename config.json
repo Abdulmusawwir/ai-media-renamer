@@ -182,11 +182,10 @@
   },
   "model": {
     "name": "qwen2.5vl:7b",
-    "text_model": "llama3.2:latest",
+    "text_model": "qwen2.5:3b",
     "temperature": 0.15,
     "num_ctx": 8192,
-    "keep_alive": "1h",
-    "last_provider": "ollama",
+    "last_provider": "llamacpp",
     "llamacpp": {
       "base_url": "http://127.0.0.1:8080/v1",
       "gguf_name": "",
@@ -194,11 +193,11 @@
       "mmproj_path": ""
     },
     "providers": {
-      "ollama": {
+      "llamacpp": {
         "models": [
           "qwen2.5vl:7b",
-          "qwen2.5vl:32b",
-          "llava:13b"
+          "qwen2.5vl:2b",
+          "qwen2.5:3b"
         ],
         "selected_model": "qwen2.5vl:7b"
       }

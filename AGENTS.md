@@ -55,10 +55,10 @@ ruff check .                      # lint
 pytest                            # unit tests
 ```
 
-### Local AI runtimes — llama.cpp default
-- Widget wizard installs `llama-server.exe` (~18 MB) + a GGUF vision/text model for fresh installs (`LLAMACPP_GGUF_CATALOG`, `configure_llamacpp_install`, `ensure_llamacpp_server`). If Ollama is already installed, the wizard reuses it instead.
+### Local AI runtime — llama.cpp only
+- Widget wizard installs `llama-server.exe` (~18 MB) + a GGUF vision/text model for fresh installs (`LLAMACPP_GGUF_CATALOG`, `configure_llamacpp_install`, `ensure_llamacpp_server`). llama.cpp is the only supported local runtime.
 - `llama-server` speaks OpenAI-compatible API on `http://127.0.0.1:8080/v1`; `LlamaCppProvider` uses it. Text-only analysis (documents/audio) goes through `OpenAIProvider._analyze_prompt_only()` with the text model.
-- Runtime chosen at wizard time persists in the setup profile (`runtime` field: `""`, `"ollama"`, `"llamacpp"`).
+- Runtime chosen at wizard time persists in the setup profile (`runtime` field: `""`, `"llamacpp"`).
 
 ### Module roles
 | File | Role | Must never |
