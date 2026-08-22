@@ -2,19 +2,25 @@
 
 Wraps ``engine.py`` behind a REST + WebSocket API. Lifecycle: load config on
 startup, register routes, run with uvicorn (auto-port 8000..8010 if the default
-is taken). The frontend is served separately (Phase 2) and is not mounted here
-yet.
+is taken). The built React frontend (``frontend/dist``) is served at "/" when
+present; otherwise the API is reachable on its own.
 """
 
 from __future__ import annotations
 
 import socket
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 import engine
 from server.routes import register_routes
+
+# Built frontend output (from ``frontend/`` via ``npm run build``). When present
+# it is served at "/" (API routes registered above win over the static mount).
+_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 # NOTE: Allowing all origins is acceptable for a local single-user tool driven
 # from localhost. If you expose this server on a LAN (e.g. --host 0.0.0.0),
@@ -36,6 +42,11 @@ def create_app() -> FastAPI:
     )
 
     register_routes(app)
+
+    # Serve the built React frontend if it has been built. API routes are already
+    # registered, so ``/api/*`` and ``/health`` take precedence over this mount.
+    if _DIST.is_dir():
+        app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="frontend")
 
     @app.on_event("startup")
     def _startup() -> None:

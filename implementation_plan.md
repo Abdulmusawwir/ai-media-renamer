@@ -6,7 +6,7 @@
 
 ## v2.0.0 — Streamlit → React + FastAPI, llama.cpp-only (PLAN)
 
-> **Status:** IN PROGRESS — Phase 0 (Ollama removal) **complete** (commit: `v2: remove Ollama runtime, llama.cpp is the only provider`). Now starting Phase 1 (FastAPI backend). Branch: `v2/frontend-rewrite`. This supersedes the Streamlit-era plan below (kept for history).
+> **Status:** v2 core complete — Phases 0–4 done on branch `v2/frontend-rewrite`. Backend (`server/`) wraps `engine.py`; React/TS frontend builds and is served by the API; packaging (pip entry, Docker, start.bat, README) in place. Remaining backlog in the note below.
 
 ### Overview
 
@@ -15,6 +15,11 @@
 - **Remove Ollama entirely** — llama.cpp is the only runtime. ~1,000 lines deleted across `engine.py` / `bootstrap.py` / configs / tests.
 - **Version:** v2.0.0 (semver major). Existing v1.x tags stay on GitHub as historical snapshots.
 - **Target:** beautiful, snappy, fluid, best-on-GitHub. WebSocket-driven real-time progress (no `st.rerun()` hacks), virtualized staging table, native desktop feel via optional Tauri wrapper (stretch).
+
+### Known v2 backlog (not blockers, future work)
+- **Phase 1:** real model-download helper in `engine.py` (current `/api/models/download` is a stub); auth enforcement (JWT helpers exist, no route requires auth yet); production hardening (rate limits, strict CORS for LAN).
+- **Phase 2:** StagingTable feature parity — 10k-row virtualization, shift-click range select, column sort/filter UI, thumbnail hover; DirectoryPicker "recent dirs"; keyboard shortcuts (Ctrl+Enter/S/Z/Delete/Escape).
+- **Cross-cutting:** telemetry/error reporting, CI for `frontend/` (type-check + build), end-to-end test of the WS analysis flow against a real llama.cpp server.
 
 ### Part 1 — Ollama removal scope
 
@@ -100,11 +105,11 @@ server/
 - **Shortcuts:** Ctrl+Enter analyze, Ctrl+S save session, Ctrl+Z undo, Delete remove, Escape close.
 - Commit: `v2: React frontend with full feature parity`
 
-#### Phase 3: Integration & Polish (3–5 days) — 🟡 MOSTLY DONE
+#### Phase 3: Integration & Polish (3–5 days) — ✅ DONE
 WS pipeline wired, cancel/abort, reconnection + state resume, toast system, skeletons/spinners, error boundaries, responsive (min 1024px).
 - Commit: `v2: integration polish, keyboard shortcuts, error boundaries`
 
-#### Phase 4: Packaging & Distribution (2–3 days)
+#### Phase 4: Packaging & Distribution (2–3 days) — ✅ DONE (core)
 - `bootstrap.py` `_launch_app()` → uvicorn + open browser; Tk wizard unchanged.
 - `pyproject.toml` entry point `ai-media-renamer`; pre-built `dist/` in package.
 - Docker: multi-stage (python-slim + ffmpeg + exiftool + built frontend); media volume mount.

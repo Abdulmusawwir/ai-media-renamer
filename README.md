@@ -58,15 +58,41 @@ This is the tool that fixes it.
 
 ---
 
-## Getting started (60 seconds)
+## Getting started
+
+**AI Media Renamer v2** is a desktop-style app: a **React** frontend served by a **FastAPI** backend, with a **llama.cpp-only** local AI runtime (no cloud, no API keys). A first-run wizard downloads the llama.cpp server (~18 MB) and a vision/text GGUF model for you.
+
+### Packaged / one-click
 
 1. Download `AIMediaRenamer.exe` from the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest) — no installation, no accounts.
-2. Double-click. It sets up its own AI engine on first launch — a guided wizard downloads the llama.cpp runtime (~18 MB) and a vision model for you.
-3. Drop in your files → **Run AI Analysis** → review → **Commit**.
+2. Double-click. The wizard sets up the local AI runtime on first launch, then opens the app at `http://localhost:8000`.
+3. Drop in your files → **Run AI Analysis** → review in the staging table → **Commit** (one-click Undo reverses the batch).
 
-That's it. A folder that took an afternoon to organize by hand is done while you make tea.
+### Run from source (dev)
 
-> Prefer the command line or Docker? Want the full feature list, CLI flags, and system requirements? See [README_TECH.md](README_TECH.md).
+```bash
+# Backend (serves the API and, once built, the frontend)
+uvicorn server.main:app --port 8000
+
+# Frontend dev server (hot reload) in a second terminal
+cd frontend && npm install && npm run dev
+```
+
+The React dev server proxies API calls to the backend; open the URL it prints (typically `http://localhost:5173`).
+
+### Docker
+
+```bash
+# Build image (compiles the frontend) and run on http://localhost:8000
+docker compose up --build
+# Drop media into ./media to have it mounted into the container at /media
+```
+
+### Windows quick launcher
+
+Run `start.bat` — it ensures Python (via winget if missing), installs the package with `pip install -e .`, launches the server, and opens `http://localhost:8000`.
+
+> Prefer the command line or want the full feature list, CLI flags, and system requirements? See [README_TECH.md](README_TECH.md).
 
 ---
 

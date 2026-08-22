@@ -1399,26 +1399,27 @@ def _kill_stale_server():
 def _launch_app(win):
     win.set_step(6, "\u2713 Starting app...")
     win.set_progress(100)
-    win.set_info("Starting Streamlit server...")
+    win.set_info("Starting AI Media Renamer server...")
     win.update()
 
     _kill_stale_server()
 
-    _log(f"launch_app: spawning subprocess {sys.executable} --streamlit-server")
+    _log(f"launch_app: spawning subprocess {sys.executable} -m uvicorn server.main:app")
     log_path = CACHE_DIR / "server.log"
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     log_fh = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(
-        [sys.executable, "--streamlit-server"],
+        [sys.executable, "-m", "uvicorn", "server.main:app",
+         "--host", "127.0.0.1", "--port", "8000"],
         creationflags=subprocess.CREATE_NO_WINDOW,
         stdout=log_fh,
         stderr=log_fh,
     )
     _log(f"launch_app: child PID={proc.pid}")
 
-    # Wait for Streamlit to be ready
+    # Wait for the API server to be ready
     import time
-    health_url = "http://localhost:8501/_stcore/health"
+    health_url = "http://localhost:8000/health"
     deadline = time.time() + 30
     ready = False
     while time.time() < deadline:
@@ -1463,11 +1464,11 @@ def _launch_app(win):
     try:
         import webview
         _icon = str(BASE_DIR / "icon.ico")
-        webview.create_window("AI Media Renamer", "http://localhost:8501",
+        webview.create_window("AI Media Renamer", "http://localhost:8000",
                               width=1280, height=800, resizable=True)
         webview.start(private_mode=True, gui="edgechromium", icon=_icon)
     except Exception:
-        webbrowser.open("http://localhost:8501")
+        webbrowser.open("http://localhost:8000")
         proc.terminate()
         try:
             proc.wait(timeout=5)

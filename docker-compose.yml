@@ -1,37 +1,19 @@
 services:
   # NOTE — host ports bind to loopback (127.0.0.1) ONLY by default.
-  # Ollama has no authentication and the renamer UI has no authentication:
-  # do not remove the "127.0.0.1:" prefix unless you explicitly want LAN access,
-  # and only on networks you trust.
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    restart: unless-stopped
-    volumes:
-      - ollama_data:/root/.ollama
-    ports:
-      - "127.0.0.1:11434:11434"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
+  # The renamer UI has no authentication: do not remove the "127.0.0.1:" prefix
+  # unless you explicitly want LAN access, and only on a network you trust.
+  # For LAN exposure change the left side to "8501:8000" (or "0.0.0.0:8000:8000").
   renamer:
     build: .
     container_name: ai-media-renamer
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8501:8501"
+      - "127.0.0.1:8000:8000"
     volumes:
-      - renamer_sessions:/root/.config/ai-media-renamer
-    environment:
-      - OLLAMA_HOST=http://ollama:11434
-    depends_on:
-      - ollama
+      # Mount the folder of media you want to organize (read/write by the app):
+      - ./media:/media
+      # Persist sessions / settings between container restarts:
+      - renamer_data:/root/.config/ai-media-renamer
 
 volumes:
-  ollama_data:
-  renamer_sessions:
+  renamer_data:
