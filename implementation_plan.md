@@ -72,7 +72,8 @@
 - Remove Ollama per Part 1. Run full suite → 300+ pass. Update `prd.md` scope.
 - Commit: `v2: remove Ollama runtime, llama.cpp is the only provider`
 
-#### Phase 1: FastAPI Backend (3–5 days)
+#### Phase 1: FastAPI Backend (3–5 days) — 🟡 SCAFFOLD DONE
+- `server/` package created: `main.py` (app, CORS, auto-port, lifecycle), `auth.py` (JWT, off by default), `deps.py` (in-memory `ACTIVE_STAGING` + cancel event), `ws.py` (ConnectionManager), `schemas.py`, and `routes/` for environment/config/browse/assets/analysis(WS)/staging/commit/sessions/models/updates. Wraps `engine.py` without modifying it. `uvicorn server.main:app --port 8000`. **Remaining:** real model-download helper (engine lacks one), static frontend mount (Phase 2), auth enforcement, production hardening.
 ```
 server/
 ├── main.py          # app, CORS, static mount, lifecycle, auto-port
