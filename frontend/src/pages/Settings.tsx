@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Save, RefreshCw, Cpu, Sparkles } from "lucide-react";
 import { useConfig, usePutConfig } from "../hooks/api";
 import { useStore, useToast } from "../store";
+import { Skeleton } from "../components/Skeleton";
 import type { Json } from "../api/client";
 
 export default function Settings() {
@@ -41,6 +42,25 @@ export default function Settings() {
     query.refetch();
     toast.info("Reloading config…");
   };
+
+  if (query.isLoading) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Settings</h2>
+          <p className="text-sm text-text-dim">
+            View and edit the engine configuration (saved to config.json on the
+            backend).
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
 
   const provider =
     (config?.model as Json | undefined)?.current_provider ??

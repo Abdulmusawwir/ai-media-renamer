@@ -15,10 +15,14 @@ import {
   connectAnalysisWS,
   getStaging,
   type AnalysisWSController,
+  type AnalysisParams,
   type BrowseEntry,
 } from "../api/client";
 import { useStore, useToast, type AnalysisSettings } from "../store";
 import DirectoryPicker from "../components/DirectoryPicker";
+import { Spinner } from "../components/Skeleton";
+
+const MAX_WS_RETRIES = 3;
 
 const FALLBACK_PROFILES = ["general_broll", "cinematography", "motion_overlays"];
 
@@ -87,6 +91,16 @@ export default function Analysis() {
   const [profile, setProfile] = useState<string>("");
   const [showSettings, setShowSettings] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
+  // Non-blocking banner shown while we retry the socket after a drop.
+  const [reconnecting, setReconnecting] = useState<{
+    active: boolean;
+    attempt: number;
+  }>({ active: false, attempt: 0 });
+
+  // Whether the run ended with a clean terminal event (complete / cancelled).
+  // Used to suppress reconnection once the job is truly finished.
+  const cleanEndRef = useRef(false);
+  const lastParamsRef = useRef<AnalysisParams | null>(null);
 
   const options = profileOptions(config as Record<string, unknown> | null);
   const activeProfile = profile || options[0]?.value || "";
@@ -113,12 +127,169 @@ export default function Analysis() {
 
   const patch = (p: Partial<AnalysisSettings>) => setAnalysisSettings(p);
 
+  // Establish (or re-establish) the analysis WebSocket for the current run.
+  // Reconnection with exponential backoff is handled in the onClose handler.
+  const startConnection = (attempt: number) => {
+    const params = lastParamsRef.current;
+    if (!params) return;
+
+    setReconnecting({ active: attempt > 0, attempt });
+
+    wsRef.current = connectAnalysisWS(params, {
+      onEvent: (type, data) => {
+        if (type === "extraction_progress") {
+          setProgress((p) => ({
+            ...p,
+            total: Number(data.total ?? p.total),
+            processed: Number(data.processed ?? 0),
+            status: "extracting",
+          }));
+        } else if (type === "asset_analyzed") {
+          const name = (data.asset as { original_name?: string } | undefined)
+            ?.original_name;
+          setProgress((p) => ({
+            ...p,
+            processed: Number(data.index ?? p.processed),
+            total: Number(data.total ?? p.total),
+            status: "analyzing",
+            log: [...p.log, `✓ analyzed ${name ?? "asset"}`],
+          }));
+        } else if (type === "asset_error") {
+          setProgress((p) => ({
+            ...p,
+            log: [
+              ...p.log,
+              `✗ ${String(data.name ?? "asset")}: ${String(data.error ?? "error")}`,
+            ],
+          }));
+        } else if (type === "complete") {
+          // Clean terminal event — stop retrying.
+          cleanEndRef.current = true;
+          setReconnecting({ active: false, attempt: 0 });
+          setProgress((p) => ({
+            ...p,
+            running: false,
+            status: "complete",
+            log: [...p.log, `✓ complete — ${Number(data.count ?? 0)} assets`],
+          }));
+          getStagingThenNavigate();
+        } else if (type === "cancelled") {
+          cleanEndRef.current = true;
+          setReconnecting({ active: false, attempt: 0 });
+          setProgress((p) => ({
+            ...p,
+            running: false,
+            status: "cancelled",
+            log: [...p.log, "⛔ analysis cancelled"],
+          }));
+          toast.info("Analysis cancelled.");
+        } else if (type === "error") {
+          setProgress((p) => ({
+            ...p,
+            running: false,
+            status: "error",
+            log: [...p.log, `⚠ ${String(data.detail ?? "error")}`],
+          }));
+          toast.error(String(data.detail ?? "Analysis error"));
+        }
+      },
+      onOpen: () => {
+        // On a reconnect, the single-shot backend may have already finished
+        // while we were disconnected. Probe staging once to recover a missed
+        // terminal event (see WS-resume limitation note in onClose below).
+        if (attempt > 0) {
+          getStaging()
+            .then((res) => {
+              if (res.assets.length > 0) {
+                cleanEndRef.current = true;
+                setReconnecting({ active: false, attempt: 0 });
+                setProgress((p) => ({
+                  ...p,
+                  running: false,
+                  status: "complete",
+                  log: [
+                    ...p.log,
+                    `✓ recovered — ${res.assets.length} assets`,
+                  ],
+                }));
+                setStaged(res.assets);
+                navigate("/staging");
+              }
+            })
+            .catch(() => {
+              /* ignore — reconnect attempts/errors will surface elsewhere */
+            });
+        }
+      },
+      onError: () => {
+        // The reconnect decision lives in onClose (which always fires after a
+        // socket error) so we don't double-handle here. Just log it.
+        setProgress((p) => ({
+          ...p,
+          log: [...p.log, "⚠ WebSocket error"],
+        }));
+      },
+      onClose: () => {
+        // Pragmatic WS resume:
+        // The backend runs analysis as a single shot and does NOT support
+        // server-side resume. A true mid-run resume (continuing exactly where
+        // the stream dropped) is therefore impossible. The best we can do is:
+        //   1. PRESERVE UI state — `progress` and `staged` live in component
+        //      state / the Zustand store and are never cleared on disconnect,
+        //      so already-received assets & progress survive the drop.
+        //   2. RETRY the socket with exponential backoff (max 3 attempts).
+        //   3. If a terminal event was missed while we were gone, recover via
+        //      the staging probe in onOpen.
+        // If retries are exhausted without a clean terminal event, the backend
+        // job was lost and the user must re-run. This is intentional.
+        if (cleanEndRef.current) {
+          setReconnecting({ active: false, attempt: 0 });
+          return;
+        }
+        if (attempt >= MAX_WS_RETRIES) {
+          setReconnecting({ active: false, attempt: 0 });
+          setProgress((p) => ({
+            ...p,
+            running: false,
+            status: "error",
+            log: [
+              ...p.log,
+              "✗ connection lost — analysis could not be resumed. Please re-run.",
+            ],
+          }));
+          toast.error("Connection lost. Please re-run the analysis.");
+          return;
+        }
+        const delay = Math.pow(2, attempt) * 1000; // ~1s, 2s, 4s
+        setReconnecting({ active: true, attempt: attempt + 1 });
+        setProgress((p) => ({
+          ...p,
+          log: [
+            ...p.log,
+            `⚠ connection dropped — reconnecting (attempt ${attempt + 1}/${MAX_WS_RETRIES})…`,
+          ],
+        }));
+        window.setTimeout(() => {
+          // If the run was cancelled or already completed meanwhile, don't retry.
+          if (!cleanEndRef.current) startConnection(attempt + 1);
+        }, delay);
+      },
+    });
+  };
+
   const runAnalysis = () => {
     if (files.length === 0) {
       toast.error("Add at least one file or pick media from the folder browser.");
       return;
     }
     const settings: Record<string, unknown> = { ...analysisSettings };
+    lastParamsRef.current = {
+      files,
+      profile: activeProfile,
+      settings,
+    };
+    cleanEndRef.current = false;
+    setReconnecting({ active: false, attempt: 0 });
     setProgress({
       running: true,
       processed: 0,
@@ -126,68 +297,7 @@ export default function Analysis() {
       log: [`Connecting to analysis stream for ${files.length} file(s)...`],
       status: "starting",
     });
-
-    wsRef.current = connectAnalysisWS(
-      { files, profile: activeProfile, settings },
-      {
-        onEvent: (type, data) => {
-          if (type === "extraction_progress") {
-            setProgress((p) => ({
-              ...p,
-              total: Number(data.total ?? p.total),
-              processed: Number(data.processed ?? 0),
-              status: "extracting",
-            }));
-          } else if (type === "asset_analyzed") {
-            const name = (data.asset as { original_name?: string } | undefined)
-              ?.original_name;
-            setProgress((p) => ({
-              ...p,
-              processed: Number(data.index ?? p.processed),
-              total: Number(data.total ?? p.total),
-              status: "analyzing",
-              log: [...p.log, `✓ analyzed ${name ?? "asset"}`],
-            }));
-          } else if (type === "asset_error") {
-            setProgress((p) => ({
-              ...p,
-              log: [
-                ...p.log,
-                `✗ ${String(data.name ?? "asset")}: ${String(data.error ?? "error")}`,
-              ],
-            }));
-          } else if (type === "complete") {
-            setProgress((p) => ({
-              ...p,
-              running: false,
-              status: "complete",
-              log: [...p.log, `✓ complete — ${Number(data.count ?? 0)} assets`],
-            }));
-            getStagingThenNavigate();
-          } else if (type === "cancelled") {
-            setProgress((p) => ({
-              ...p,
-              running: false,
-              status: "cancelled",
-              log: [...p.log, "⛔ analysis cancelled"],
-            }));
-            toast.info("Analysis cancelled.");
-          } else if (type === "error") {
-            setProgress((p) => ({
-              ...p,
-              running: false,
-              status: "error",
-              log: [...p.log, `⚠ ${String(data.detail ?? "error")}`],
-            }));
-            toast.error(String(data.detail ?? "Analysis error"));
-          }
-        },
-        onError: () => {
-          setProgress((p) => ({ ...p, running: false, status: "error" }));
-          toast.error("WebSocket error — is the backend running on :8000?");
-        },
-      }
-    );
+    startConnection(0);
   };
 
   const getStagingThenNavigate = async () => {
@@ -409,6 +519,14 @@ export default function Analysis() {
         )}
       </div>
 
+      {/* Reconnecting banner (non-blocking) */}
+      {reconnecting.active && (
+        <div className="flex items-center gap-2 rounded-lg border border-warn/40 bg-warn/10 px-4 py-2.5 text-sm text-warn">
+          <Spinner size={15} />
+          Reconnecting… (attempt {reconnecting.attempt}/{MAX_WS_RETRIES})
+        </div>
+      )}
+
       {/* Progress */}
       {(progress.running || progress.log.length > 0) && (
         <div className="rounded-lg border border-border bg-bg-elev p-4">
@@ -416,7 +534,10 @@ export default function Analysis() {
             <span className="font-medium">
               Progress — {progress.processed}/{progress.total}
             </span>
-            <span className="rounded-full bg-bg px-2 py-0.5 text-xs text-text-dim">
+            <span className="flex items-center gap-2 rounded-full bg-bg px-2 py-0.5 text-xs text-text-dim">
+              {progress.running && progress.processed === 0 && (
+                <Spinner size={12} />
+              )}
               {progress.status}
             </span>
           </div>

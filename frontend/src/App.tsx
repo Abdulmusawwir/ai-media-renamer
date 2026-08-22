@@ -1,6 +1,7 @@
-import { NavLink, Outlet } from "react-router-dom";
-import { useEffect } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { X } from "lucide-react";
 import {
   Film,
   Layers,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import { useEnvironment, useConfig } from "./hooks/api";
 import { useStore } from "./store";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 const NAV_ITEMS = [
   { to: "/analysis", label: "Analysis", icon: Upload },
@@ -42,6 +44,19 @@ export default function App() {
   const envOk = environment
     ? environment.ffmpeg && environment.exiftool
     : false;
+
+  // Responsive floor: 1024px is the supported minimum width. Below that, show
+  // a dismissible banner (the app is not laid out for narrow viewports).
+  const [showNarrow, setShowNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const update = () => setShowNarrow(!mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  const location = useLocation();
 
   return (
     <div className="flex min-h-screen bg-bg text-text">
@@ -89,6 +104,20 @@ export default function App() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
+        {showNarrow && (
+          <div className="flex items-center gap-2 border-b border-warn/40 bg-warn/10 px-5 py-2 text-sm text-warn">
+            <span className="flex-1">
+              Best viewed at 1024px or wider.
+            </span>
+            <button
+              className="shrink-0 rounded p-1 hover:bg-warn/20"
+              onClick={() => setShowNarrow(false)}
+              aria-label="Dismiss"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
         <header className="flex h-14 items-center justify-between border-b border-border bg-bg-elev px-5">
           <h1 className="text-[15px] font-semibold">AI Media Renamer</h1>
           <div className="flex items-center gap-2 text-xs text-text-dim">
@@ -105,7 +134,12 @@ export default function App() {
             transition={{ duration: 0.2 }}
             className="mx-auto max-w-5xl"
           >
-            <Outlet />
+            {/* Per-page boundary: a crash on one route shows a fallback without
+                tearing down the app shell (sidebar / header stay alive). The
+                key resets the boundary when navigating between pages. */}
+            <ErrorBoundary key={location.pathname} label="this page">
+              <Outlet />
+            </ErrorBoundary>
           </motion.div>
         </main>
       </div>

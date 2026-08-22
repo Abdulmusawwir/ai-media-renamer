@@ -30,6 +30,7 @@ import {
   downloadStagingCsv,
 } from "../hooks/api";
 import { useStore, useToast } from "../store";
+import { Skeleton, SkeletonRows, Spinner } from "../components/Skeleton";
 
 const PIE_COLORS = [
   "#3b82f6",
@@ -52,6 +53,30 @@ export default function Staging() {
   const bulk = useBulkUpdateStaging();
   const save = useSaveStaging();
   const importCsv = useImportStagingCsv();
+
+  if (query.isLoading) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Staging</h2>
+          <p className="text-sm text-text-dim">
+            Review and edit AI suggestions before committing to disk.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 px-1 text-sm text-text-dim">
+          <Spinner size={16} label="Loading staged assets…" />
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+          <div className="rounded-lg border border-border bg-bg-elev p-4 lg:col-span-3">
+            <SkeletonRows rows={6} />
+          </div>
+          <div className="rounded-lg border border-border bg-bg-elev p-4">
+            <Skeleton className="h-48" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const serverRows = query.data?.assets ?? [];
   const [rows, setRows] = useState<StagedAsset[]>([]);

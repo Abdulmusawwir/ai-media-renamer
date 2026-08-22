@@ -8,6 +8,7 @@ import {
   useLoadSession,
 } from "../hooks/api";
 import { useToast } from "../store";
+import { SkeletonRows } from "../components/Skeleton";
 
 function sessionId(s: { name?: string; path?: string }): string {
   return String(s.name ?? s.path ?? "");
@@ -22,6 +23,25 @@ export default function Sessions() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const sessions = query.data?.sessions ?? [];
+
+  if (query.isLoading) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Sessions</h2>
+          <p className="text-sm text-text-dim">
+            Save, restore, and delete staging sessions.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <SkeletonRows rows={1} className="!space-y-0" />
+        </div>
+        <div className="overflow-x-auto rounded-lg border border-border bg-bg-elev p-4">
+          <SkeletonRows rows={5} />
+        </div>
+      </div>
+    );
+  }
 
   const onSave = async () => {
     setNotice(null);
