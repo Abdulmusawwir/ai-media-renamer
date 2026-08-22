@@ -16,10 +16,10 @@ import asyncio
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 import engine
-from server import deps
+from server import auth, deps
 from server.schemas import AnalyzeRequest
 from server.ws import make_event, manager
 
@@ -164,7 +164,7 @@ def run_analysis(
     return staging
 
 
-@router.post("/analyze")
+@router.post("/analyze", dependencies=[Depends(deps.require_auth)])
 def post_analyze(req: AnalyzeRequest) -> dict:
     """Kick off analysis in a background thread and accept the job.
 
@@ -187,6 +187,13 @@ def post_analyze(req: AnalyzeRequest) -> dict:
 @router.websocket("/analyze/stream")
 async def ws_analyze(websocket: WebSocket) -> None:
     """Stream analysis progress. Client sends init/cancel control messages."""
+    # When LAN auth is enabled, the bearer token travels as a query param
+    # (browsers cannot set Authorization headers on WebSocket handshakes).
+    if auth.AUTH_ENABLED:
+        token = websocket.query_params.get("token")
+        if not token or auth.verify_token(token) is None:
+            await websocket.close(code=1008)
+            return
     await manager.connect(websocket)
     cancel_event = deps.reset_cancel_event()
     loop = asyncio.get_running_loop()

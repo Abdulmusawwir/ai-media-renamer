@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 
 import engine
@@ -18,7 +18,7 @@ def get_staging() -> dict:
     return {"assets": deps.get_active_staging(), "count": len(deps.ACTIVE_STAGING)}
 
 
-@router.put("/staging")
+@router.put("/staging", dependencies=[Depends(deps.require_auth)])
 def put_staging(assets: list[dict]) -> dict:
     """Replace the entire staging list."""
     if not isinstance(assets, list):
@@ -28,7 +28,7 @@ def put_staging(assets: list[dict]) -> dict:
     return {"count": len(deps.ACTIVE_STAGING)}
 
 
-@router.post("/staging/bulk")
+@router.post("/staging/bulk", dependencies=[Depends(deps.require_auth)])
 def bulk_edit(req: StagingBulkRequest) -> dict:
     """Apply ``updates`` to every staged asset whose name is in ``selected``."""
     if not req.selected:
@@ -51,7 +51,7 @@ def export_staging() -> PlainTextResponse:
     return PlainTextResponse(csv_text, media_type="text/csv")
 
 
-@router.post("/staging/import")
+@router.post("/staging/import", dependencies=[Depends(deps.require_auth)])
 def import_staging(req: StagingImportRequest) -> dict:
     """Import staging from CSV text (``{csv: "..."}``)."""
     csv_text = req.csv

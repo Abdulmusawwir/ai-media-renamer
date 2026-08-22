@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from server import deps
 
@@ -15,7 +15,7 @@ def get_assets() -> dict:
     return {"assets": deps.get_active_staging(), "count": len(deps.ACTIVE_STAGING)}
 
 
-@router.delete("/assets/{name}")
+@router.delete("/assets/{name}", dependencies=[Depends(deps.require_auth)])
 def delete_asset(name: str) -> dict:
     """Remove a single staged asset by its ``original_name``."""
     before = len(deps.ACTIVE_STAGING)
