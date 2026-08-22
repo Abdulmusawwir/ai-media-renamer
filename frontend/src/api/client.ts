@@ -119,10 +119,10 @@ export function getConfig(): Promise<Json> {
   return request<Json>("GET", "/api/config");
 }
 
-// NOTE: the backend route `PUT /api/config` accepts the patch object *directly*
-// as the request body (not wrapped in { patch: ... }), so we send it as-is.
+// NOTE: the backend route `PUT /api/config` accepts the patch object *wrapped* in
+// a `patch` key (`{ patch: { ...partialConfig } }`), so we wrap it before sending.
 export function putConfig(patch: Json): Promise<Json> {
-  return request<Json>("PUT", "/api/config", patch);
+  return request<Json>("PUT", "/api/config", { patch });
 }
 
 export function browseFolder(path?: string): Promise<BrowseResponse> {
@@ -162,13 +162,15 @@ export function importStagingCsv(
   );
 }
 
-export function commit(payload: {
+export interface CommitPayload {
   assets?: StagedAsset[];
   target_dir?: string;
   sort_folders?: boolean;
   skip_rename?: boolean;
   skip_metadata?: boolean;
-}): Promise<{ committed: number; results: string[] }> {
+}
+
+export function commit(payload: CommitPayload): Promise<{ committed: number; results: string[] }> {
   return request<{ committed: number; results: string[] }>(
     "POST",
     "/api/commit",
@@ -177,8 +179,23 @@ export function commit(payload: {
 }
 
 export function rollback(): Promise<Json> {
-  // Route has no body parameter; send an empty object to be safe.
-  return request<Json>("POST", "/api/rollback", {});
+  // Route accepts an optional empty body; send no body (safest).
+  const url = `${API_BASE}/api/rollback`;
+  return fetch(url, { method: "POST" }).then(async (res) => {
+    if (!res.ok) {
+      let detail = `${res.status} ${res.statusText}`;
+      try {
+        const err = await res.json();
+        detail = err.detail || err.message || detail;
+      } catch {
+        /* keep default detail */
+      }
+      throw new Error(`API POST /api/rollback failed: ${detail}`);
+    }
+    const contentType = res.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) return (await res.json()) as Json;
+    return {} as Json;
+  });
 }
 
 export function listSessions(): Promise<{ sessions: SessionInfo[] }> {

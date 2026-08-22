@@ -1,110 +1,151 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { motion } from "framer-motion";
+import { Save, Trash2, FolderOpen, RefreshCw } from "lucide-react";
 import {
-  deleteSession,
-  getStaging,
-  listSessions,
-  loadSession,
-  saveSession,
-  type SessionInfo,
-} from "../api/client";
-import { useStore } from "../store";
+  useSessions,
+  useSaveSession,
+  useDeleteSession,
+  useLoadSession,
+} from "../hooks/api";
+import { useToast } from "../store";
 
-function sessionId(s: SessionInfo): string {
+function sessionId(s: { name?: string; path?: string }): string {
   return String(s.name ?? s.path ?? "");
 }
 
 export default function Sessions() {
-  const { setStaged } = useStore();
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
+  const query = useSessions();
+  const save = useSaveSession();
+  const del = useDeleteSession();
+  const load = useLoadSession();
   const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const sessions = query.data?.sessions ?? [];
 
-  const refresh = async () => {
+  const onSave = async () => {
+    setNotice(null);
     try {
-      const res = await listSessions();
-      setSessions(res.sessions);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
-
-  const doSave = async () => {
-    try {
-      const res = await saveSession({});
+      const res = await save.mutateAsync({});
       setNotice(`Saved session: ${res.path}`);
-      await refresh();
+      toast.success("Session saved.");
     } catch (err) {
-      setError(String(err));
+      toast.error(String(err));
     }
   };
 
-  const doLoad = async (id: string) => {
+  const onLoad = async (id: string) => {
+    setNotice(null);
     try {
-      const res = await loadSession(id);
-      const staging = await getStaging();
-      setStaged(staging.assets);
+      const res = await load.mutateAsync(id);
       setNotice(`Loaded: ${res.asset_count} assets`);
+      toast.success("Session loaded.");
     } catch (err) {
-      setError(String(err));
+      toast.error(String(err));
     }
   };
 
-  const doDelete = async (id: string) => {
+  const onDelete = async (id: string) => {
     try {
-      await deleteSession(id);
-      await refresh();
+      await del.mutateAsync(id);
+      toast.success("Session deleted.");
     } catch (err) {
-      setError(String(err));
+      toast.error(String(err));
     }
   };
 
   return (
-    <div className="page">
-      <h2>Sessions</h2>
-      <p className="page-sub">Save, restore, and delete staging sessions.</p>
-
-      {error && <p className="badge failed">{error}</p>}
-      {notice && <p className="badge ok">{notice}</p>}
-
-      <div className="card">
-        <button onClick={doSave}>Save current session</button>
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">Sessions</h2>
+        <p className="text-sm text-text-dim">
+          Save, restore, and delete staging sessions.
+        </p>
       </div>
 
-      <div className="card">
-        <table>
+      <div className="flex items-center gap-2">
+        <button
+          className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-2"
+          onClick={onSave}
+          disabled={save.isPending}
+        >
+          <Save size={16} /> Save current session
+        </button>
+        <button
+          className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-sm hover:bg-bg"
+          onClick={() => query.refetch()}
+        >
+          <RefreshCw size={14} /> Refresh
+        </button>
+      </div>
+
+      {notice && (
+        <div className="rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-accent">
+          {notice}
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-lg border border-border bg-bg-elev">
+        <table className="w-full border-collapse text-sm">
           <thead>
-            <tr>
-              <th>Session</th>
-              <th>Modified</th>
-              <th></th>
+            <tr className="border-b border-border">
+              <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-text-dim">
+                Session
+              </th>
+              <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-text-dim">
+                Modified
+              </th>
+              <th className="px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-text-dim">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
             {sessions.map((s) => {
               const id = sessionId(s);
               return (
-                <tr key={id}>
-                  <td>{id}</td>
-                  <td className="muted">{String(s.modified ?? "")}</td>
-                  <td className="row" style={{ margin: 0, justifyContent: "flex-end" }}>
-                    <button className="secondary" onClick={() => doLoad(id)}>
-                      Load
-                    </button>
-                    <button className="danger" onClick={() => doDelete(id)}>
-                      Delete
-                    </button>
+                <motion.tr
+                  key={id}
+                  className="border-b border-border/60"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                >
+                  <td className="px-3 py-1.5">
+                    <span className="flex items-center gap-2">
+                      <FolderOpen size={14} className="text-text-dim" />
+                      {id}
+                    </span>
                   </td>
-                </tr>
+                  <td className="px-3 py-1.5 text-text-dim">
+                    {String(s.modified ?? "")}
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        className="flex items-center gap-1 rounded-md border border-border bg-bg-elev-2 px-2.5 py-1 text-xs hover:bg-bg"
+                        onClick={() => onLoad(id)}
+                        disabled={load.isPending}
+                      >
+                        Load
+                      </button>
+                      <button
+                        className="flex items-center gap-1 rounded-md border border-danger/40 bg-danger/10 px-2.5 py-1 text-xs text-danger hover:bg-danger/20"
+                        onClick={() => onDelete(id)}
+                        disabled={del.isPending}
+                      >
+                        <Trash2 size={13} /> Delete
+                      </button>
+                    </div>
+                  </td>
+                </motion.tr>
               );
             })}
             {sessions.length === 0 && (
               <tr>
-                <td colSpan={3} className="muted">
+                <td
+                  colSpan={3}
+                  className="px-3 py-6 text-center text-text-dim"
+                >
                   No saved sessions.
                 </td>
               </tr>

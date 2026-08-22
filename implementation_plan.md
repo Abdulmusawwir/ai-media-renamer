@@ -88,8 +88,8 @@ server/
 - Tests: pytest + httpx.AsyncClient per endpoint. **Verify CLI still runs a full cycle.**
 - Commit: `v2: FastAPI backend with REST + WebSocket API`
 
-#### Phase 2: React Frontend (5–8 days) — 🟡 SCAFFOLD DONE
-- `frontend/` created with Vite + React 18 + TypeScript; builds cleanly (`npm run build` passes). **Current scaffold uses a lightweight stack** (plain CSS + React context store) rather than the planned Tailwind/TanStack Table/Zustand/TanStack Query/Framer Motion/Recharts/Lucide — those can be adopted as features are deepened in Phase 3+. All pages (Analysis + WS flow, Staging, Commit, Sessions, Settings, Models) compile and the API client matches `server/` routes.
+#### Phase 2: React Frontend (5–8 days) — ✅ DONE
+- `frontend/` created with Vite + React 18 + TypeScript; builds cleanly (`npm run build` passes, `tsc --noEmit` clean). **Planned stack adopted:** Tailwind CSS, TanStack Table v8, Zustand, TanStack Query, Framer Motion, React Dropzone, Recharts, Lucide React, React Router v6. All pages implemented (Analysis + WS flow, Staging via TanStack Table, Commit, Sessions, Settings, Models) and the API client matches the reconciled `server/` routes.
 - **Stack:** React 18, TypeScript, Vite, Tailwind CSS, TanStack Table v8, Zustand, TanStack Query, Framer Motion, React Dropzone, Recharts, React Router v6, Lucide React.
 - **Structure:** `api/` (client+WS), `hooks/` (useAnalysis, useWebSocket, useConfig, useStaging), `components/` (layout, upload, analysis, staging, commit, config, analytics, sessions, browse, shared), `pages/` (Analyze, Analytics, Config), `stores/` (Zustand), `lib/`.
 - **Critical components:**
@@ -100,7 +100,7 @@ server/
 - **Shortcuts:** Ctrl+Enter analyze, Ctrl+S save session, Ctrl+Z undo, Delete remove, Escape close.
 - Commit: `v2: React frontend with full feature parity`
 
-#### Phase 3: Integration & Polish (3–5 days)
+#### Phase 3: Integration & Polish (3–5 days) — 🟡 MOSTLY DONE
 WS pipeline wired, cancel/abort, reconnection + state resume, toast system, skeletons/spinners, error boundaries, responsive (min 1024px).
 - Commit: `v2: integration polish, keyboard shortcuts, error boundaries`
 

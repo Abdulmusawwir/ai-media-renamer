@@ -1,9 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
-import { StoreProvider } from "./store";
-import "./styles.css";
+import { queryClient } from "./lib/query";
+import Toaster from "./components/Toaster";
 import Analysis from "./pages/Analysis";
 import Staging from "./pages/Staging";
 import Commit from "./pages/Commit";
@@ -13,8 +14,8 @@ import Models from "./pages/Models";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <StoreProvider>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
         <Routes>
           <Route path="/" element={<App />}>
             <Route index element={<Navigate to="/analysis" replace />} />
@@ -27,7 +28,8 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
             <Route path="*" element={<Navigate to="/analysis" replace />} />
           </Route>
         </Routes>
-      </StoreProvider>
-    </BrowserRouter>
+      </BrowserRouter>
+      <Toaster />
+    </QueryClientProvider>
   </React.StrictMode>
 );
