@@ -1,5 +1,22 @@
 # Changelog
 
+## [v2.0.0] — 2026-08-22
+
+### Rewrite: local-first React + FastAPI architecture
+- **Streamlit UI replaced** by a `server/` FastAPI backend + `frontend/` React (Vite + TypeScript + Tailwind) SPA. `app.py` is removed; the engine (`engine.py`) and CLI (`cli.py`) are preserved unchanged in behavior.
+- **llama.cpp is now the only AI runtime.** Ollama and all cloud providers are gone; a bundled `llama-server` + GGUF model is installed by the setup wizard. The local OpenAI-compatible server is the sole inference path.
+- **New REST + WebSocket API.** `POST /api/analyze` (fire-and-forget) and `WS /api/analyze/stream` (live `extraction_progress` → `asset_analyzed` → `complete`/`cancelled` events with in-stream cancel). Routes for config, staging (CRUD/bulk/CSV import-export), assets, sessions, browse, environment, and models.
+- **Optional LAN JWT auth.** `AMR_AUTH_ENABLED=1` + `AMR_JWT_SECRET` gate every mutating route (including `/analyze`); the WebSocket token-checks via a `?token=` query param. Off by default for the local/trusted-LAN flow.
+- **Production hardening.** Static frontend served from `frontend/dist` via a catch-all mount registered *after* API routes (so `/health` and `/api/*` are never shadowed); per-IP rate limiting behind `AMR_RATE_LIMIT`; configurable strict CORS from `server.cors_origins`.
+- **Model download.** `GET /api/models` + `POST /api/models/download` with background progress polling (`/api/models/{name}/download-status`); `engine.download_llamacpp_model` streams with SHA-256 verification.
+- **Packaging.** `bootstrap.py` launches uvicorn; pip entry point, Docker multi-stage, `start.bat`, README rewrite.
+- **Tests.** Backend unit/integration suite plus end-to-end API tests (REST smoke + mocked WebSocket analysis flow + auth enforcement) using FastAPI's `TestClient`.
+
+### Bug fixes (found via the new e2e suite)
+- `server/ws.py` `make_event()` no longer converts `dict` payloads (e.g. the `asset` object) into a list of keys — the WebSocket asset payload is now sent intact.
+- `GET /health` was shadowed by the frontend static mount in production builds; the mount now registers last so `/health` and all `/api/*` routes win.
+- The OpenAI client used for the local llama.cpp server now disables SDK retries and sets a bounded timeout, so `GET /api/models` returns `[]` promptly instead of hanging for minutes when the server is unreachable.
+
 ## [v1.7.0] — 2026-08-16
 
 ### Breaking Change: fully local & offline

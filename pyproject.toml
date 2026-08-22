@@ -1,5 +1,6 @@
 [project]
 name = "ai-media-renamer"
+version = "2.0.0"
 requires-python = ">=3.10"
 
 [tool.ruff]

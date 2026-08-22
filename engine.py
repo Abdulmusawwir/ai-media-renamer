@@ -1589,6 +1589,13 @@ class OpenAIProvider(AIProvider):
         kwargs = {"api_key": self._api_key}
         if self._base_url:
             kwargs["base_url"] = self._base_url
+        # Bounds worst-case latency: local llama.cpp is the only backend, so a
+        # dead/unreachable server must fail fast (the SDK's default retries with
+        # exponential backoff would otherwise hang callers like /api/models for
+        # minutes). Completions get a generous ceiling for slow local inference;
+        # ``available_models`` relies on the no-retry setting to return [] quickly.
+        kwargs["timeout"] = 300
+        kwargs["max_retries"] = 0
         return openai.OpenAI(**kwargs)
 
     def _request_completion(self, client: Any, model_name: str, messages: list[dict[str, Any]],
