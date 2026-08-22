@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 import engine
 from server import deps
+from server.schemas import ConfigPutRequest
 
 router = APIRouter(prefix="/api", tags=["config"])
 
@@ -17,8 +18,9 @@ def get_config() -> dict:
 
 
 @router.put("/config")
-def put_config(patch: dict) -> dict:
+def put_config(req: ConfigPutRequest) -> dict:
     """Merge a partial config patch, persist it, then reload from disk."""
+    patch = req.patch
     if not isinstance(patch, dict):
         raise HTTPException(status_code=400, detail="patch must be an object")
 

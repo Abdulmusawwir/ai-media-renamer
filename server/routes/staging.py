@@ -7,7 +7,7 @@ from fastapi.responses import PlainTextResponse
 
 import engine
 from server import deps
-from server.schemas import StagingBulkRequest
+from server.schemas import StagingBulkRequest, StagingImportRequest
 
 router = APIRouter(prefix="/api", tags=["staging"])
 
@@ -52,9 +52,9 @@ def export_staging() -> PlainTextResponse:
 
 
 @router.post("/staging/import")
-def import_staging(payload: dict) -> dict:
+def import_staging(req: StagingImportRequest) -> dict:
     """Import staging from CSV text (``{csv: "..."}``)."""
-    csv_text = payload.get("csv", "")
+    csv_text = req.csv
     if not csv_text:
         raise HTTPException(status_code=400, detail="missing csv field")
     imported, warnings = engine.import_staging_csv(csv_text, engine.ALLOWED_CATEGORIES)

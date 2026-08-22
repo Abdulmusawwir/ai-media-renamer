@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 import engine
-from server.schemas import ModelsResponse
+from server.schemas import ModelsDownloadRequest, ModelsResponse
 
 router = APIRouter(prefix="/api", tags=["models"])
 
@@ -40,7 +40,7 @@ def get_models() -> dict:
 
 
 @router.post("/models/download")
-def download_model(payload: dict) -> dict:
+def download_model(req: ModelsDownloadRequest) -> dict:
     """Trigger a model download if the engine exposes a helper.
 
     The engine currently has no server-callback download helper, so this
@@ -48,7 +48,7 @@ def download_model(payload: dict) -> dict:
     downloads are handled by the setup wizard / llama.cpp tooling. Wire a real
     engine helper here once one exists.
     """
-    model_name = payload.get("model") or payload.get("name")
+    model_name = req.model
     if not model_name:
         raise HTTPException(status_code=400, detail="model name required")
     # No engine download helper exists yet; surface a clear, non-failing status.

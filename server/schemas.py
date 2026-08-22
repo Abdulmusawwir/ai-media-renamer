@@ -44,6 +44,22 @@ class ConfigPutRequest(BaseModel):
     patch: dict[str, Any] = Field(default_factory=dict)
 
 
+class StagingImportRequest(BaseModel):
+    """Import staging rows from CSV text."""
+
+    csv: str = ""
+
+
+class ModelsDownloadRequest(BaseModel):
+    """Request to download a model by name."""
+
+    model: str = ""
+
+
+class RollbackRequest(BaseModel):
+    """Rollback request — no fields; body is optional."""
+
+
 class SessionCreateRequest(BaseModel):
     """Create a session from the current staging set."""
 

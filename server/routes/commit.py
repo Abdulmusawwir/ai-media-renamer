@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 import engine
 from server import deps
-from server.schemas import CommitRequest
+from server.schemas import CommitRequest, RollbackRequest
 
 router = APIRouter(prefix="/api", tags=["commit"])
 
@@ -72,7 +72,7 @@ def commit(req: CommitRequest) -> dict:
 
 
 @router.post("/rollback")
-def rollback() -> dict:
+def rollback(req: RollbackRequest | None = None) -> dict:
     """Roll back the most recent commit batch."""
     try:
         result = engine.rollback_last_batch()
