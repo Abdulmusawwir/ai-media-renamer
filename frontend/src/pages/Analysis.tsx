@@ -230,24 +230,20 @@ export default function Analysis() {
         }));
       },
       onClose: () => {
-        // Pragmatic WS resume:
         // The backend runs analysis as a single shot and does NOT support
-        // server-side resume. A true mid-run resume (continuing exactly where
-        // the stream dropped) is therefore impossible. The best we can do is:
-        //   1. PRESERVE UI state — `progress` and `staged` live in component
-        //      state / the Zustand store and are never cleared on disconnect,
-        //      so already-received assets & progress survive the drop.
-        //   2. RETRY the socket with exponential backoff (max 3 attempts).
-        //   3. If a terminal event was missed while we were gone, recover via
-        //      the staging probe in onOpen.
-        // If retries are exhausted without a clean terminal event, the backend
-        // job was lost and the user must re-run. This is intentional.
+        // server-side resume, so re-opening the socket and re-sending `files`
+        // would START A SECOND RUN (and could run concurrently with the first).
+        // Instead we never auto-restart: if a clean terminal event already
+        // arrived we're done; otherwise we probe staging once in case the
+        // terminal event was missed while disconnected, and if not we ask the
+        // user to re-run. UI state (`progress`/`staged`) is preserved in the
+        // store, so any assets already received survive the drop.
         if (cleanEndRef.current) {
           setReconnecting({ active: false, attempt: 0 });
           return;
         }
-        if (attempt >= MAX_WS_RETRIES) {
-          setReconnecting({ active: false, attempt: 0 });
+        setReconnecting({ active: false, attempt: 0 });
+        const lost = () => {
           setProgress((p) => ({
             ...p,
             running: false,
@@ -258,21 +254,24 @@ export default function Analysis() {
             ],
           }));
           toast.error("Connection lost. Please re-run the analysis.");
-          return;
-        }
-        const delay = Math.pow(2, attempt) * 1000; // ~1s, 2s, 4s
-        setReconnecting({ active: true, attempt: attempt + 1 });
-        setProgress((p) => ({
-          ...p,
-          log: [
-            ...p.log,
-            `⚠ connection dropped — reconnecting (attempt ${attempt + 1}/${MAX_WS_RETRIES})…`,
-          ],
-        }));
-        window.setTimeout(() => {
-          // If the run was cancelled or already completed meanwhile, don't retry.
-          if (!cleanEndRef.current) startConnection(attempt + 1);
-        }, delay);
+        };
+        getStaging()
+          .then((res) => {
+            if (res.assets.length > 0) {
+              cleanEndRef.current = true;
+              setProgress((p) => ({
+                ...p,
+                running: false,
+                status: "complete",
+                log: [...p.log, `✓ recovered — ${res.assets.length} assets`],
+              }));
+              setStaged(res.assets);
+              navigate("/staging");
+            } else {
+              lost();
+            }
+          })
+          .catch(lost);
       },
     });
   };

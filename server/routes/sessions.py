@@ -13,6 +13,20 @@ router = APIRouter(prefix="/api", tags=["sessions"])
 SESSION_DIR = engine.SESSION_DIR
 
 
+def _safe_session_path(session_id: str) -> Path:
+    """Resolve ``session_id`` to a path confined to ``SESSION_DIR``.
+
+    Rejects names containing path separators or ``..`` so a crafted id cannot
+    escape the session directory (path-traversal guard).
+    """
+    if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
+        raise HTTPException(status_code=400, detail="invalid session id")
+    candidate = (SESSION_DIR / session_id).resolve()
+    if candidate.parent != SESSION_DIR.resolve():
+        raise HTTPException(status_code=400, detail="invalid session id")
+    return candidate
+
+
 @router.get("/sessions")
 def list_sessions() -> dict:
     """List saved session files (newest first)."""
@@ -37,9 +51,11 @@ def create_session(req: SessionCreateRequest) -> dict:
 @router.get("/sessions/{session_id}")
 def load_session_by_id(session_id: str) -> dict:
     """Load a session by its filename (e.g. ``session_2026-01-01_120000.json``)."""
-    candidate = SESSION_DIR / session_id
+    candidate = _safe_session_path(session_id)
     try:
         data = engine.load_session(candidate)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=404, detail=f"session not found: {exc}")
     staged = data.get("staged_assets", [])
@@ -50,7 +66,7 @@ def load_session_by_id(session_id: str) -> dict:
 @router.delete("/sessions/{session_id}", dependencies=[Depends(deps.require_auth)])
 def delete_session_by_id(session_id: str) -> dict:
     """Delete a saved session file."""
-    candidate = SESSION_DIR / session_id
+    candidate = _safe_session_path(session_id)
     ok = engine.delete_session(candidate)
     if not ok:
         raise HTTPException(status_code=404, detail="session not found")

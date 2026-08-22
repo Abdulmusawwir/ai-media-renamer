@@ -29,8 +29,9 @@ def _is_media(name: str) -> str | None:
 def browse(path: str = Query(default="", description="Folder path to list")) -> dict:
     """List files and subfolders of ``path`` (default: current working dir).
 
-    Guards against path traversal by resolving the path and refusing to walk
-    above an absolute, real location. Returns media-kind flags per entry.
+    The path is resolved and validated to exist; listings are not restricted to a
+    server root (the directory picker is expected to choose arbitrary local
+    folders). Returns media-kind flags per entry.
     """
     root = Path.cwd()
     target = Path(path) if path else root
