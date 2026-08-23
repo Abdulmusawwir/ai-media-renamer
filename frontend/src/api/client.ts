@@ -14,9 +14,13 @@ async function request<T = any>(
   body?: unknown
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
-  const opts: RequestInit = { method, headers: {} };
+  const headers: Record<string, string> = {};
+  // Attach the LAN auth bearer token (populated by getAnalysisToken) so REST
+  // calls respect AMR_AUTH_ENABLED in the same way the WebSocket does.
+  if (_cachedToken) headers["Authorization"] = `Bearer ${_cachedToken}`;
+  const opts: RequestInit = { method, headers };
   if (body !== undefined) {
-    (opts.headers as Record<string, string>)["Content-Type"] = "application/json";
+    headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(url, opts);
@@ -181,7 +185,9 @@ export function commit(payload: CommitPayload): Promise<{ committed: number; res
 export function rollback(): Promise<Json> {
   // Route accepts an optional empty body; send no body (safest).
   const url = `${API_BASE}/api/rollback`;
-  return fetch(url, { method: "POST" }).then(async (res) => {
+  const headers: Record<string, string> = {};
+  if (_cachedToken) headers["Authorization"] = `Bearer ${_cachedToken}`;
+  return fetch(url, { method: "POST", headers }).then(async (res) => {
     if (!res.ok) {
       let detail = `${res.status} ${res.statusText}`;
       try {
@@ -267,11 +273,48 @@ function wsBaseFor(path: string): string {
   return `${wsBase}${path}`;
 }
 
+let _cachedToken: string | null = null;
+let _tokenFetchedAt = 0;
+// JWT lifetime is 12h; refresh a bit earlier to avoid sending an expired token.
+const TOKEN_TTL_MS = 11 * 60 * 60 * 1000;
+
+/**
+ * Fetch a LAN auth token when the backend has auth enabled. Tokens are cached
+ * in memory and reused until near expiry — they are never persisted to disk
+ * (keeps the token out of the localStorage/XSS theft surface for a same-origin
+ * local app). Returns null when auth is disabled or the endpoint is
+ * unreachable, so callers can proceed unauthenticated in the default mode.
+ */
+export async function getAnalysisToken(): Promise<string | null> {
+  const now = Date.now();
+  if (_cachedToken && now - _tokenFetchedAt < TOKEN_TTL_MS) {
+    return _cachedToken;
+  }
+  try {
+    const res = await request<{ enabled: boolean; token?: string }>(
+      "POST",
+      "/api/auth/token"
+    );
+    if (res.enabled && res.token) {
+      _cachedToken = res.token;
+      _tokenFetchedAt = now;
+      return _cachedToken;
+    }
+    _cachedToken = null;
+    return null;
+  } catch {
+    // Token endpoint unreachable — assume auth disabled / backend down.
+    return null;
+  }
+}
+
 export function connectAnalysisWS(
   params: AnalysisParams,
-  handlers: WSHandlers
+  handlers: WSHandlers,
+  token?: string | null
 ): AnalysisWSController {
-  const ws = new WebSocket(wsBaseFor("/api/analyze/stream"));
+  const suffix = token ? `?token=${encodeURIComponent(token)}` : "";
+  const ws = new WebSocket(wsBaseFor(`/api/analyze/stream${suffix}`));
 
   ws.onopen = () => {
     ws.send(

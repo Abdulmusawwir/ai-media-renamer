@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import {
   connectAnalysisWS,
+  getAnalysisToken,
   getStaging,
   type AnalysisWSController,
   type AnalysisParams,
@@ -135,7 +136,9 @@ export default function Analysis() {
 
     setReconnecting({ active: attempt > 0, attempt });
 
-    wsRef.current = connectAnalysisWS(params, {
+    getAnalysisToken()
+      .then((token) => {
+        wsRef.current = connectAnalysisWS(params, {
       onEvent: (type, data) => {
         if (type === "extraction_progress") {
           setProgress((p) => ({
@@ -273,7 +276,17 @@ export default function Analysis() {
           })
           .catch(lost);
       },
-    });
+        }, token);
+      })
+      .catch(() => {
+        setProgress((p) => ({
+          ...p,
+          running: false,
+          status: "error",
+          log: [...p.log, "⚠ failed to start the analysis connection"],
+        }));
+        toast.error("Failed to start the analysis connection.");
+      });
   };
 
   const runAnalysis = () => {

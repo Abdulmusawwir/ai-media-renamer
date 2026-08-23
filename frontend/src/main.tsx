@@ -12,6 +12,12 @@ import Commit from "./pages/Commit";
 import Sessions from "./pages/Sessions";
 import Settings from "./pages/Settings";
 import Models from "./pages/Models";
+import { getAnalysisToken } from "./api/client";
+
+// Best-effort: fetch a LAN auth token up front so REST calls (staging, commit,
+// rollback) carry the bearer header when the backend has auth enabled. Failures
+// are non-fatal (default mode is auth-disabled).
+getAnalysisToken().catch(() => undefined);
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

@@ -108,6 +108,13 @@ export default function Staging() {
   const [bulkCategory, setBulkCategory] = useState<string>("");
   const lastClicked = useRef<number | null>(null);
   const parentRef = useRef<HTMLDivElement>(null);
+  // Tracks unsaved local edits and debounces a server write so the backend
+  // stays the source of truth (edits are never lost when navigating away).
+  const dirtyRef = useRef(false);
+  const saveTimer = useRef<number | null>(null);
+  // Mirror of `rows` for the unmount flush (refs survive past render scope).
+  const latestRows = useRef<StagedAsset[]>(rows);
+  latestRows.current = rows;
   const [hoverThumb, setHoverThumb] = useState<{
     src: string;
     x: number;
@@ -129,8 +136,48 @@ export default function Staging() {
   }, [categories, rows]);
 
   const updateRow = (idx: number, patch: Partial<StagedAsset>) => {
+    dirtyRef.current = true;
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   };
+
+  // Debounced auto-save: flush local edits to the server so the staging set is
+  // authoritative. A short timer coalesces rapid keystrokes; success is silent
+  // (the manual Save button remains for explicit feedback). Only runs when the
+  // user actually changed something (dirtyRef), so server-driven syncs are
+  // ignored and no save-loop forms.
+  useEffect(() => {
+    if (!dirtyRef.current) return;
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      const clean = rows.map(({ selected: _s, ...rest }) => rest) as StagedAsset[];
+      save
+        .mutateAsync(clean)
+        .then(() => {
+          dirtyRef.current = false;
+        })
+        .catch((err) => {
+          toast.error(String(err));
+        });
+    }, 600);
+    return () => {
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    };
+  }, [rows, save, toast]);
+
+  // If the user navigates away (e.g. to Commit) with an in-flight debounce,
+  // flush the pending edit immediately so the next screen reads the latest
+  // staging from the server instead of stale cached data.
+  useEffect(() => {
+    return () => {
+      if (dirtyRef.current && saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        const clean = latestRows.current.map(
+          ({ selected: _s, ...rest }) => rest
+        ) as StagedAsset[];
+        save.mutateAsync(clean).catch(() => {});
+      }
+    };
+  }, [save]);
 
   const selectedNames = useMemo(
     () =>
@@ -434,7 +481,7 @@ export default function Staging() {
           <Tag size={14} /> Apply to selected
         </button>
         <span className="text-xs text-text-dim">
-          {selectedNames.length} selected
+          {save.isPending ? "Saving…" : `${selectedNames.length} selected`}
         </span>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
