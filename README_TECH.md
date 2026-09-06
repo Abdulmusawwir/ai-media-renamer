@@ -15,7 +15,7 @@ Pre-built binaries are available on the [Releases page](https://github.com/Abdul
 ```bash
 pip install -r requirements.txt
 pip install pyinstaller
-pyinstaller build.spec
+pyinstaller build_v2.spec --noconfirm
 # Output: dist/AIMediaRenamer.exe
 ```
 

@@ -17,9 +17,26 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Build EXE
-        run: pyinstaller build.spec
+        run: pyinstaller build_v2.spec --noconfirm
       - name: Smoke test EXE
-        run: dist\AIMediaRenamer.exe --streamlit-server --check-only
+        # launch.py ignores argv (no --check-only flag): boot the exe and probe
+        # /health on the auto-picked loopback port (8000-8010), then stop it.
+        shell: powershell
+        run: |
+          Start-Process dist\AIMediaRenamer.exe
+          $ok = $false
+          foreach ($port in 8000..8010) {
+            for ($i = 0; $i -lt 6; $i++) {
+              try {
+                $r = Invoke-RestMethod "http://127.0.0.1:$port/health" -TimeoutSec 5
+                if ($r.status -eq "ok") { $ok = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 5
+            }
+            if ($ok) { break }
+          }
+          Stop-Process -Name AIMediaRenamer -ErrorAction SilentlyContinue
+          if (-not $ok) { exit 1 }
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v3.0.2
         with:
