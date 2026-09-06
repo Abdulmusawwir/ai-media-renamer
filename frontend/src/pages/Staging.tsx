@@ -76,30 +76,6 @@ export default function Staging() {
   const save = useSaveStaging();
   const importCsv = useImportStagingCsv();
 
-  if (query.isLoading) {
-    return (
-      <div className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold">Staging</h2>
-          <p className="text-sm text-text-dim">
-            Review and edit AI suggestions before committing to disk.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 px-1 text-sm text-text-dim">
-          <Spinner size={16} label="Loading staged assets…" />
-        </div>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-          <div className="rounded-lg border border-border bg-bg-elev p-4 lg:col-span-3">
-            <SkeletonRows rows={6} />
-          </div>
-          <div className="rounded-lg border border-border bg-bg-elev p-4">
-            <Skeleton className="h-48" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const serverRows = query.data?.assets ?? [];
   const [rows, setRows] = useState<StagedAsset[]>([]);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -435,6 +411,34 @@ export default function Staging() {
       value,
     }));
   }, [rows]);
+
+  // NOTE: This early return MUST come after every hook above is declared.
+  // Returning before the hooks run would, on the next render (once loading
+  // finishes), change the number of hooks React sees — tripping
+  // "Rendered more hooks than during the previous render" (#310).
+  if (query.isLoading) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Staging</h2>
+          <p className="text-sm text-text-dim">
+            Review and edit AI suggestions before committing to disk.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 px-1 text-sm text-text-dim">
+          <Spinner size={16} label="Loading staged assets…" />
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+          <div className="rounded-lg border border-border bg-bg-elev p-4 lg:col-span-3">
+            <SkeletonRows rows={6} />
+          </div>
+          <div className="rounded-lg border border-border bg-bg-elev p-4">
+            <Skeleton className="h-48" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

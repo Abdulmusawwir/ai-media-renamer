@@ -67,6 +67,8 @@ def test_ws_stream_accepts_valid_token(auth_on, monkeypatch, tmp_path):
     monkeypatch.setattr(
         engine, "process_image_to_base64", lambda p: "data:image/jpeg;base64,xxxx"
     )
+    # run_analysis() fail-fasts when no AI server answers; simulate one.
+    monkeypatch.setattr(engine, "_llamacpp_server_running", lambda: True)
     monkeypatch.setattr(
         engine,
         "analyze_asset_with_ai",

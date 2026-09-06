@@ -199,8 +199,6 @@ textarea:focus {
 }
 
 button {
-  background: var(--accent);
-  color: #fff;
   border: none;
   border-radius: 6px;
   padding: 8px 14px;
@@ -210,23 +208,9 @@ button {
   transition: background 0.15s;
 }
 
-button:hover {
-  background: var(--accent-2);
-}
-
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-button.secondary {
-  background: var(--bg-elev-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-
-button.danger {
-  background: var(--danger);
 }
 
 .row {

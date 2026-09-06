@@ -103,6 +103,17 @@ def run_analysis(
         if send_cb is not None:
             send_cb(event)
 
+    # Upfront check: if the local AI server is not running, fail fast with a
+    # clear error instead of silently erroring on every file.
+    if not engine._llamacpp_server_running():
+        emit(make_event("error", detail=(
+            "The llama.cpp server is not running on "
+            f"{engine._llamacpp_host_port()[0]}:{engine._llamacpp_host_port()[1]}. "
+            "Run the setup wizard (python bootstrap.py) or start llama-server manually."
+        )))
+        emit(make_event("complete", staged=[], count=0))
+        return staging
+
     emit(make_event("extraction_progress", processed=0, total=total))
 
     for idx, raw in enumerate(files, 1):

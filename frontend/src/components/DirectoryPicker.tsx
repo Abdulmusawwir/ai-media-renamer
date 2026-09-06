@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ChevronRight, File, Folder, FolderOpen, Plus, Clock } from "lucide-react";
 import { browseFolder, type BrowseEntry, type BrowseResponse } from "../api/client";
@@ -51,7 +51,30 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
         // Record user-initiated navigations (skip the initial empty load).
         if (target) pushRecent(res.path);
       } catch (err) {
-        toast.error(`Browse failed: ${String(err)}`);
+        const msg = String(err);
+        // Probe a different endpoint to tell whether the *whole* backend is
+        // unreachable (VPN/proxy/antivirus intercepting localhost) vs. a
+        // browse-specific issue. Surfaces as part of the toast.
+        let diag = "";
+        try {
+          const probe = await fetch("/api/environment", { method: "GET" });
+          diag = probe.ok
+            ? " (but /api/environment IS reachable)"
+            : ` (and /api/environment -> ${probe.status})`;
+        } catch {
+          diag = " (and /api/environment is ALSO unreachable)";
+        }
+        const origin = window.location.origin;
+        const network = /network|Failed to fetch|ERR_/i.test(msg);
+        if (network) {
+          toast.error(
+            `Can't reach backend at ${origin}${diag}. If you use a VPN, proxy, ` +
+              `or antivirus with web shielding, it is likely intercepting localhost — ` +
+              `add 127.0.0.1 to its bypass list. [${msg}]`
+          );
+        } else {
+          toast.error(`Browse failed: ${msg}${diag}`);
+        }
       } finally {
         setBusy(false);
       }
@@ -59,9 +82,16 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
     [toast, pushRecent]
   );
 
+  // Run the initial listing exactly once on mount. Guarding with a ref (rather
+  // than depending on `doBrowse`) prevents an infinite re-render loop: the toast
+  // store updates on every toast, which can change `doBrowse`'s identity and
+  // otherwise re-trigger the effect forever, spamming the UI.
+  const didInit = useRef(false);
   useEffect(() => {
+    if (didInit.current) return;
+    didInit.current = true;
     doBrowse("");
-  }, [doBrowse]);
+  }, [didInit]);
 
   return (
     <div className="rounded-lg border border-border bg-bg-elev p-4">

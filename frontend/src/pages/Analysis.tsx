@@ -169,13 +169,25 @@ export default function Analysis() {
           // Clean terminal event — stop retrying.
           cleanEndRef.current = true;
           setReconnecting({ active: false, attempt: 0 });
+          const count = Number(data.count ?? 0);
           setProgress((p) => ({
             ...p,
             running: false,
             status: "complete",
-            log: [...p.log, `✓ complete — ${Number(data.count ?? 0)} assets`],
+            log: [
+              ...p.log,
+              count > 0
+                ? `✓ complete — ${count} asset(s)`
+                : "✗ complete — no assets were analyzed. Check the log above for errors.",
+            ],
           }));
-          getStagingThenNavigate();
+          if (count > 0) {
+            getStagingThenNavigate();
+          } else {
+            toast.error(
+              "Analysis finished with 0 assets. Check the progress log for errors (missing AI server, extraction failures, etc.)."
+            );
+          }
         } else if (type === "cancelled") {
           cleanEndRef.current = true;
           setReconnecting({ active: false, attempt: 0 });

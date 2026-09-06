@@ -42,10 +42,18 @@ def create_app() -> FastAPI:
     cfg_origins = engine.config.get("server", {}).get("cors_origins")
     allow_origins = cfg_origins if isinstance(cfg_origins, list) and cfg_origins else CORS_ALLOW_ORIGINS
 
+    # NOTE: ``allow_credentials`` is intentionally False. The app authenticates
+    # via bearer tokens (never cookies), so omitting credentials lets the
+    # permissive ``Access-Control-Allow-Origin: *`` actually take effect for
+    # cross-origin loads (e.g. when the UI is reached via ``localhost`` while the
+    # API is bound to ``127.0.0.1``, or behind a reverse proxy). Starlette only
+    # emits a wildcard ACAO when credentials are disabled; with credentials
+    # enabled a literal ``*`` origin list silently fails to echo the caller's
+    # origin and every cross-origin fetch is blocked by the browser.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allow_origins,
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )

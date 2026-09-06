@@ -61,6 +61,8 @@ def test_rest_smoke():
 def test_ws_analysis_flow(monkeypatch, tmp_path):
     monkeypatch.setattr(engine, "process_image_to_base64", lambda p: "data:image/jpeg;base64,xxxx")
     monkeypatch.setattr(engine, "analyze_asset_with_ai", _fake_asset)
+    # run_analysis() fail-fasts when no AI server answers; simulate one.
+    monkeypatch.setattr(engine, "_llamacpp_server_running", lambda: True)
 
     src = _make_image(tmp_path, "cat.jpg")
     client = TestClient(app)
@@ -86,6 +88,8 @@ def test_ws_analysis_can_cancel(monkeypatch, tmp_path):
 
     monkeypatch.setattr(engine, "process_image_to_base64", slow_extract)
     monkeypatch.setattr(engine, "analyze_asset_with_ai", _fake_asset)
+    # run_analysis() fail-fasts when no AI server answers; simulate one.
+    monkeypatch.setattr(engine, "_llamacpp_server_running", lambda: True)
 
     a = _make_image(tmp_path, "a.jpg")
     b = _make_image(tmp_path, "b.jpg")

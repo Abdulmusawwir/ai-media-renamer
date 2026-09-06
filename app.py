@@ -2139,9 +2139,6 @@ st.markdown(
     " &mdash; "
     "<a href='https://github.com/sponsors/Abdulmusawwir' "
     "   style='color: #A1A1AA; text-decoration: none;'>Sponsor</a>"
-    " &middot; "
-    "<a href='https://buymeacoffee.com/abdulmusawwir' "
-    "   style='color: #A1A1AA; text-decoration: none;'>Buy Me a Coffee</a>"
     "</p>",
     unsafe_allow_html=True,
 )

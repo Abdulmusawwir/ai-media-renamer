@@ -273,6 +273,10 @@ class TestConfigureLlamaCppInstall:
 class TestLlamaBuildPlan:
     def test_plan_uses_llamacpp_runtime(self, monkeypatch, tmp_path):
         import bootstrap
+        # Point at a nonexistent exe: _build_plan() checks LLAMACPP_EXE.exists()
+        # before the (mocked) PATH lookup, so a real install on the test
+        # machine would otherwise flip the expected "download" status.
+        monkeypatch.setattr(bootstrap, "LLAMACPP_EXE", tmp_path / "nope" / "llama-server.exe")
         monkeypatch.setattr(bootstrap, "_resolve_binary_path", lambda name: None)
         monkeypatch.setattr(bootstrap, "_installed_models", lambda: set())
         monkeypatch.setattr(bootstrap, "_llamacpp_gguf_paths",

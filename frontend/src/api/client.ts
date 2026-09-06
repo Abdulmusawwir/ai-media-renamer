@@ -18,12 +18,25 @@ async function request<T = any>(
   // Attach the LAN auth bearer token (populated by getAnalysisToken) so REST
   // calls respect AMR_AUTH_ENABLED in the same way the WebSocket does.
   if (_cachedToken) headers["Authorization"] = `Bearer ${_cachedToken}`;
-  const opts: RequestInit = { method, headers };
+  // Explicitly omit credentials (the app authenticates via bearer tokens, not
+  // cookies). This keeps every request on the simple (non-credentialed) CORS
+  // path, which is required for the permissive `Access-Control-Allow-Origin: *`
+  // served by the backend to actually take effect on cross-origin loads.
+  const opts: RequestInit = { method, headers, credentials: "omit" };
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(url, opts);
+  let res: Response;
+  try {
+    res = await fetch(url, opts);
+  } catch (e) {
+    // Network-level failure (server down, wrong origin, CORS, mixed content).
+    // Surface the URL so the failure is diagnosable from the UI toast.
+    throw new Error(
+      `API ${method} ${path} request failed (network): ${String(e)} [url=${url}]`
+    );
+  }
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
     try {

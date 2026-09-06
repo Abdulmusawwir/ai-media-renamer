@@ -94,6 +94,13 @@ Run `start.bat` — it ensures Python (via winget if missing), installs the pack
 
 > Prefer the command line or want the full feature list, CLI flags, and system requirements? See [README_TECH.md](README_TECH.md).
 
+### Security & LAN access
+
+By default the server binds to loopback (`127.0.0.1`) and runs **unauthenticated** — safe because nothing is exposed beyond your own machine. Two opt-in knobs exist:
+
+- **LAN sharing** — set `AMR_AUTH_ENABLED=1` to require a bearer token. The backend issues a short-lived JWT at `/api/auth/token`, and the frontend fetches it automatically and attaches it to both REST calls and the analysis WebSocket, so enabling auth stays transparent.
+- **Custom secret** — set `AMR_JWT_SECRET` to override the dev fallback secret in any multi-user/LAN scenario.
+
 ---
 
 ## Who it's for
@@ -107,9 +114,10 @@ Run `start.bat` — it ensures Python (via winget if missing), installs the pack
 
 ## Roadmap — we're just getting started
 
-- [x] **Security hardening pass** — done in v1.6.3: checksum-verified downloads, frozen lockfile, secret redaction, keychain fail-closed, loopback-only server with LAN opt-in, input-validation hardening, log path redaction
-- [x] **Stability & engine hardening** — done in v1.6.4: atomic config saves, import-safe startup, callback-driven engine switching, safer Clear All (sessions preserved), CLI argument validation
-- [x] **Fully local & offline** — done in v1.7.0: cloud providers, API keys, and the keychain layer removed. Only local runtimes (llama.cpp).
+- [x] **v2.0.0 — React + FastAPI rewrite** — llama.cpp-only local runtime, REST + WebSocket API, loopback-first LAN auth (JWT), and a packaged `AIMediaRenamer.exe`.
+- [x] **Security hardening pass** — v1.6.3: checksum-verified downloads, frozen lockfile, secret redaction, keychain fail-closed, loopback-only server with LAN opt-in, input-validation hardening, log path redaction
+- [x] **Stability & engine hardening** — v1.6.4: atomic config saves, import-safe startup, callback-driven engine switching, safer Clear All (sessions preserved), CLI argument validation
+- [x] **Fully local & offline** — v1.7.0: cloud providers, API keys, and the keychain layer removed. Only local runtimes (llama.cpp).
 - [ ] More AI models and language support
 - [ ] Auto-sorting into category folders
 - [ ] Bulk import from cloud drives
@@ -119,9 +127,9 @@ Run `start.bat` — it ensures Python (via winget if missing), installs the pack
 
 ## Support the project
 
-If this saves you a weekend a month, consider supporting development — it funds new features, testing, and the coffee that powers them.
+If this saves you a weekend a month, consider [sponsoring the project on GitHub](https://github.com/sponsors/Abdulmusawwir) — it funds new features, testing, and the llama.cpp runtime downloads that keep everything 100% local.
 
-*Donation links coming soon.*
+[![Sponsor](https://img.shields.io/badge/sponsor-%E2%9D%A4%EF%B8%8F%20GitHub%20Sponsors-blue?style=flat&logo=githubsponsors)](https://github.com/sponsors/Abdulmusawwir)
 
 ---
 
