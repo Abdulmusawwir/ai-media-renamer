@@ -75,7 +75,10 @@ class TestExportStagingJson:
 
 class TestImportStagingCsv:
     def test_parses_valid_csv(self):
-        csv_data = "original_name,proposed_filename,category,tags,summary\npic.png,desert_sunset,landscapes_broll,\"sunset, desert\",warm colors\n"
+        csv_data = (
+            "original_name,proposed_filename,category,tags,summary\n"
+            'pic.png,desert_sunset,landscapes_broll,"sunset, desert",warm colors\n'
+        )
         assets, warnings = import_staging_csv(csv_data, ALLOWED_CATEGORIES)
         assert len(assets) == 1
         assert assets[0]["original_name"] == "pic.png"
@@ -98,7 +101,10 @@ class TestImportStagingCsv:
         assert len(warnings) == 0
 
     def test_multiple_tags_parsed(self):
-        csv_data = "original_name,proposed_filename,category,tags,summary\nf.mov,clip,landscapes_broll,\"tag1, tag2, tag3\",desc\n"
+        csv_data = (
+            "original_name,proposed_filename,category,tags,summary\n"
+            'f.mov,clip,landscapes_broll,"tag1, tag2, tag3",desc\n'
+        )
         assets, _ = import_staging_csv(csv_data, ALLOWED_CATEGORIES)
         assert assets[0]["tags"] == ["tag1", "tag2", "tag3"]
 

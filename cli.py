@@ -273,7 +273,13 @@ def process_library(
                     future_to_file[future] = file
                 else:
                     print(f"Skipped (Already Processed): {file.name}")
-                    log_event(logger, "INFO", "file_skipped", file_name=file.name, details={"reason": "already_processed"})
+                    log_event(
+                        logger,
+                        "INFO",
+                        "file_skipped",
+                        file_name=file.name,
+                        details={"reason": "already_processed"},
+                    )
 
             for future in as_completed(future_to_file):
                 file = future_to_file[future]

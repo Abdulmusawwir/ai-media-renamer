@@ -1,13 +1,9 @@
-streamlit>=1.37.0
-plotly>=5.18.0
-pandas>=2.2.0
 ruff>=0.5.0
 requests>=2.32.0
 pytest>=8.0.0
 openai>=1.0.0
 pyinstaller>=6.0
-pywebview>=4.0
-# transitive dep of pywebview; pinned floor to the version fixing PYSEC-2026-3552
+# transitive dep of pdfminer.six (via pdfplumber); pinned floor fixes PYSEC-2026-3552
 cryptography>=50.0.0
 rich>=13.0.0
 imagehash>=4.3.0

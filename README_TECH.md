@@ -1,6 +1,6 @@
 # AI Media Renamer — Technical Reference
 
-Automatically organize, rename, and tag video, image, document, and audio assets using AI. 9 prompt profiles for different use cases. Comes with both a **CLI** and a **Streamlit web app**.
+Automatically organize, rename, and tag video, image, document, and audio assets using AI. 9 prompt profiles for different use cases. Comes with both a **CLI** and a **web app** (FastAPI backend + React SPA).
 
 > This is the deep-dive reference: full feature list, CLI flags, config reference, module map, metadata tables, and system requirements.
 >
@@ -25,13 +25,11 @@ pyinstaller build.spec
 
 ```bash
 pip install -r requirements.txt
-streamlit run app.py
+python launch.py
 ```
 
 ### Prerequisites
-- **A local AI runtime** — one of:
-  - **llama.cpp** (default for fresh installs) — `llama-server` + a GGUF vision model (7B Qwen2-VL, or lighter 2B on CPU), auto-downloaded by the setup wizard; documents/audio route to a compact text model (Qwen2.5-3B)
-  - **Ollama** with a vision model (e.g. `qwen2.5vl:7b`) — [ollama.com](https://ollama.com); auto-detected and reused when already installed
+- **A local AI runtime** — **llama.cpp** (the only supported runtime) — `llama-server` + a GGUF vision model (7B Qwen2-VL, or lighter 2B on CPU), auto-downloaded by the setup wizard; documents/audio route to a compact text model (Qwen2.5-3B)
 - **ExifTool 12+** — [exiftool.org](https://exiftool.org)
 - **FFmpeg 6+** (including ffprobe) — [ffmpeg.org](https://ffmpeg.org)
 - **fpcalc** (Chromaprint) — for audio fingerprint duplicate detection (auto-downloaded by EXE)
@@ -95,7 +93,7 @@ There is **no telemetry**. The app never collects or transmits usage data — no
 
 - **Atomic config writes** — `save_config()` writes to a temp file and `os.replace`s it, so a crash mid-save can never leave a truncated `config.json`.
 - **Import-safe startup** — config load/validation is deferred and non-fatal; a broken config degrades gracefully (`CONFIG_LOAD_ERROR` + a minimal fallback) instead of crashing the process at import time.
-- **Callback-driven settings** — the engine switcher runs in a Streamlit `on_change` callback (radio disabled while analysis is running) instead of mutating provider/config state mid-render.
+- **Callback-driven settings** (v1.6.4, Streamlit era) — the engine switcher ran in a Streamlit `on_change` callback instead of mutating provider/config state mid-render. Superseded in v2 by the React settings page + REST config routes.
 - **Safer Clear All** — never deletes saved sessions; sessions are removed only via the explicit Delete control. A shared `_reset_analysis_state()` helper keeps every reset path consistent (also clears the analysis index and duplicate results).
 - **ExifTool lifecycle** — the batch session is closed in a `finally`, and stale upload temp-dirs are cleaned up before re-extraction.
 - **Lazy previews** — thumbnail decoding and the duplicate table are built on demand instead of on every rerun.
@@ -144,7 +142,9 @@ Interactive mode per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze`, `[E]di
 | File | Purpose |
 |---|---|
 | `engine.py` | Core importable functions — config, ExifTool sessions, FFmpeg frame extraction, AI analysis, environment checks, file commits, duplicate detection, audio transcription |
-| `app.py` | Streamlit web app — Upload & Analyze tab (file upload, per-asset AI analysis, editable staging matrix, commit), Analytics Dashboard |
+| `launch.py` | Desktop entrypoint — picks a free loopback port, spawns uvicorn, opens the browser |
+| `server/` | FastAPI backend — REST routes, WebSocket analysis streaming, auth, in-memory staging |
+| `frontend/` | React (Vite + TypeScript) SPA — Upload & Analyze, staging matrix, analytics |
 | `cli.py` | CLI workflow — scan, extract, analyze, stage, commit |
 | `config.json` | Single source of truth — prompt profiles (9), categories (54), model settings, naming templates, providers, logging |
 
@@ -155,7 +155,7 @@ Interactive mode per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze`, `[E]di
 - **Upload & Analyze** — Drag-and-drop upload with extension/file-size validation, parallel FFmpeg frame extraction (single midpoint frame per video, hardware-accelerated), sequential per-asset AI analysis with progress bars
 - **Audio Transcription** — Local Whisper transcription for audio files and video audio tracks, fed into AI analysis context
 - **Document Analysis** — Text extraction from PDF, DOCX, XLSX, CSV, PPTX, TXT, MD, RTF for AI analysis
-- **Editable Staging Matrix** — `st.data_editor` with columns: select checkbox, original filename, type (media/doc/audio), editable proposed filename, category dropdown (with custom entry), comma-separated tags, read-only summary. Search/filter above the table. Native click-to-sort column headers.
+- **Editable Staging Matrix** — columns: select checkbox, original filename, type (media/doc/audio), editable proposed filename, category dropdown (with custom entry), comma-separated tags, read-only summary. Search/filter above the table. Native click-to-sort column headers.
 - **Bulk Category Assignment** — Select assets, pick a category (or type a custom one), apply to all checked rows at once
 - **AI Prompt Profiles** — 8 built-in profiles selectable right before analysis. Changeable per run.
 - **Naming Settings** — Configurable `{category}_{topic}_{description}` pattern, case style (snake_case, camelCase, etc.), max filename length — all with live preview updates in the staging table
@@ -163,8 +163,8 @@ Interactive mode per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze`, `[E]di
 - **CSV Import/Export** — Export staging table as CSV ("Export Staged Changes"), re-import later to restore or modify
 - **Commit** — Write metadata (XMP, QuickTime, EXIF, IPTC, ID3, Vorbis) and optionally sort into categorized subfolders
 - **Undo/Rollback** — Revert the last commit batch from the Analytics tab
-- **Analytics Dashboard** — Auto-refreshing stats cards, Plotly charts, filterable event timeline from JSONL logs, Reset All button
-- **Sidebar** — Engine (Ollama / llama.cpp) + model selection, environment health check indicators
+- **Analytics Dashboard** — Auto-refreshing stats cards, charts, filterable event timeline from JSONL logs, Reset All button
+- **Settings** — llama.cpp model selection, environment health check indicators
 
 ### Output Directory
 

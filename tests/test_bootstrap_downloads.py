@@ -104,8 +104,7 @@ class TestIsValidZip:
 
 class TestExtractExiftool:
     def test_extracts_exe_and_files_folder(self, tmp_path, monkeypatch):
-        extract_dir = tmp_path / "out"
-        BIN_DIR = tmp_path / "bin"
+        bin_dir = tmp_path / "bin"
         exe_data = b"MZ fake exe payload"
         files_txt = b"cpan needed by exiftool"
 
@@ -115,8 +114,8 @@ class TestExtractExiftool:
             zf.writestr("exiftool-13.59/exiftool_files/ExifTool_config", files_txt)
 
         monkeypatch.setattr(bootstrap, "CACHE_DIR", tmp_path)
-        monkeypatch.setattr(bootstrap, "BIN_DIR", BIN_DIR)
+        monkeypatch.setattr(bootstrap, "BIN_DIR", bin_dir)
 
         assert bootstrap._extract_exiftool(zip_path) is True
-        assert (BIN_DIR / "exiftool.exe").read_bytes() == exe_data
-        assert (BIN_DIR / "exiftool_files" / "ExifTool_config").read_bytes() == files_txt
+        assert (bin_dir / "exiftool.exe").read_bytes() == exe_data
+        assert (bin_dir / "exiftool_files" / "ExifTool_config").read_bytes() == files_txt

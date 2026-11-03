@@ -332,7 +332,7 @@ CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'llamacpp')
 USER_DATA_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "ai-media-renamer"
 
 # Use-case keys map to the external tools + model kinds they require. Kept in
-# engine.py so both bootstrap.py (setup wizard) and app.py (env checks) share
+# engine.py so both bootstrap.py (setup wizard) and the server (env checks) share
 # a single source of truth.
 SETUP_USE_CASES: dict[str, dict[str, Any]] = {
     "videos": {
@@ -624,7 +624,13 @@ def _redact_recursive(value: Any) -> Any:
     return value
 
 
-def log_event(logger: Any, level: str, event: str, file_name: str | None = None, details: dict[str, Any] | None = None) -> None:
+def log_event(
+    logger: Any,
+    level: str,
+    event: str,
+    file_name: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
     """Write a structured JSON log entry.
 
     Args:
@@ -2361,7 +2367,11 @@ def _exiftool_output_has_error(output: str) -> bool:
 SESSION_DIR = Path(os.environ.get('APPDATA', Path.home())) / "ai-media-renamer" / "sessions"
 
 
-def save_session(staged_assets: list[dict[str, Any]], uploaded_files: dict[str, Path], settings: dict[str, Any]) -> Path:
+def save_session(
+    staged_assets: list[dict[str, Any]],
+    uploaded_files: dict[str, Path],
+    settings: dict[str, Any],
+) -> Path:
     """Save session state to a JSON file for later restoration."""
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -3369,7 +3379,10 @@ def export_staging_json(staged_assets: list[dict[str, Any]]) -> str:
     return json.dumps(clean, indent=2)
 
 
-def import_staging_csv(csv_string: str, allowed_categories: tuple[str, ...] | list[str]) -> tuple[list[dict[str, Any]], list[str]]:
+def import_staging_csv(
+    csv_string: str,
+    allowed_categories: tuple[str, ...] | list[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
     """Parse a CSV string into staged asset dicts with category validation.
 
     Args:

@@ -29,7 +29,6 @@ from engine import (
     _llamacpp_server_running,
     _resolve_binary_path,
     check_for_updates,
-    config,
     configure_llamacpp_install,
     download_file,
     ensure_llamacpp_server,
@@ -53,7 +52,6 @@ if getattr(sys, "frozen", False):
 else:
     BASE_DIR = Path(__file__).parent
 
-APP_PATH = BASE_DIR / "app.py"
 CACHE_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "ai-media-renamer"
 BIN_DIR = CACHE_DIR / "bin"
 INSTALLER_CACHE = CACHE_DIR / "cache"
@@ -1189,38 +1187,6 @@ class ModelRecommendationDialog:
 def main():
     _log(f"main() argv={sys.argv} frozen={getattr(sys, 'frozen', False)}")
 
-    if "--streamlit-server" in sys.argv:
-        if "--check-only" in sys.argv:
-            import importlib.metadata
-            importlib.metadata.version("streamlit")
-            sys.exit(0)
-
-        _log(f"APP_PATH={APP_PATH} exists={APP_PATH.exists()}")
-        os.environ["STREAMLIT_CONFIG_PATH"] = str(BASE_DIR / ".streamlit" / "config.toml")
-        # Bind to loopback by default; opt into LAN exposure via
-        # config.json server.lan_expose = true (see AGENTS.md / 20.3).
-        lan_expose = bool(config.get("server", {}).get("lan_expose", False))
-        server_address = "0.0.0.0" if lan_expose else "127.0.0.1"
-        sys.argv = [
-            "streamlit",
-            "run",
-            str(APP_PATH),
-            "--server.port=8501",
-            "--server.headless=true",
-            f"--server.address={server_address}",
-            "--browser.serverAddress=",
-            "--global.developmentMode=false",
-            "--browser.gatherUsageStats=false",
-        ]
-        _log(f"argv set to {sys.argv}")
-        _log(f"STREAMLIT_CONFIG_PATH={os.environ.get('STREAMLIT_CONFIG_PATH')}")
-        from streamlit.runtime.scriptrunner import magic_funcs  # noqa: F401
-        from streamlit.web.cli import main as stcli_main
-        _log("calling stcli.main()")
-        stcli_main()
-        _log("stcli.main() returned")
-        return
-
     if "--no-gui" in sys.argv:
         class _StubWin:
             def set_step(self, *a): pass
@@ -1499,7 +1465,7 @@ def _headless_run():
     if info.get("update_available"):
         print(f"  Update available: {info['current']} -> {info['latest']}")
         print(f"  Download: {info['download_url']}")
-    print("Use 'streamlit run app.py' to start manually.")
+    print("Run 'python launch.py' to start the app manually.")
 
 
 if __name__ == "__main__":

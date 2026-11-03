@@ -405,5 +405,8 @@ class TestFormatAiError:
 
     def test_verbose_includes_raw(self):
         from engine import _format_ai_error
-        msg = _format_ai_error({"error": "openai_api_error", "detail": "fail", "raw_response": "RAW DATA"}, verbose=True)
+        msg = _format_ai_error(
+            {"error": "openai_api_error", "detail": "fail", "raw_response": "RAW DATA"},
+            verbose=True,
+        )
         assert "RAW DATA" in msg

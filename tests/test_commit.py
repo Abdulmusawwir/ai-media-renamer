@@ -257,7 +257,13 @@ class TestExecuteCommit:
         target_dir = tmp_path / "output"
         session = ExifToolSession()
         try:
-            result = execute_commit(asset, target_dir, sort_into_folders=False, exiftool_session=session, skip_metadata=True)
+            result = execute_commit(
+                asset,
+                target_dir,
+                sort_into_folders=False,
+                exiftool_session=session,
+                skip_metadata=True,
+            )
             assert isinstance(result, Path)
             assert (target_dir / result).exists()
         finally:
@@ -285,7 +291,13 @@ class TestExecuteCommit:
         target_dir = tmp_path / "output"
         session = ExifToolSession()
         try:
-            result = execute_commit(asset, target_dir, sort_into_folders=False, exiftool_session=session, skip_rename=True)
+            result = execute_commit(
+                asset,
+                target_dir,
+                sort_into_folders=False,
+                exiftool_session=session,
+                skip_rename=True,
+            )
             assert isinstance(result, Path)
             assert result.exists()
             assert asset["original_path"].exists()
@@ -346,7 +358,13 @@ class TestExecuteCommitBatch:
         target_dir = tmp_path / "output"
         session = ExifToolSession()
         try:
-            results = execute_commit_batch(assets, target_dir, sort_into_folders=False, exiftool_session=session, skip_metadata=True)
+            results = execute_commit_batch(
+                assets,
+                target_dir,
+                sort_into_folders=False,
+                exiftool_session=session,
+                skip_metadata=True,
+            )
             assert len(results) == 1
             assert isinstance(results[0], Path)
         finally:
@@ -365,7 +383,14 @@ class TestUndoRollback:
             UNDO_LOG_FILE.unlink()
 
     def test_log_commit_batch_writes_file(self, tmp_path: Path):
-        records = [{"original_path": str(tmp_path / "a.mp4"), "new_path": str(tmp_path / "out" / "b.mp4"), "category": "test", "tags": ["t"]}]
+        records = [
+            {
+                "original_path": str(tmp_path / "a.mp4"),
+                "new_path": str(tmp_path / "out" / "b.mp4"),
+                "category": "test",
+                "tags": ["t"],
+            }
+        ]
         result = log_commit_batch("batch-001", str(tmp_path / "out"), records)
         assert result.exists()
         batches = list_undo_batches()

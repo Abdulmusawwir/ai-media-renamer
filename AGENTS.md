@@ -44,7 +44,7 @@ Read @task.md → Read @AGENTS.md → Read @implementation_plan.md → Read @aud
 ### Commands
 ```bash
 pip install -r requirements.txt
-streamlit run app.py              # web app (primary)
+python launch.py                  # web app (primary: FastAPI + React SPA)
 python cli.py "path/to/dir"       # CLI
 python cli.py "path/to/dir" --verbose --profile cinematography --case-style kebab-case --max-chars 60
 python cli.py "path/to/dir" --dry-run                              # preview only
@@ -64,15 +64,16 @@ pytest                            # unit tests
 | File | Role | Must never |
 |---|---|---|
 | `engine.py` | Pure importable core | Call UI, run as entrypoint |
-| `app.py` | Streamlit web UI | Reimplement engine logic |
+| `launch.py` | Desktop entrypoint (spawns uvicorn, opens browser) | Reimplement engine logic |
+| `server/` | FastAPI backend + WebSocket analysis streaming | Reimplement engine logic |
+| `frontend/` | React (Vite + TS) SPA | Talk to the engine directly |
 | `cli.py` | CLI entrypoint | Reimplement engine logic |
 | `config.json` | Single source of truth | Duplicate config in Python code |
 
-### Per-asset rerun loop (app.py — most commonly broken pattern)
+### Per-asset analysis loop (server/routes/analysis.py — most commonly broken pattern)
 - Phase 1 (parallel FFmpeg extraction) runs ONCE per session.
-- Phase 2 does ONE `analyze_asset_with_ai()` call per script execution, increments `analysis_index`, calls `st.rerun()`.
-- Never batch AI calls in a single execution.
-- Re-analysis: filters `base64_cache` to selected file names, resets `analysis_index=0`, sets `analysis_in_progress=True`. Uses same Phase 2 loop.
+- Phase 2 streams ONE `analyze_asset_with_ai()` result per asset over the WebSocket, advancing an index; never batch AI calls in one blocking pass.
+- Re-analysis: filters `base64_cache` to selected file names and restarts the same Phase 2 loop.
 
 ### Single-frame extraction (engine.py)
 - `process_video_to_base64()` extracts ONE frame at the video midpoint (replaced the old 5×2 storyboard grid).
@@ -85,19 +86,17 @@ pytest                            # unit tests
 - `EXIF:XPKeywords=` — images only (Windows "Tags" column).
 - Metadata IS correct (verified by DaVinci Resolve, Premiere Pro). Windows Explorer just doesn't surface XMP for MP4 — not a bug.
 
-### Session state reset pattern
-On file change → reset: `analysis_done`, `analysis_in_progress`, `analysis_aborted`, `staged_assets`, `base64_cache`.
-On Clear All → also pop: `uploaded_files`, `temp_dir`, increment `clear_counter`.
-On commit success → clear: `uploaded_files`, `base64_cache`, `staged_assets`, `temp_dir`, `analysis_done`, `output_dir`, `logger`; increment `clear_counter`.
+### Session state (v2 backend)
+- The "current" staging set lives in `server/deps.py` as module-level `ACTIVE_STAGING` (`get_active_staging()` / `set_active_staging()`), not in a UI framework's session dict.
+- Cancellation is a single shared `threading.Event` (`get_cancel_event()` / `reset_cancel_event()`); one analysis job runs at a time.
+- Client-side state (selected files, staging rows) is React state in `frontend/src/pages/` — never persisted in the server beyond `ACTIVE_STAGING`.
 
-### AI Profile selector location
-- In `app.py` main interface (NOT sidebar), placed right before the "Run AI Analysis" button.
-- Changeable per analysis run. Has `on_change` that calls `set_active_profile()`.
-- Custom profile shows text area for user prompt + export button.
+### AI profile selection
+- Selected in `frontend/src/pages/Analysis.tsx` (`profile` state, options from `config.prompt_profiles`) and sent per run in the WS payload.
+- Server calls `engine.set_active_profile(profile)` in `server/routes/analysis.py` before analyzing.
 
-### Staging table dynamic category options
-- `st.column_config.SelectboxColumn` options built from `set(CATEGORY_LIST) | set(all categories in staged_assets)`.
-- Ensures custom categories applied via bulk apply remain selectable in the data editor.
+### Staging categories
+- `CATEGORY_LIST` on the engine is the canonical set; custom categories applied in bulk stay selectable because the UI unions them with the categories already present in the staged rows.
 
 ### Windows constraints
 - `str(fp).startswith()` for path checks (not `Path.startswith()` — positional on Windows).
@@ -112,7 +111,7 @@ Before marking ANY task `[x]` in `@implementation_plan.md`:
 1. **Search** the new/changed files for any violation of `@AGENTS.md` rules:
    - Wrong naming convention?
    - Forbidden import?
-   - Module boundary crossed (e.g., `st.` call in `engine.py`)?
+   - Module boundary crossed (e.g., a `server`/`fastapi` import in `engine.py`)?
 2. **Check** `@audit.md` Section 1 — did this introduce a new bug? Update the section if yes.
 3. **Check** `@audit.md` Section 3 — did this diverge from `@prd.md`? If yes, revert the scope expansion.
 4. **Update** `@task.md` — move completed items to done, add any discovered follow-ups.
