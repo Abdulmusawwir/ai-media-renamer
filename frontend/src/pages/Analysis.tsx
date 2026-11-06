@@ -78,6 +78,11 @@ function profileOptions(config: Record<string, unknown> | null): {
   return keys.map((k) => ({ value: k, label: pp?.[k]?.label ?? k }));
 }
 
+function autoRouteEnabled(config: Record<string, unknown> | null): boolean {
+  const pp = config?.prompt_profiles as { auto_route?: boolean } | undefined;
+  return pp?.auto_route !== false;
+}
+
 export default function Analysis() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -439,6 +444,11 @@ export default function Analysis() {
                 </option>
               ))}
             </select>
+            {autoRouteEnabled(config as Record<string, unknown> | null) && (
+              <p className="mt-1 text-xs text-text-dim">
+                Documents, spreadsheets, and audio use their own profiles automatically.
+              </p>
+            )}
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-text-dim">

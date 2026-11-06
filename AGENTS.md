@@ -91,9 +91,12 @@ pytest                            # unit tests
 - Cancellation is a single shared `threading.Event` (`get_cancel_event()` / `reset_cancel_event()`); one analysis job runs at a time.
 - Client-side state (selected files, staging rows) is React state in `frontend/src/pages/` — never persisted in the server beyond `ACTIVE_STAGING`.
 
-### AI profile selection
+### AI profile selection & auto-routing
 - Selected in `frontend/src/pages/Analysis.tsx` (`profile` state, options from `config.prompt_profiles`) and sent per run in the WS payload.
-- Server calls `engine.set_active_profile(profile)` in `server/routes/analysis.py` before analyzing.
+- Server calls `engine.set_active_profile(profile)` in `server/routes/analysis.py` before analyzing (this persists `prompt_profiles.active`).
+- **Auto-routing** (`prompt_profiles.auto_route`, default `true`): text assets override the selected profile by type via `engine.resolve_profile_for_path()` — `document` → `document_naming`, `spreadsheet` → `spreadsheet_naming`, `audio` → `audio_naming`; video/image keep the selected profile.
+- Per-asset switching MUST use `engine.profile_scope(name)` (context manager, in-memory only, restores on exit) — never `set_active_profile()`, which writes `config.json`. The routed name is emitted as `asset["profile"]`.
+- CLI mirrors this in `cli.py` (`_analyze()` in `process_library`, and `_interactive_commit()`'s re-analyze branch).
 
 ### Staging categories
 - `CATEGORY_LIST` on the engine is the canonical set; custom categories applied in bulk stay selectable because the UI unions them with the categories already present in the staged rows.

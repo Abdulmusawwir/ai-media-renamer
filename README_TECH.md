@@ -51,6 +51,7 @@ python launch.py
 
 ### AI Analysis
 - **9 prompt profiles** — General Balanced, General B-Roll, Cinematography, Motion & Overlays, Religious Landmarks, Document Naming, Spreadsheet Naming, Audio Files, and Custom
+- **Automatic profile routing** — documents, spreadsheets, and audio are analyzed with their own naming profile even when a visual profile is selected (disable via `prompt_profiles.auto_route`)
 - **2 local AI providers** — Ollama and llama.cpp (default for new installs). Fully offline: no cloud models, no API keys, no keychain required.
 - **Single-frame extraction** — one representative frame per video for accurate analysis
 - **Image analysis** — downscaled in memory, no disk writes
@@ -157,7 +158,7 @@ Interactive mode per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze`, `[E]di
 - **Document Analysis** — Text extraction from PDF, DOCX, XLSX, CSV, PPTX, TXT, MD, RTF for AI analysis
 - **Editable Staging Matrix** — columns: select checkbox, original filename, type (media/doc/audio), editable proposed filename, category dropdown (with custom entry), comma-separated tags, read-only summary. Search/filter above the table. Native click-to-sort column headers.
 - **Bulk Category Assignment** — Select assets, pick a category (or type a custom one), apply to all checked rows at once
-- **AI Prompt Profiles** — 8 built-in profiles selectable right before analysis. Changeable per run.
+- **AI Prompt Profiles** — 9 built-in profiles selectable right before analysis. Changeable per run. Text assets auto-route to document/spreadsheet/audio profiles unless disabled.
 - **Naming Settings** — Configurable `{category}_{topic}_{description}` pattern, case style (snake_case, camelCase, etc.), max filename length — all with live preview updates in the staging table
 - **Re-analyze Selected** — Check specific rows and re-analyze only those assets without re-processing the entire batch
 - **CSV Import/Export** — Export staging table as CSV ("Export Staged Changes"), re-import later to restore or modify

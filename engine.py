@@ -15,6 +15,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -159,7 +160,7 @@ def _minimal_config() -> dict[str, Any]:
         "naming": {"case_style": "snake_case", "max_filename_chars": 0, "sort_folders": True},
         "naming_templates": {"default": "{topic}_{description}"},
         "logging": {"directory": "logs", "max_upload_size": 10737418240},
-        "prompt_profiles": {"active": "general_balanced", "profiles": {}},
+        "prompt_profiles": {"active": "general_balanced", "auto_route": True, "profiles": {}},
     }
 
 
@@ -177,20 +178,21 @@ def get_active_profile() -> str:
     return config.get('prompt_profiles', {}).get('active', 'general_balanced')
 
 
-def get_active_categories() -> tuple[str, ...]:
-    """Return the allowed categories for the active prompt profile."""
-    profile_name = get_active_profile()
+def get_profile_categories(profile_name: str) -> tuple[str, ...]:
+    """Return the allowed categories for ``profile_name``.
+
+    Falls back to the global ``ALLOWED_CATEGORIES`` when the profile lists none.
+    """
     profile = config.get('prompt_profiles', {}).get('profiles', {}).get(profile_name, {})
     cats = profile.get('allowed_categories', [])
     return tuple(cats) if cats else ALLOWED_CATEGORIES
 
 
-def get_active_prompt() -> str:
-    """Return the active prompt text with categories expanded into the template."""
-    profile_name = get_active_profile()
+def get_profile_prompt(profile_name: str) -> str:
+    """Return ``profile_name``'s prompt with its categories expanded into it."""
     profile = config.get('prompt_profiles', {}).get('profiles', {}).get(profile_name, {})
     raw = profile.get('prompt', '')
-    cats = get_active_categories()
+    cats = get_profile_categories(profile_name)
     cat_str = "\n".join(f'   - "{c}"' for c in cats)
 
     for needle in ("the allowed categories list", "the allowed list"):
@@ -204,6 +206,16 @@ def get_active_prompt() -> str:
     return raw + constraint
 
 
+def get_active_categories() -> tuple[str, ...]:
+    """Return the allowed categories for the active prompt profile."""
+    return get_profile_categories(get_active_profile())
+
+
+def get_active_prompt() -> str:
+    """Return the active prompt text with categories expanded into the template."""
+    return get_profile_prompt(get_active_profile())
+
+
 def set_active_profile(name: str) -> None:
     """Set the active prompt profile by name and persist to config.
 
@@ -214,6 +226,26 @@ def set_active_profile(name: str) -> None:
     if name in profiles:
         config['prompt_profiles']['active'] = name
         save_config()
+
+
+@contextmanager
+def profile_scope(name: str):
+    """Temporarily change the active profile in memory, without saving config.
+
+    Used for per-asset auto-routing: the active profile is restored on exit so a
+    mixed batch can analyze each asset with its own profile.
+
+    Args:
+        name: Profile key to activate for the duration of the block.
+    """
+    profiles = config.get('prompt_profiles', {}).get('profiles', {})
+    previous = get_active_profile()
+    if name in profiles:
+        config['prompt_profiles']['active'] = name
+    try:
+        yield name if name in profiles else previous
+    finally:
+        config['prompt_profiles']['active'] = previous
 
 
 def get_profile_labels() -> dict[str, str]:
@@ -1063,6 +1095,66 @@ DOCUMENT_EXTENSIONS = config.get('document_extensions', [
 
 SPREADSHEET_EXTENSIONS = {'.xlsx', '.csv'}
 PRESENTATION_EXTENSIONS = {'.pptx'}
+
+# Asset kind -> prompt profile used when auto-routing is enabled. Visual assets
+# (video/image) have no entry: they keep whichever profile the user selected.
+AUTO_ROUTE_PROFILES = {
+    'audio': 'audio_naming',
+    'spreadsheet': 'spreadsheet_naming',
+    'document': 'document_naming',
+}
+
+
+def auto_route_enabled() -> bool:
+    """Return whether text assets are auto-routed to their type's profile."""
+    return bool(config.get('prompt_profiles', {}).get('auto_route', True))
+
+
+def asset_kind(path: str | Path) -> str:
+    """Classify ``path`` as ``video``/``image``/``audio``/``spreadsheet``/``document``."""
+    suffix = Path(path).suffix.lower()
+    if suffix in VIDEO_EXTENSIONS:
+        return 'video'
+    if suffix in IMAGE_EXTENSIONS:
+        return 'image'
+    if suffix in AUDIO_EXTENSIONS:
+        return 'audio'
+    if suffix in SPREADSHEET_EXTENSIONS:
+        return 'spreadsheet'
+    if suffix in DOCUMENT_EXTENSIONS:
+        return 'document'
+    return 'image'
+
+
+def resolve_profile_for_path(
+    path: str | Path,
+    selected: str | None = None,
+    auto_route: bool | None = None,
+) -> str:
+    """Pick the prompt profile to use for one asset.
+
+    Visual assets keep ``selected`` (or the active profile). Text assets
+    (audio/spreadsheet/document) are routed to their type-specific profile when
+    auto-routing is on. Unknown/missing profiles fall back to the selection.
+
+    Args:
+        path: Asset path, used only for its extension.
+        selected: Profile the user chose for this run; None means active.
+        auto_route: Override for ``auto_route_enabled()``.
+
+    Returns:
+        A profile key that exists in ``config``.
+    """
+    profiles = config.get('prompt_profiles', {}).get('profiles', {})
+    chosen = selected if selected in profiles else get_active_profile()
+    if auto_route is None:
+        auto_route = auto_route_enabled()
+    if not auto_route:
+        return chosen
+    target = AUTO_ROUTE_PROFILES.get(asset_kind(path))
+    if target in profiles:
+        return target
+    return chosen
 
 
 def extract_text_pdf(path: Path) -> str | None:

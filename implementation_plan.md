@@ -782,6 +782,7 @@ Tauri wrapping React frontend; Python backend sidecar; native dialogs/tray/updat
   - Replace generic `"Pick ONE category from the allowed list"` with profile-specific constraint
 - [x] In `engine.py`, modify `get_active_prompt()` to inject `allowed_categories` into the prompt string before sending to AI
   - [x] Test: upload RTF, MD, PDF files and verify they categorize as `documents`, `reports`, `contracts`, `invoices`, or `manuals` (not `text_overlays`, `presentation_slides`, `motion_graphics`)
+- [x] Auto-route text assets to their naming profile regardless of the selected visual profile (`engine.resolve_profile_for_path()` + `profile_scope()`, `prompt_profiles.auto_route`), wired in server/CLI; live e2e verified under `cinematography`
 
 ### 16.2 Content-based hash for documents
 - [x] In `engine.py`, update `compute_asset_hash()` to handle documents:

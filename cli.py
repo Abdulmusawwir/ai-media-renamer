@@ -36,6 +36,8 @@ from engine import (
     normalize_category,
     process_image_to_base64,
     process_video_to_base64,
+    profile_scope,
+    resolve_profile_for_path,
     restore_default_config,
     sanitize_name,
     set_active_profile,
@@ -321,10 +323,20 @@ def process_library(
             else:
                 print(f"[{idx}/{len(pending_assets)}] AI analyzing: {file_path.name}...", end="", flush=True)
 
-            if is_text:
-                ai_result = analyze_document_with_ai(data, verbose=verbose)
-            else:
-                ai_result = analyze_asset_with_ai(data, verbose=verbose)
+            # Text assets (documents/spreadsheets/audio) are analyzed with their
+            # own profile when auto-routing is on; visual assets keep the run's.
+            asset_profile = resolve_profile_for_path(file_path, profile)
+            with profile_scope(asset_profile):
+                if is_text:
+                    ai_result = analyze_document_with_ai(data, verbose=verbose)
+                else:
+                    ai_result = analyze_asset_with_ai(data, verbose=verbose)
+
+                if ai_result['ok']:
+                    ai_data = ai_result['data']
+                    staged_category, category_fallback = validate_category(
+                        ai_data.get('suggested_category')
+                    )
 
             if not ai_result['ok']:
                 error_msg = _format_ai_error(ai_result, verbose=verbose)
@@ -335,10 +347,8 @@ def process_library(
                     progress.update(task, advance=1)
                 continue
 
-            ai_data = ai_result['data']
             safe_name = sanitize_name(ai_data['new_filename'])
 
-            staged_category, category_fallback = validate_category(ai_data.get('suggested_category'))
             if category_fallback and not _show_progress:
                 original = ai_data.get('suggested_category', '(missing)')
                 if verbose:
@@ -748,11 +758,16 @@ def _interactive_commit(
                 print("  [DRY RUN] Would re-analyze with AI.")
                 continue
             print("  Re-analyzing with AI...", end="", flush=True)
-            ai_result = analyze_asset_with_ai(asset["base64_data"], verbose=False)
+            with profile_scope(
+                resolve_profile_for_path(asset["original_name"], None)
+            ):
+                ai_result = analyze_asset_with_ai(asset["base64_data"], verbose=False)
+                staged_category = ""
+                if ai_result['ok']:
+                    ai_data = ai_result['data']
+                    staged_category, _ = validate_category(ai_data.get('suggested_category'))
             if ai_result['ok']:
-                ai_data = ai_result['data']
                 new_name = sanitize_name(ai_data['new_filename'])
-                staged_category, _ = validate_category(ai_data.get('suggested_category'))
                 asset['staged_name'] = new_name
                 asset['category'] = staged_category
                 asset['tags'] = ai_data.get('tags', [])

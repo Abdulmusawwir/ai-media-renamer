@@ -227,6 +227,7 @@
   },
   "prompt_profiles": {
     "active": "general_balanced",
+    "auto_route": true,
     "profiles": {
       "general_balanced": {
         "label": "General Purpose",

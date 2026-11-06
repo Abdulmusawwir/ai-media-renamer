@@ -137,21 +137,28 @@ def run_analysis(
             emit(make_event("asset_error", name=path.name, error="extraction failed", index=idx, total=total))
             continue
 
+        # Text assets (documents/spreadsheets/audio) are analyzed with their own
+        # profile when auto-routing is on; visual assets keep the run's profile.
+        asset_profile = engine.resolve_profile_for_path(path, profile)
         try:
-            if is_text:
-                ai = engine.analyze_document_with_ai(preview)
-            else:
-                ai = engine.analyze_asset_with_ai(preview)
+            with engine.profile_scope(asset_profile):
+                if is_text:
+                    ai = engine.analyze_document_with_ai(preview)
+                else:
+                    ai = engine.analyze_asset_with_ai(preview)
+                if not ai.get("ok"):
+                    detail = ai.get("detail") or ai.get("error") or "analysis failed"
+                    emit(make_event(
+                        "asset_error", name=path.name, error=str(detail), index=idx, total=total,
+                    ))
+                    continue
+                # Build inside the scope so category validation uses this profile.
+                asset = _build_asset(path, ai.get("data", {}), is_text, kind, preview)
         except Exception as exc:
             emit(make_event("asset_error", name=path.name, error=str(exc), index=idx, total=total))
             continue
 
-        if not ai.get("ok"):
-            detail = ai.get("detail") or ai.get("error") or "analysis failed"
-            emit(make_event("asset_error", name=path.name, error=str(detail), index=idx, total=total))
-            continue
-
-        asset = _build_asset(path, ai.get("data", {}), is_text, kind, preview)
+        asset["profile"] = asset_profile
 
         if template_string:
             rendered = engine.apply_naming_template(
