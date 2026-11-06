@@ -1,5 +1,22 @@
 # Changelog
 
+## [v2.1.0] — 2026-11-06
+
+### Reliability
+- **Fix: the CI-built exe shipped without the UI.** `build_v2.spec` bundles `frontend/dist`, but the release workflow never built the frontend — PyInstaller only warns and produces an exe whose `/` has no SPA. The workflow now runs `npm ci && npm run build` before packaging.
+- **Fix: silent llama-server launch failure (issue #6).** `ensure_llamacpp_server()` combined `CREATE_NO_WINDOW` with `DETACHED_PROCESS`, which makes Windows ignore the no-window flag and can fail to open the exe; `stdin` was also inherited from a console-less parent. It now uses `CREATE_NO_WINDOW` alone, redirects `stdin`, and writes stdout/stderr to `logs/llamacpp_server.log` so a real crash is diagnosable.
+- **Fix: analysis could "complete" with zero assets.** `run_analysis()` now fail-fasts with an error event when the local AI server is down, and the UI only navigates to staging when at least one asset was produced.
+- **Fix: `127.0.0.1` vs `localhost` loads.** New `launch.py` binds both loopback families (Windows `IPV6_V6ONLY` means one `::` socket does not accept IPv4) and the frontend drops credentialed CORS requests.
+- **Fix: missing `Path` import** in `server/routes/sessions.py` (ruff F821).
+
+### Automatic profile routing
+- Documents, spreadsheets, and audio are analyzed with `document_naming`, `spreadsheet_naming`, and `audio_naming` respectively, even when a visual profile is selected. Video/image keep the selection. Controlled by `prompt_profiles.auto_route` (default `true`) and applied per asset without persisting config changes. The routed profile is emitted as `asset.profile`.
+
+### Packaging & cleanup
+- **`build.spec` retired** — CI builds `build_v2.spec --noconfirm` and smoke-tests by booting the exe and polling `/health`.
+- **Dead Streamlit UI removed** — `app.py` (2,149 lines) and its unused dependencies (`streamlit`, `plotly`, `pandas`, `pywebview`) are gone; `ruff check .` is clean.
+- Documentation (`AGENTS.md`, `README_TECH.md`, `audit.md`) re-pointed at the v2 architecture.
+
 ## [v2.0.0] — 2026-08-22
 
 ### Rewrite: local-first React + FastAPI architecture

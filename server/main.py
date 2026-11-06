@@ -35,7 +35,7 @@ CORS_ALLOW_ORIGINS = ["*"]
 
 def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""
-    app = FastAPI(title="AI Media Renamer API", version="2.0.0")
+    app = FastAPI(title="AI Media Renamer API", version=engine.VERSION)
 
     # CORS origins: prefer an explicit ``server.cors_origins`` list from config
     # when present, otherwise fall back to the open default.
@@ -88,7 +88,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["meta"])
     def health() -> dict:
-        return {"status": "ok", "version": "2.0.0"}
+        return {"status": "ok", "version": engine.VERSION}
 
     # Serve the built React frontend LAST so API routes and /health (registered
     # above) match first and are not swallowed by the catch-all mount.

@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 import engine
 from server.main import app
+
+VERSION_FILE = Path(__file__).resolve().parent.parent / "VERSION"
 
 
 def test_updates_reports_current_version():
@@ -14,7 +18,10 @@ def test_updates_reports_current_version():
     client = TestClient(app)
     body = client.get("/api/updates/check").json()
     assert body["current_version"] == engine.VERSION
-    assert engine.VERSION == "2.0.0"
+
+
+def test_engine_version_matches_version_file():
+    assert engine.VERSION == VERSION_FILE.read_text(encoding="utf-8").strip()
 
 
 def test_session_traversal_rejected():
