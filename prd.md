@@ -90,7 +90,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 - [x] QuickTime tags for video: `Description`, `Comment`, `Keywords`
 - [x] Keys tags for video: `Description`, `Keywords`
 - [x] EXIF tags for images: `ImageDescription`, `UserComment`, `XPKeywords`, IPTC `Keywords`
-- [x] Commit writes in place into the scanned directory (CLI) or the request's `target_dir` (API), optionally into category subfolders
+- [x] Commit writes in place next to each original file (CLI and web API when `target_dir` is omitted) or into an explicit `target_dir`, optionally into category subfolders; server batches are logged for rollback
 - [x] Collision-safe renames; per-asset commit status and error surfaced back into staging
 - [x] Undo/rollback engine — `undo_log.jsonl`, `--rollback` CLI flag, "Rollback last batch" on the Commit & Export page
 

@@ -2391,10 +2391,10 @@ def execute_commit_batch(
     Returns:
         List of relative paths or 'ERROR:<message>' strings, one per asset.
     """
-    prepared: list[tuple[dict[str, Any], Path]] = []
-    results: list[str | Path] = []
+    prepared: list[tuple[int, dict[str, Any], Path]] = []
+    results: list[str | Path | None] = [None] * len(assets)
 
-    for asset in assets:
+    for index, asset in enumerate(assets):
         old_path = asset['original_path']
         safe_name = asset['staged_name']
         suffix = old_path.suffix.lower()
@@ -2404,40 +2404,36 @@ def execute_commit_batch(
                 target_file = _commit_move(old_path, final_folder, old_path.stem, old_path.suffix, skip_rename=True)
             else:
                 target_file = _commit_move(old_path, final_folder, safe_name, suffix, skip_rename=False)
-            prepared.append((asset, target_file))
+            prepared.append((index, asset, target_file))
         except Exception as exc:
-            results.append(f"ERROR:{exc}")
+            results[index] = f"ERROR:{exc}"
 
-    all_args = [_build_commit_args(asset, tf) for asset, tf in prepared]
+    all_args = [_build_commit_args(asset, tf) for _, asset, tf in prepared]
     if not skip_metadata:
-        files_with_args: list[tuple[dict[str, Any], Path]] = []
-        for (asset, tf), file_args in zip(prepared, all_args):
+        files_with_args: list[tuple[int, dict[str, Any], Path]] = []
+        for (index, asset, tf), file_args in zip(prepared, all_args):
             if file_args:
-                files_with_args.append((asset, tf))
+                files_with_args.append((index, asset, tf))
             else:
                 _write_document_metadata(tf, asset)
         if files_with_args:
-            exiftool_args = [_build_commit_args(asset, tf) for asset, tf in files_with_args]
+            exiftool_args = [_build_commit_args(asset, tf) for _, asset, tf in files_with_args]
             try:
                 outputs = exiftool_session.execute_batch(exiftool_args)
-                for (asset, tf), output in zip(files_with_args, outputs):
+                for (index, _asset, tf), output in zip(files_with_args, outputs):
                     if _exiftool_output_has_error(output):
-                        results.append(f"ERROR:ExifTool metadata write failed for {tf.name}")
+                        results[index] = f"ERROR:ExifTool metadata write failed for {tf.name}"
                     else:
-                        results.append(_commit_result(tf, target_dir, skip_rename))
+                        results[index] = _commit_result(tf, target_dir, skip_rename)
             except Exception as exc:
-                for asset, tf in files_with_args:
-                    results.append(f"ERROR:ExifTool metadata write failed: {exc}")
+                for index, _asset, _tf in files_with_args:
+                    results[index] = f"ERROR:ExifTool metadata write failed: {exc}"
 
-    for asset, target_file in prepared:
-        already_reported = any(
-            r == target_file or r == target_file.relative_to(target_dir)
-            for r in results
-        )
-        if not already_reported:
-            results.append(_commit_result(target_file, target_dir, skip_rename))
+    for index, _asset, target_file in prepared:
+        if results[index] is None:
+            results[index] = _commit_result(target_file, target_dir, skip_rename)
 
-    return results
+    return [r if r is not None else "ERROR:asset was not committed" for r in results]
 
 
 def _commit_result(target_file: Path, target_dir: Path, skip_rename: bool) -> str | Path:

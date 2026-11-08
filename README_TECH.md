@@ -180,7 +180,7 @@ Interactive mode per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze`, `[E]di
 
 ### Output Directory
 
-The commit destination is the request's `target_dir`. The CLI commits in place, into the scanned directory (or its category subfolders when `naming.sort_folders` is on). The web UI does not currently send a target, so the API default (`"."`, the server's working directory) applies.
+The CLI commits in place, into the scanned directory (or its category subfolders when `naming.sort_folders` is on). `POST /api/commit` behaves the same way when `target_dir` is omitted: each asset is renamed next to its original file. Send an explicit `target_dir` to move everything into one destination folder. Every successful server commit is recorded in the undo log, so "Rollback last batch" works for web commits too.
 
 ---
 

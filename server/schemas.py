@@ -32,7 +32,7 @@ class CommitRequest(BaseModel):
     """Payload to commit staged assets to disk."""
 
     assets: list[dict[str, Any]] = Field(default_factory=list)
-    target_dir: str = "."
+    target_dir: str | None = None
     sort_folders: bool = True
     skip_rename: bool = False
     skip_metadata: bool = False
