@@ -1,5 +1,7 @@
 # Remediation Plan — AI Media Renamer
 
+> **HISTORICAL RECORD — v1.x (Streamlit era).** `app.py` and the Streamlit UI were removed in v2.0.0; the current architecture is documented in `README_TECH.md`, `AGENTS.md`, and `High Level Diagrammatic View.txt`. Keep this file as the audit trail of the v1 remediation waves.
+>
 > Source: codebase review (engine.py / app.py / cli.py / bootstrap.py / config / tests).
 > Four workstreams. Wave 1 = all Critical + High items. Wave 2 = Medium backlog. Wave 3 = Low + docs/config hygiene.
 > Each wave runs on its own feature branch and must pass the AGENTS.md Verification Gate (ruff, pytest, `py_compile`, audit.md sync) before commit.

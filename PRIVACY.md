@@ -19,9 +19,9 @@ AI Media Renamer is a **fully local** media management tool. All AI analysis, fi
 
 ## Data Security
 
-- **No data leaves your machine** — AI calls go directly from your app to your local runtime (llama.cpp or Ollama); no network request is ever made for analysis
+- **No data leaves your machine** — AI calls go directly from your app to the local llama.cpp server; no network request is ever made for analysis
 - **No API keys, no keychain** — since v1.7.0 the app has no cloud providers and stores no API keys, so there is nothing to leak
-- **Loopback-only by default** — the web server binds to `127.0.0.1`, so it is not reachable from your local network unless you explicitly enable LAN exposure in Configuration
+- **Loopback-only by default** — the launcher binds `127.0.0.1` and `::1` only, so the app is not reachable from your local network unless you explicitly enable LAN exposure
 - **No cookies, fingerprinting, or tracking**
 - **No third-party analytics or telemetry services**
 - **Logs** are written locally to `%APPDATA%/ai-media-renamer/logs/`, are never transmitted, and strip absolute paths by default (`redact_paths`); secrets are masked everywhere they could appear

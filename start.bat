@@ -2,7 +2,7 @@
 REM ===========================================================================
 REM AI Media Renamer v2 - quick launcher for Windows
 REM Starts the FastAPI backend (which serves the built React frontend) and opens
-REM the app in your default browser at http://localhost:8000
+REM the app in your default browser on the first free loopback port (8000-8010)
 REM ===========================================================================
 
 setlocal
@@ -28,13 +28,7 @@ python -m pip install --quiet --upgrade pip
 python -m pip install --quiet -e .
 
 REM --- Launch the server -----------------------------------------------------
-echo Starting server on http://localhost:8000 ...
-start "" python -m uvicorn server.main:app --host 127.0.0.1 --port 8000
-
-REM Give the server a moment to boot, then open the browser
-timeout /t 3 >nul
-start "" http://localhost:8000
-
-echo Done. Press any key to exit this window (the server keeps running in the background).
+echo Starting AI Media Renamer...
+python launch.py
 pause
 endlocal

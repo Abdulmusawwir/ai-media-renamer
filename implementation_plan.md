@@ -1,12 +1,14 @@
 # Implementation Plan — AI Media Renamer
 
-> **Status:** v1.x (Streamlit era) complete — Layers 1–20 shipped through v1.7.0. **Next major: v2.0.0 — Streamlit → React + FastAPI rewrite, llama.cpp-only.**
+> **Status:** v1.x (Streamlit era) complete — Layers 1–20 shipped through v1.7.0.
+> **v2.0.0** (Streamlit → React + FastAPI, llama.cpp-only) and **v2.1.0** (per-asset profile auto-routing, release build compiles the SPA) are shipped.
+> **Current state:** the v2 backend/frontend, not this plan, is authoritative. Use `AGENTS.md` + `README_TECH.md` for the live architecture; the checkboxes below are a historical record of v1/v2 work.
 
 ---
 
-## v2.0.0 — Streamlit → React + FastAPI, llama.cpp-only (PLAN)
+## v2.0.0 — Streamlit → React + FastAPI, llama.cpp-only (SHIPPED)
 
-> **Status:** v2 core complete — Phases 0–4 done on branch `v2/frontend-rewrite`. Backend (`server/`) wraps `engine.py`; React/TS frontend builds and is served by the API; packaging (pip entry, Docker, start.bat, README) in place. Remaining backlog in the note below.
+> **Status:** complete — Phases 0–4 shipped in v2.0.0; auto-routing shipped in v2.1.0. Backend (`server/`) wraps `engine.py`; React/TS frontend builds and is served by the API; packaging (pip entry, Docker, start.bat, README) in place. Remaining backlog in the note below.
 
 ### Overview
 
@@ -17,9 +19,9 @@
 - **Target:** beautiful, snappy, fluid, best-on-GitHub. WebSocket-driven real-time progress (no `st.rerun()` hacks), virtualized staging table, native desktop feel via optional Tauri wrapper (stretch).
 
 ### Known v2 backlog (not blockers, future work)
-- **Phase 1:** real model-download helper in `engine.py` (current `/api/models/download` is a stub); auth enforcement (JWT helpers exist, no route requires auth yet); production hardening (rate limits, strict CORS for LAN).
+- **Phase 1:** =DONE= model-download helper (`stream_model_download`) + `/api/models/download` with status polling; JWT auth enforcement on mutating routes (`AMR_AUTH_ENABLED=1`, `require_auth`, WS `?token=`); rate limiting (`AMR_RATE_LIMIT`) and `server.cors_origins`.
 - **Phase 2:** StagingTable feature parity — 10k-row virtualization, shift-click range select, column sort/filter UI, thumbnail hover; DirectoryPicker "recent dirs"; keyboard shortcuts (Ctrl+Enter/S/Z/Delete/Escape).
-- **Cross-cutting:** telemetry/error reporting, CI for `frontend/` (type-check + build), end-to-end test of the WS analysis flow against a real llama.cpp server.
+- **Cross-cutting:** telemetry/error reporting (intentionally not implemented — no telemetry), CI frontend build (=DONE= in `build.yml` for tagged releases), end-to-end test of the WS analysis flow against a real llama.cpp server.
 
 ### Part 1 — Ollama removal scope
 

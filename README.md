@@ -18,11 +18,11 @@ AI Media Renamer looks at every video, photo, document, and audio file you throw
 
 This is the tool that fixes it.
 
-- **Drop in your mess → get back order.** One click starts the AI. It watches every frame, reads every document, transcribes every voice note, and figures out what each file is.
+- **Drop in your mess → get back order.** One click starts the AI. It samples a representative frame from every video, reads every document, transcribes every voice note, and figures out what each file is.
 - **Names you'd actually search for.** `IMG_5821.jpg` becomes `quran_carving_ornate_detail.jpg`. `Recording_004.m4a` becomes `voice_note_team_standup_notes.m4a`.
-- **Metadata written *into* the file — not a spreadsheet you'll ignore.** DaVinci Resolve, Premiere Pro, and Windows Explorer read it natively. Search "drone" and everything drone-related shows up.
-- **Private by design.** Everything runs locally on a bundled AI runtime — llama.cpp on fresh installs. Your family videos and client work never leave your computer.
-- **Safe.** Nothing is touched until you hit Commit, and one click on **Undo** reverses the whole batch.
+- **Metadata written *into* the file — not a spreadsheet you'll ignore.** DaVinci Resolve and Premiere Pro read it natively; Explorer surfaces the EXIF keywords on images. Search "drone" and everything drone-related shows up.
+- **Private by design.** Everything runs locally on the bundled llama.cpp runtime. Your family videos and client work never leave your computer.
+- **Safe.** Nothing is touched until you hit Commit, and one click on **Rollback last batch** reverses it.
 
 ---
 
@@ -33,10 +33,6 @@ This is the tool that fixes it.
 ![AI picks a name, category, and tags for every file](assets/screenshot-staging.png)
 
 *AI reviews every file and proposes a filename, category, and searchable tags — all in one editable table.*
-
-![Track how much of your library you've tamed](assets/screenshot-dashboard.png)
-
-*A live dashboard shows what's been organized, how much storage is tidied, and a full commit history.*
 
 ![A setup wizard that reads the room](assets/screenshot-wizard.png)
 
@@ -65,8 +61,8 @@ This is the tool that fixes it.
 ### Packaged / one-click
 
 1. Download `AIMediaRenamer.exe` from the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest) — no installation, no accounts.
-2. Double-click. The wizard sets up the local AI runtime on first launch, then opens the app at `http://localhost:8000`.
-3. Drop in your files → **Run AI Analysis** → review in the staging table → **Commit** (one-click Undo reverses the batch).
+2. Double-click. The wizard sets up the local AI runtime on first launch, then opens the app in your browser on a loopback port (8000–8010).
+3. Drop in your files → **Run AI Analysis** → review in the staging table → **Commit** (one-click Rollback reverses the batch).
 
 ### Run from source (dev)
 
@@ -90,7 +86,7 @@ docker compose up --build
 
 ### Windows quick launcher
 
-Run `start.bat` — it ensures Python (via winget if missing), installs the package with `pip install -e .`, launches the server, and opens `http://localhost:8000`.
+Run `start.bat` — it ensures Python (via winget if missing), installs the package with `pip install -e .`, then runs `launch.py` (free loopback port, browser opened automatically).
 
 > Prefer the command line or want the full feature list, CLI flags, and system requirements? See [README_TECH.md](README_TECH.md).
 
@@ -114,12 +110,13 @@ By default the server binds to loopback (`127.0.0.1`) and runs **unauthenticated
 
 ## Roadmap — we're just getting started
 
+- [x] **v2.1.0 — Auto-routing & release fix** — documents, spreadsheets, and audio are routed to their own naming profiles automatically, and the release build now compiles the React SPA before packaging.
 - [x] **v2.0.0 — React + FastAPI rewrite** — llama.cpp-only local runtime, REST + WebSocket API, loopback-first LAN auth (JWT), and a packaged `AIMediaRenamer.exe`.
 - [x] **Security hardening pass** — v1.6.3: checksum-verified downloads, frozen lockfile, secret redaction, keychain fail-closed, loopback-only server with LAN opt-in, input-validation hardening, log path redaction
-- [x] **Stability & engine hardening** — v1.6.4: atomic config saves, import-safe startup, callback-driven engine switching, safer Clear All (sessions preserved), CLI argument validation
+- [x] **Stability & engine hardening** — v1.6.4: atomic config saves, import-safe startup, safer Clear All (sessions preserved), CLI argument validation
 - [x] **Fully local & offline** — v1.7.0: cloud providers, API keys, and the keychain layer removed. Only local runtimes (llama.cpp).
+- [x] **Auto-sorting into category folders** — `naming.sort_folders` (on by default) and `--sort-folders` / `--no-sort-folders`
 - [ ] More AI models and language support
-- [ ] Auto-sorting into category folders
 - [ ] Bulk import from cloud drives
 - [ ] And whatever the community asks for next
 
