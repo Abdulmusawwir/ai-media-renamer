@@ -63,14 +63,109 @@ def _resolve_workers(cfg_value: int | float | None) -> int:
     return os.cpu_count() or 4
 
 # -----------------------------------------------------------------------------
+# 0b. PATHS, DATA ROOT & CONFIG SEEDING
+# -----------------------------------------------------------------------------
+
+def is_frozen() -> bool:
+    """Return True when running from a PyInstaller-frozen executable."""
+    return bool(getattr(sys, "frozen", False))
+
+
+BASE_DIR = Path(sys._MEIPASS) if is_frozen() else Path(__file__).parent
+BUNDLE_DIR = Path(sys._MEIPASS) if is_frozen() else BASE_DIR
+
+
+def _has_data_dir_override() -> bool:
+    """Return True when ``AMR_DATA_DIR`` explicitly redirects the data root."""
+    return bool(os.environ.get("AMR_DATA_DIR"))
+
+
+def resolve_data_dir() -> Path:
+    """Return the writable application data root for the current mode."""
+    override = os.environ.get("AMR_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+    roaming = os.environ.get("APPDATA")
+    if roaming:
+        return Path(roaming) / "ai-media-renamer"
+    return Path.home() / "AppData" / "Roaming" / "ai-media-renamer"
+
+
+APP_DATA_DIR = resolve_data_dir()
+USER_DATA_DIR = APP_DATA_DIR
+
+
+def resolve_config_path() -> Path:
+    """Return the active config path: data root when frozen/overridden, else repo."""
+    if is_frozen() or _has_data_dir_override():
+        return APP_DATA_DIR / "config.json"
+    return BASE_DIR / "config.json"
+
+
+CONFIG_PATH = resolve_config_path()
+
+
+def _resolve_log_dir(cfg: dict[str, Any]) -> Path:
+    """Resolve ``logging.directory`` against the mode's writable root."""
+    raw = Path(cfg.get('logging', {}).get('directory', 'logs'))
+    if raw.is_absolute():
+        return raw
+    if is_frozen() or _has_data_dir_override():
+        return APP_DATA_DIR / raw
+    return BASE_DIR / raw
+
+
+def _copy_json_if_valid(src: Path, dst: Path) -> bool:
+    """Copy ``src`` to ``dst`` only when ``src`` exists, differs, and parses as JSON."""
+    try:
+        if src == dst or not src.exists():
+            return False
+        json.loads(src.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    try:
+        shutil.copy2(src, dst)
+    except OSError:
+        return False
+    return True
+
+
+def _seed_config_if_missing() -> None:
+    """Create ``CONFIG_PATH`` on first frozen/override run.
+
+    A legacy portable config next to the executable or ``engine.py`` wins so
+    existing users keep their settings; otherwise the bundled default is used.
+    """
+    if not (is_frozen() or _has_data_dir_override()):
+        return
+    if CONFIG_PATH.exists():
+        return
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    legacy_candidates = [
+        Path(sys.executable).parent / "config.json",
+        BASE_DIR / "config.json",
+    ]
+    for legacy in legacy_candidates:
+        if _copy_json_if_valid(legacy, CONFIG_PATH):
+            return
+    _copy_json_if_valid(BUNDLE_DIR / "config.default.json", CONFIG_PATH)
+
+
+_seed_config_if_missing()
+
+# -----------------------------------------------------------------------------
 # 1. CONFIGURATION & LOGGING
 # -----------------------------------------------------------------------------
 
-def load_config(config_path: str = "config.json", quiet: bool = False) -> dict[str, Any]:
+def load_config(config_path: str | Path | None = None, quiet: bool = False) -> dict[str, Any]:
     """Load configuration from JSON file with auto-recovery from default.
 
     Args:
-        config_path: Relative path to the config file from the script directory.
+        config_path: Absolute path, path relative to ``BASE_DIR``, or None to
+            use the mode-resolved ``CONFIG_PATH``.
         quiet: When True, suppress recovery/unrecoverable prints (used at import
             time so importing engine never prints to stdout).
 
@@ -82,9 +177,16 @@ def load_config(config_path: str = "config.json", quiet: bool = False) -> dict[s
             ``config.default.json`` can be loaded. Replaces the old
             ``sys.exit`` so callers can defer handling.
     """
-    script_dir = Path(__file__).parent
-    full_path = script_dir / config_path
+    if config_path is None:
+        full_path = CONFIG_PATH
+    else:
+        candidate = Path(config_path)
+        full_path = candidate if candidate.is_absolute() else BASE_DIR / candidate
     default_path = full_path.parent / "config.default.json"
+    if config_path is None and not default_path.exists():
+        bundled_default = BUNDLE_DIR / "config.default.json"
+        if bundled_default.exists():
+            default_path = bundled_default
     try:
         with open(full_path, encoding='utf-8') as f:
             cfg = json.load(f)
@@ -121,14 +223,12 @@ def load_config(config_path: str = "config.json", quiet: bool = False) -> dict[s
 
 
 def restore_default_config() -> bool:
-    """Overwrite config.json with config.default.json. Returns True on success."""
-    import shutil
-    script_dir = Path(__file__).parent
-    default_path = script_dir / "config.default.json"
-    target_path = script_dir / "config.json"
+    """Overwrite the active config with the bundled default. Returns True on success."""
+    default_path = BUNDLE_DIR / "config.default.json"
     if not default_path.exists():
         return False
-    shutil.copy2(default_path, target_path)
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(default_path, CONFIG_PATH)
     return True
 
 
@@ -283,9 +383,9 @@ NAMED_TEMPLATES = config.get('naming_templates', {
 })
 DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}")
 
-LOG_DIR = Path(config['logging']['directory'])
+LOG_DIR = _resolve_log_dir(config)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 MAX_UPLOAD_SIZE = int(config['logging'].get('max_upload_size', 10737418240))
-CONFIG_PATH = Path(__file__).parent / "config.json"
 PROVIDER_REGISTRY = {}
 
 
@@ -297,6 +397,7 @@ def save_config() -> None:
     config that breaks the next import.
     """
     global config
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = CONFIG_PATH.with_suffix(".json.tmp")
     try:
         with open(tmp_path, 'w', encoding='utf-8') as f:
@@ -324,6 +425,7 @@ def reload_config() -> None:
     global DEFAULT_SORT_FOLDERS
     global NAMED_TEMPLATES, DEFAULT_TEMPLATE_STRING, PROMPT_PROFILES, CURRENT_PROVIDER
     global IMAGE_PREVIEW_MAX_EDGE, VIDEO_GRID_SCALE, DOCUMENT_EXTENSIONS, CONFIG_LOAD_ERROR
+    global LOG_DIR
     try:
         config = load_config(quiet=True)
         CONFIG_LOAD_ERROR = None
@@ -355,13 +457,14 @@ def reload_config() -> None:
     })
     DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}")
     PROMPT_PROFILES = get_profile_labels()
+    LOG_DIR = _resolve_log_dir(config)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'llamacpp')
 
 # -----------------------------------------------------------------------------
 # 1b. SETUP / ONBOARDING (use-case → one-time dependency matrix)
 # -----------------------------------------------------------------------------
 
-USER_DATA_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "ai-media-renamer"
 
 # Use-case keys map to the external tools + model kinds they require. Kept in
 # engine.py so both bootstrap.py (setup wizard) and the server (env checks) share
