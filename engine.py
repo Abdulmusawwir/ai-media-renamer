@@ -2555,7 +2555,7 @@ def _exiftool_output_has_error(output: str) -> bool:
 # 5b. SESSION PERSISTENCE
 # -----------------------------------------------------------------------------
 
-SESSION_DIR = Path(os.environ.get('APPDATA', Path.home())) / "ai-media-renamer" / "sessions"
+SESSION_DIR = USER_DATA_DIR / "sessions"
 
 
 def save_session(
@@ -2685,7 +2685,7 @@ def load_session(session_path: str | Path) -> dict[str, Any]:
 # 5c. UNDO / ROLLBACK
 # -----------------------------------------------------------------------------
 
-UNDO_DIR = Path(os.environ.get("APPDATA", Path.home())) / "ai-media-renamer"
+UNDO_DIR = USER_DATA_DIR
 UNDO_LOG_FILE = UNDO_DIR / "undo_log.jsonl"
 
 
@@ -3265,6 +3265,8 @@ def download_file(url: str, dest: Path,
 
 # GGUF files are stored under the user data dir so they survive app re-installs.
 LLAMACPP_MODELS_DIR = USER_DATA_DIR / "models"
+# Older builds downloaded models into the per-user cache; migrate them once.
+LEGACY_MODELS_DIR = Path.home() / ".cache" / "ai-media-renamer" / "models"
 LLAMACPP_SERVER_EXE = "llama-server.exe"
 
 LLAMACPP_GGUF_FILENAMES: dict[str, tuple[str, str]] = {
@@ -3287,20 +3289,189 @@ def _llamacpp_gguf_paths(model_name: str) -> tuple[Path, Path]:
     gguf_file, mmproj_file = LLAMACPP_GGUF_FILENAMES.get(
         model_name, (model_name.replace(":", "-") + ".gguf", "")
     )
-    mmproj = LLAMACPP_MODELS_DIR / mmproj_file if mmproj_file else Path("")
-    return LLAMACPP_MODELS_DIR / gguf_file, mmproj
+    model_dir = _llamacpp_model_dir()
+    mmproj = model_dir / mmproj_file if mmproj_file else Path("")
+    return model_dir / gguf_file, mmproj
 
 
 def _llamacpp_model_dir() -> Path:
     """Return the directory GGUF models are downloaded into.
 
     Reads ``model.llamacpp.model_dir`` from config when present, otherwise
-    defaults to ``~/.cache/ai-media-renamer/models``.
+    defaults to ``LLAMACPP_MODELS_DIR`` (``USER_DATA_DIR/models``).
     """
     configured = config.get("model", {}).get("llamacpp", {}).get("model_dir")
     if configured:
         return Path(configured).expanduser()
-    return Path(os.path.expanduser("~/.cache/ai-media-renamer/models"))
+    return LLAMACPP_MODELS_DIR
+
+
+def _migration_enabled() -> bool:
+    """Return True when model migration should run (frozen or ``AMR_DATA_DIR``)."""
+    return is_frozen() or _has_data_dir_override()
+
+
+def _move_model_file(src: Path, dst: Path) -> Path:
+    """Move ``src`` to ``dst`` atomically without overwriting ``dst``.
+
+    Same-volume moves use :func:`os.replace`. Cross-volume moves (any
+    ``OSError`` from ``os.replace``) copy to ``<dst>.part``, flush and fsync
+    it, atomically replace the destination, then delete the source. On
+    failure the source is left intact and the partial file is removed.
+    """
+    if dst.exists():
+        raise FileExistsError(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.replace(src, dst)
+        return dst
+    except OSError:
+        pass
+
+    part = dst.with_name(dst.name + ".part")
+    try:
+        with open(src, "rb") as fsrc, open(part, "wb") as fdst:
+            shutil.copyfileobj(fsrc, fdst)
+            fdst.flush()
+            os.fsync(fdst.fileno())
+        os.replace(part, dst)
+    except Exception:
+        try:
+            part.unlink()
+        except OSError:
+            pass
+        raise
+    try:
+        src.unlink()
+    except OSError:
+        logging.getLogger("video_renamer").warning(
+            "model migration: copied %s but could not delete the source", src
+        )
+    return dst
+
+
+def _is_model_file(name: str) -> bool:
+    """Return True for GGUF files, mmproj files, and ``mmproj*`` names."""
+    lowered = name.lower()
+    return lowered.endswith((".gguf", ".mmproj")) or "mmproj" in lowered
+
+
+def migrate_llamacpp_models() -> list[Path]:
+    """Move legacy GGUF/mmproj files into the active model directory.
+
+    No-op unless running frozen or with ``AMR_DATA_DIR`` set. Existing
+    destinations are never overwritten. Returns the destination paths moved.
+    """
+    if not _migration_enabled():
+        return []
+    source = LEGACY_MODELS_DIR
+    dest = _llamacpp_model_dir()
+    if not source.is_dir():
+        return []
+    try:
+        if source.resolve() == dest.resolve():
+            return []
+    except OSError:
+        if source == dest:
+            return []
+
+    log = logging.getLogger("video_renamer")
+    moved: list[Path] = []
+    for src in sorted(source.iterdir()):
+        if not src.is_file() or not _is_model_file(src.name):
+            continue
+        dst = dest / src.name
+        if dst.exists():
+            log.info("model migration: skipped %s (destination exists)", dst)
+            continue
+        try:
+            moved.append(_move_model_file(src, dst))
+        except OSError as exc:
+            log.warning("model migration: failed to move %s: %s", src, exc)
+            continue
+        log.info("model migration: moved %s -> %s", src, dst)
+    return moved
+
+
+def migrate_llamacpp_paths() -> bool:
+    """Point config at a catalog GGUF found in ``LLAMACPP_MODELS_DIR``.
+
+    Only repairs an onboarded install whose ``gguf_path`` is empty. Returns
+    True when config was updated and saved.
+    """
+    if not _migration_enabled():
+        return False
+    if not load_setup_profile().get("onboarded"):
+        return False
+    llamacpp = config.get("model", {}).get("llamacpp", {})
+    if llamacpp.get("gguf_path"):
+        return False
+    for gguf_name, mmproj_name in LLAMACPP_GGUF_FILENAMES.values():
+        gguf = LLAMACPP_MODELS_DIR / gguf_name
+        if not gguf.exists():
+            continue
+        mmproj = LLAMACPP_MODELS_DIR / mmproj_name if mmproj_name else None
+        target = config.setdefault("model", {}).setdefault("llamacpp", {})
+        target["gguf_path"] = str(gguf)
+        target["mmproj_path"] = str(mmproj) if mmproj and mmproj.exists() else ""
+        save_config()
+        return True
+    return False
+
+
+_MODEL_MIGRATION_LOCK = threading.Lock()
+_MODEL_MIGRATION_THREAD: threading.Thread | None = None
+_MODEL_MIGRATION_RUNNING = False
+_MODEL_MIGRATION_STARTED = False
+
+
+def is_model_migration_running() -> bool:
+    """Return True while the background model migration thread is active."""
+    return _MODEL_MIGRATION_RUNNING
+
+
+def wait_for_model_migration(timeout: float = 300) -> bool:
+    """Wait for the background migration to finish.
+
+    Returns False when it is still running after ``timeout`` seconds.
+    """
+    deadline = time.monotonic() + max(0.0, timeout)
+    while is_model_migration_running():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def _run_model_migration() -> None:
+    """Run both migration passes, always clearing the running flag."""
+    global _MODEL_MIGRATION_RUNNING
+    try:
+        migrate_llamacpp_models()
+        migrate_llamacpp_paths()
+    except Exception:
+        logging.getLogger("video_renamer").exception("model migration failed")
+    finally:
+        _MODEL_MIGRATION_RUNNING = False
+
+
+def start_model_migration() -> None:
+    """Start the one-time legacy model migration in a daemon thread."""
+    global _MODEL_MIGRATION_RUNNING, _MODEL_MIGRATION_THREAD, _MODEL_MIGRATION_STARTED
+    if not _migration_enabled():
+        return
+    with _MODEL_MIGRATION_LOCK:
+        if _MODEL_MIGRATION_STARTED:
+            return
+        _MODEL_MIGRATION_STARTED = True
+        _MODEL_MIGRATION_RUNNING = True
+        thread = threading.Thread(
+            target=_run_model_migration,
+            name="amr-model-migration",
+            daemon=True,
+        )
+        _MODEL_MIGRATION_THREAD = thread
+        thread.start()
 
 
 def _maybe_mirror_url(url: str) -> str:
@@ -3335,6 +3506,8 @@ def download_llamacpp_model(name: str,
     Raises:
         ValueError: If ``name`` is not present in the catalog.
     """
+    if not wait_for_model_migration():
+        raise RuntimeError("models are still being migrated")
     entry = next((m for m in LLAMACPP_GGUF_CATALOG if m["name"] == name), None)
     if entry is None:
         available = ", ".join(m["name"] for m in LLAMACPP_GGUF_CATALOG)
@@ -3410,6 +3583,9 @@ def ensure_llamacpp_server(timeout: int = 40) -> bool:
     Args:
         timeout: Maximum seconds to wait for the server to come up.
     """
+    if not wait_for_model_migration():
+        logging.getLogger("video_renamer").warning("models are still being migrated")
+        return False
     if _llamacpp_server_running():
         return True
     exe = _resolve_binary_path(LLAMACPP_SERVER_EXE)

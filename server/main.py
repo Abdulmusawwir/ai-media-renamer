@@ -80,8 +80,10 @@ def create_app() -> FastAPI:
     def _startup() -> None:
         # Ensure the engine config is loaded and environment probes are usable.
         engine.load_config(quiet=True)
-        # Best-effort: confirm the environment check runs without raising.
         try:
+            # Migrate any legacy GGUF cache before a server/model is requested.
+            engine.start_model_migration()
+            # Best-effort: confirm the environment check runs without raising.
             engine.check_environment()
         except Exception:
             pass
