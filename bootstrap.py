@@ -1232,8 +1232,16 @@ class ModelRecommendationDialog:
         self.top.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
 
 
-def _finish_setup(win, no_launch: bool) -> int:
-    """Close the wizard and, unless suppressed, start the app."""
+def _finish_setup(win, no_launch: bool, success: bool = True) -> int:
+    """Close the wizard and, unless suppressed, start the app.
+
+    Returns 1 for a failed setup (e.g. the llama.cpp runtime/server did not
+    start) even in ``--no-launch`` mode, so the desktop shell can distinguish a
+    completed setup from a broken one.
+    """
+    if not success:
+        win.close()
+        return 1
     if no_launch:
         win.close()
         return 0
@@ -1260,7 +1268,7 @@ def main(argv: list[str] | None = None) -> int:
     win = SetupWindow()
 
     if not win.root:
-        return _headless_run()
+        return _headless_run(no_update_check=no_update_check)
 
     force_setup = "--setup" in args
 
@@ -1312,7 +1320,7 @@ def main(argv: list[str] | None = None) -> int:
             win.set_progress(100)
             win.set_info("Please start llama-server manually and restart this app.")
             win.update()
-            return _finish_setup(win, no_launch)
+            return _finish_setup(win, no_launch, success=False)
         win.update()
         step += 1
 
@@ -1428,7 +1436,7 @@ def _launch_app(win) -> None:
     win.close()
 
 
-def _headless_run() -> int:
+def _headless_run(no_update_check: bool = False) -> int:
     print("AI Media Renamer — Setup (headless mode)")
     print(f"Version: {VERSION}")
     checks = [
@@ -1439,10 +1447,11 @@ def _headless_run() -> int:
     for step, (label, found) in enumerate(checks, start=1):
         status = "\u2713 found" if found else "missing"
         print(f"  [{step}/{len(checks)}] {label}: {status}")
-    info = check_for_updates()
-    if info.get("update_available"):
-        print(f"  Update available: {info['current']} -> {info['latest']}")
-        print(f"  Download: {info['download_url']}")
+    if not no_update_check:
+        info = check_for_updates()
+        if info.get("update_available"):
+            print(f"  Update available: {info['current']} -> {info['latest']}")
+            print(f"  Download: {info['download_url']}")
     print("Run 'python launch.py' to start the app manually.")
     return 0
 

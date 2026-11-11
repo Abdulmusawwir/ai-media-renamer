@@ -160,6 +160,100 @@ def test_bootstrap_main_no_launch_returns_zero(monkeypatch):
     assert win.closed is True
 
 
+@pytest.mark.parametrize("no_update_check", [True, False])
+def test_headless_run_honors_no_update_check(no_update_check, monkeypatch):
+    calls: list[bool] = []
+
+    def _fake_update_check():
+        calls.append(True)
+        return {}
+
+    monkeypatch.setattr(bootstrap, "_resolve_binary_path", lambda name: None)
+    monkeypatch.setattr(bootstrap, "_llamacpp_server_running", lambda: False)
+    monkeypatch.setattr(bootstrap, "check_for_updates", _fake_update_check)
+
+    assert bootstrap._headless_run(no_update_check=no_update_check) == 0
+    assert bool(calls) is (not no_update_check)
+
+
+def test_finish_setup_distinguishes_success_from_failure(monkeypatch):
+    launched: list[_FakeWin] = []
+    monkeypatch.setattr(bootstrap, "_launch_app", launched.append)
+
+    success = _FakeWin()
+    assert bootstrap._finish_setup(success, True) == 0
+    assert success.closed is True
+
+    failed = _FakeWin()
+    assert bootstrap._finish_setup(failed, True, success=False) == 1
+    assert failed.closed is True
+    assert launched == []
+
+    launched_setup = _FakeWin()
+    assert bootstrap._finish_setup(launched_setup, False) == 0
+    assert launched == [launched_setup]
+
+
+def test_server_start_failure_returns_one(monkeypatch, tmp_path):
+    win = _FakeWin()
+
+    monkeypatch.setattr(bootstrap, "SetupWindow", lambda: win)
+    monkeypatch.setattr(
+        bootstrap,
+        "load_setup_profile",
+        lambda: {"onboarded": True, "profile": ["video"]},
+    )
+    monkeypatch.setattr(bootstrap, "use_cases_needs", lambda profile: set())
+    monkeypatch.setattr(bootstrap, "recommended_models", lambda profile: {})
+    monkeypatch.setattr(bootstrap, "LLAMACPP_EXE", tmp_path / "missing-llama-server.exe")
+    monkeypatch.setattr(bootstrap, "_resolve_binary_path", lambda name: "llama-server")
+    monkeypatch.setattr(bootstrap, "_llamacpp_server_running", lambda: False)
+    monkeypatch.setattr(bootstrap, "_start_llamacpp_server", lambda w: False)
+
+    def _fail_launch(_win):
+        raise AssertionError("a failed setup must not launch the app")
+
+    monkeypatch.setattr(bootstrap, "_launch_app", _fail_launch)
+
+    assert bootstrap.main(["--no-launch"]) == 1
+    assert win.closed is True
+
+
+def test_plan_declined_setup_returns_zero(monkeypatch):
+    win = _FakeWin()
+    saved: list[dict] = []
+
+    class _FakeUseCaseDialog:
+        def __init__(self, root):
+            self.result = ["video"]
+
+    class _FakePlanDialog:
+        def __init__(self, root, plan):
+            self.result = False
+
+    monkeypatch.setattr(bootstrap, "SetupWindow", lambda: win)
+    monkeypatch.setattr(
+        bootstrap,
+        "load_setup_profile",
+        lambda: {"onboarded": False, "profile": []},
+    )
+    monkeypatch.setattr(bootstrap, "UseCaseDialog", _FakeUseCaseDialog)
+    monkeypatch.setattr(bootstrap, "PlanConfirmDialog", _FakePlanDialog)
+    monkeypatch.setattr(bootstrap, "_show_modal", lambda w, d: None)
+    monkeypatch.setattr(bootstrap, "use_cases_needs", lambda profile: set())
+    monkeypatch.setattr(bootstrap, "recommended_models", lambda profile: {})
+    monkeypatch.setattr(bootstrap, "_build_plan", lambda profile, needs, rec: [])
+    monkeypatch.setattr(
+        bootstrap,
+        "save_setup_profile",
+        lambda **kwargs: saved.append(kwargs) or {},
+    )
+
+    assert bootstrap.main(["--setup", "--no-launch"]) == 0
+    assert win.closed is True
+    assert saved == [{"profile": ["video"], "onboarded": True}]
+
+
 def test_launch_app_does_not_import_pywebview(monkeypatch):
     monkeypatch.delitem(sys.modules, "webview", raising=False)
     monkeypatch.delitem(sys.modules, "pywebview", raising=False)
