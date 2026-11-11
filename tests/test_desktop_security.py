@@ -95,6 +95,24 @@ def test_mutating_request_rejects_foreign_host(client):
     assert resp.status_code == 403
 
 
+def test_preflight_options_is_answered_by_cors(client):
+    """An unauthenticated CORS preflight must reach CORSMiddleware, not get 401."""
+    resp = client.options(
+        "/api/staging",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers.get("access-control-allow-origin") in {
+        "*",
+        "http://localhost:5173",
+    }
+    assert "PUT" in resp.headers.get("access-control-allow-methods", "")
+
+
 def test_ws_rejects_missing_desktop_token(client):
     rejected = False
     try:

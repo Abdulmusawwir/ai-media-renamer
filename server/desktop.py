@@ -111,9 +111,15 @@ def is_desktop_request(path: str, method: str, request: Request) -> bool:
 
     ``/health`` and the LAN token issuer stay outside the boundary; in desktop
     mode the issuer is not registered so requests to it fall through to a 404.
+
+    CORS preflight (``OPTIONS``) is also skipped so it reaches the inner
+    ``CORSMiddleware`` instead of being rejected with a 401 before CORS can
+    answer. Real requests keep requiring the bearer token.
     """
-    del method, request  # kept for interface parity / future method-specific rules
+    del request  # kept for interface parity / future request-specific rules
     if not desktop_mode():
+        return False
+    if method == "OPTIONS":
         return False
     if path == "/health":
         return False
