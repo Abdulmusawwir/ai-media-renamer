@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import server.main as main
+from server import deps
 
 
 @pytest.fixture
@@ -45,6 +46,25 @@ def test_api_route_wins_over_spa(client):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("application/json")
     assert "spa-index" not in resp.text
+
+
+def test_unknown_api_path_returns_404(client):
+    before = (
+        deps.analysis_running(),
+        deps.commit_running(),
+        deps.get_active_staging(),
+    )
+
+    for route in ("/api/does-not-exist", "/api/nested/does-not-exist"):
+        resp = client.get(route)
+        assert resp.status_code == 404
+        assert "spa-index" not in resp.text
+
+    assert (
+        deps.analysis_running(),
+        deps.commit_running(),
+        deps.get_active_staging(),
+    ) == before
 
 
 def test_existing_asset_is_not_shadowed(client):
