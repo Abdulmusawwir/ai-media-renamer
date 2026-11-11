@@ -1232,26 +1232,37 @@ class ModelRecommendationDialog:
         self.top.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
 
 
-def main():
-    _log(f"main() argv={sys.argv} frozen={getattr(sys, 'frozen', False)}")
+def _finish_setup(win, no_launch: bool) -> int:
+    """Close the wizard and, unless suppressed, start the app."""
+    if no_launch:
+        win.close()
+        return 0
+    _launch_app(win)
+    return 0
 
-    if "--no-gui" in sys.argv:
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    _log(f"main() argv={args} frozen={getattr(sys, 'frozen', False)}")
+
+    no_launch = "--no-launch" in args
+    no_update_check = "--no-update-check" in args
+
+    if "--no-gui" in args:
         class _StubWin:
             def set_step(self, *a): pass
             def set_progress(self, *a): pass
             def set_info(self, *a): pass
             def update(self): pass
             def close(self): pass
-        _launch_app(_StubWin())
-        return
+        return _finish_setup(_StubWin(), no_launch)
 
     win = SetupWindow()
 
     if not win.root:
-        _headless_run()
-        return
+        return _headless_run()
 
-    force_setup = "--setup" in sys.argv
+    force_setup = "--setup" in args
 
     try:
         # ---- Onboarding questionnaire (first run, or explicit --setup) ----
@@ -1275,8 +1286,7 @@ def main():
         # Skipped onboarding (empty profile): don't force any downloads —
         # launch the app; env checks + in-app download buttons cover the rest.
         if not do_installs:
-            _launch_app(win)
-            return
+            return _finish_setup(win, no_launch)
 
         # Confirm the one-time download plan when onboarding / re-running setup
         if do_installs and (not onboarded or force_setup):
@@ -1284,8 +1294,7 @@ def main():
             _show_modal(win, dlg)
             if not dlg.result:
                 save_setup_profile(profile=profile, onboarded=True)
-                _launch_app(win)
-                return
+                return _finish_setup(win, no_launch)
 
         step = 1
 
@@ -1302,9 +1311,8 @@ def main():
             win.set_step(step, "\u26a0 llama.cpp server did not start")
             win.set_progress(100)
             win.set_info("Please start llama-server manually and restart this app.")
-            win.wait_for_user()
-            win.close()
-            return
+            win.update()
+            return _finish_setup(win, no_launch)
         win.update()
         step += 1
 
@@ -1358,22 +1366,23 @@ def main():
             save_setup_profile(profile=profile, onboarded=True, runtime=runtime)
 
         # ---- Step: Update check ----
-        update_info = check_for_updates()
-        if update_info.get("ok") and update_info.get("update_available"):
-            win.set_step(step, "\u26a0 Update available")
-            win.set_progress(100)
-            win.set_info("")
-            win.show_update(update_info)
-            win.update()
-            win.wait_for_user()
-        else:
-            win.set_step(step, "\u2713 Checking for updates... up to date")
-            win.set_progress(100)
-            win.set_info("")
+        if not no_update_check:
+            update_info = check_for_updates()
+            if update_info.get("ok") and update_info.get("update_available"):
+                win.set_step(step, "\u26a0 Update available")
+                win.set_progress(100)
+                win.set_info("")
+                win.show_update(update_info)
+                win.update()
+                win.wait_for_user()
+            else:
+                win.set_step(step, "\u2713 Checking for updates... up to date")
+                win.set_progress(100)
+                win.set_info("")
         win.update()
 
-        # ---- Step: Launch ----
-        _launch_app(win)
+        # ---- Finish: launch the app unless setup-only mode ----
+        return _finish_setup(win, no_launch)
 
     except Exception as exc:
         if win.root:
@@ -1386,133 +1395,57 @@ def main():
         else:
             print(f"Setup failed: {exc}")
         win.close()
-        sys.exit(1)
+        return 1
 
 
-def _kill_stale_server():
-    """Kill any process still listening on port 8501 from a previous session."""
+def _launch_app(win) -> None:
+    """Start ``launch.py`` for source users and close the wizard.
+
+    The child owns the server/browser lifecycle; this process must not
+    terminate it. The Tauri shell is responsible for backend shutdown.
+    """
     try:
-        result = subprocess.run(
-            ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        for line in result.stdout.splitlines():
-            if ":8501" in line and "LISTENING" in line:
-                parts = line.split()
-                pid = int(parts[-1])
-                _log(f"killing stale server PID={pid}")
-                subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                               capture_output=True, timeout=5,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
-    except Exception as e:
-        _log(f"_kill_stale_server: {e}")
-
-
-def _launch_app(win):
-    win.set_step(6, "\u2713 Starting app...")
-    win.set_progress(100)
-    win.set_info("Starting AI Media Renamer server...")
-    win.update()
-
-    _kill_stale_server()
-
-    _log(f"launch_app: spawning subprocess {sys.executable} -m uvicorn server.main:app")
-    log_path = CACHE_DIR / "server.log"
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    log_fh = open(log_path, "w", encoding="utf-8")
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "server.main:app",
-         "--host", "127.0.0.1", "--port", "8000"],
-        creationflags=subprocess.CREATE_NO_WINDOW,
-        stdout=log_fh,
-        stderr=log_fh,
-    )
-    _log(f"launch_app: child PID={proc.pid}")
-
-    # Wait for the API server to be ready
-    import time
-    health_url = "http://localhost:8000/health"
-    deadline = time.time() + 30
-    ready = False
-    while time.time() < deadline:
-        try:
-            r = requests.get(health_url, timeout=2)
-            if r.status_code == 200:
-                ready = True
-                _log("health check: OK (200)")
-                break
-        except Exception as e:
-            _log(f"health check: {e}")
-        time.sleep(0.5)
-
-    if not ready:
-        _log("health check: FAILED after 30s")
-        # Dump child process stderr
-        log_fh.close()
-        try:
-            with open(log_path, encoding="utf-8", errors="replace") as f:
-                _log(f"child stdout/stderr:\n{f.read()}")
-        except Exception:
-            pass
-        win.set_info("App taking longer than expected — opening browser...")
+        win.set_step(6, "\u2713 Starting app...")
+        win.set_progress(100)
+        win.set_info("Starting AI Media Renamer...")
         win.update()
-    else:
-        win.set_info("Opening app window...")
-        win.update()
-
-    # Also dump server log for success case
-    log_fh.close()
-    try:
-        with open(log_path, encoding="utf-8", errors="replace") as f:
-            server_out = f.read().strip()
-            if server_out:
-                _log(f"child server output:\n{server_out}")
     except Exception:
         pass
 
+    script = BASE_DIR / "launch.py"
+    _log(f"launch_app: spawning subprocess {sys.executable} {script}")
+    try:
+        subprocess.Popen(
+            [sys.executable, str(script)],
+            cwd=str(BASE_DIR),
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:
+        _log(f"launch_app: spawn failed: {exc}")
     win.close()
 
-    # Try pywebview native window; fall back to browser
-    try:
-        import webview
-        _icon = str(BASE_DIR / "icon.ico")
-        webview.create_window("AI Media Renamer", "http://localhost:8000",
-                              width=1280, height=800, resizable=True)
-        webview.start(private_mode=True, gui="edgechromium", icon=_icon)
-    except Exception:
-        webbrowser.open("http://localhost:8000")
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
-        sys.exit(0)
 
-    # Clean shutdown on window close
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except Exception:
-        proc.kill()
-    sys.exit(0)
-
-
-def _headless_run():
+def _headless_run() -> int:
     print("AI Media Renamer — Setup (headless mode)")
     print(f"Version: {VERSION}")
-    for step, check in enumerate([
+    checks = [
         ("ExifTool", _resolve_binary_path("exiftool")),
         ("FFmpeg", _resolve_binary_path("ffmpeg")),
         ("llama.cpp server", _llamacpp_server_running()),
-    ]):
-        status = "\u2713 found" if check else "missing"
-        print(f"  [{step+1}/5] {check[0]}: {status}")
+    ]
+    for step, (label, found) in enumerate(checks, start=1):
+        status = "\u2713 found" if found else "missing"
+        print(f"  [{step}/{len(checks)}] {label}: {status}")
     info = check_for_updates()
     if info.get("update_available"):
         print(f"  Update available: {info['current']} -> {info['latest']}")
         print(f"  Download: {info['download_url']}")
     print("Run 'python launch.py' to start the app manually.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -358,7 +358,7 @@
 - `--mark-onboarded` uses `engine.load_setup_profile`/`save_setup_profile` and must not overwrite an existing profile.
 
 **Steps:**
-- [ ] Write failing tests:
+- [x] Write failing tests:
   - `test_argparse_rejects_unknown_flag`
   - `test_mark_onboarded_creates_profile`
   - `test_mark_onboarded_preserves_existing_profile` (monkeypatch `engine.save_setup_profile`)
@@ -368,10 +368,10 @@
   - `test_windowed_stdio_redirects_none` (monkeypatch `sys.stdout`/`sys.stderr` and `AMR_DATA_DIR`)
   - `test_bootstrap_main_no_launch_returns_zero` (monkeypatch `SetupWindow`/`_finish_setup`)
   - `test_launch_app_does_not_import_pywebview`
-- [ ] Run `python -m pytest tests/test_desktop_entrypoint.py -q`; confirm failures.
-- [ ] Implement entry point and refactor `bootstrap.main` exits conservatively.
-- [ ] Run new tests, full `pytest`, `ruff check desktop_backend.py bootstrap.py tests/test_desktop_entrypoint.py`, `py_compile` both.
-- [ ] Commit: `desktop: add windowed backend entry point and setup-only mode`
+- [x] Run `python -m pytest tests/test_desktop_entrypoint.py -q`; confirm failures.
+- [x] Implement entry point and refactor `bootstrap.main` exits conservatively.
+- [x] Run new tests, full `pytest`, `ruff check desktop_backend.py bootstrap.py tests/test_desktop_entrypoint.py`, `py_compile` both.
+- [x] Commit: `desktop: add windowed backend entry point and setup-only mode`
 
 ---
 
