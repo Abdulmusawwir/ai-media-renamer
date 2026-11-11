@@ -17,8 +17,9 @@ def _write(path: Path, data: bytes = b"x") -> Path:
 
 
 class _FakeProc:
-    def __init__(self, returncode=None):
+    def __init__(self, returncode=None, terminate_error=None):
         self._returncode = returncode
+        self.terminate_error = terminate_error
         self.terminated = False
         self.killed = False
         self.wait_calls: list[float | None] = []
@@ -27,6 +28,8 @@ class _FakeProc:
         return self._returncode
 
     def terminate(self):
+        if self.terminate_error is not None:
+            raise self.terminate_error
         self.terminated = True
         self._returncode = 0
 
@@ -206,6 +209,83 @@ class TestLlamaServerLifecycle:
         assert engine.ensure_llamacpp_server(timeout=5) is True
         assert len(spawns) == 1
         assert engine._llamacpp_proc is not None
+
+    def test_ensure_server_replaces_live_unhealthy_owned_process(self, monkeypatch, tmp_path):
+        gguf = _write(tmp_path / "model.gguf")
+        monkeypatch.setattr(engine, "config", {
+            "model": {"llamacpp": {
+                "gguf_path": str(gguf), "gguf_name": "", "mmproj_path": "",
+            }},
+        })
+        monkeypatch.setattr(engine, "wait_for_model_migration", lambda timeout=300: True)
+        monkeypatch.setattr(engine, "LOG_DIR", tmp_path / "logs")
+        monkeypatch.setattr(
+            engine, "_resolve_binary_path",
+            lambda name: "C:/tools/llama-server.exe" if name == engine.LLAMACPP_SERVER_EXE else None,
+        )
+        # Live but never answered: a previous spawn failed to become healthy.
+        dead = _FakeProc()
+        monkeypatch.setattr(engine, "_llamacpp_proc", dead)
+        monkeypatch.setattr(engine, "_llamacpp_proc_healthy", False)
+        monkeypatch.setattr(engine, "_llamacpp_proc_pending", False)
+
+        running = {"value": False}
+        spawns: list[list[str]] = []
+        replacement = _FakeProc()
+
+        def fake_popen(args, **kwargs):
+            spawns.append(args)
+            running["value"] = True
+            return replacement
+
+        monkeypatch.setattr(engine, "_llamacpp_server_running", lambda: running["value"])
+        monkeypatch.setattr(engine.subprocess, "Popen", fake_popen)
+
+        assert engine.ensure_llamacpp_server(timeout=5) is True
+        assert dead.terminated is True
+        assert len(spawns) == 1
+        assert engine._llamacpp_proc is replacement
+        assert engine._llamacpp_proc_healthy is True
+        assert engine._llamacpp_proc_pending is False
+
+    def test_ensure_server_stops_owned_process_after_failed_start(self, monkeypatch, tmp_path):
+        gguf = _write(tmp_path / "model.gguf")
+        monkeypatch.setattr(engine, "config", {
+            "model": {"llamacpp": {
+                "gguf_path": str(gguf), "gguf_name": "", "mmproj_path": "",
+            }},
+        })
+        monkeypatch.setattr(engine, "wait_for_model_migration", lambda timeout=300: True)
+        monkeypatch.setattr(engine, "LOG_DIR", tmp_path / "logs")
+        monkeypatch.setattr(
+            engine, "_resolve_binary_path",
+            lambda name: "C:/tools/llama-server.exe" if name == engine.LLAMACPP_SERVER_EXE else None,
+        )
+        monkeypatch.setattr(engine, "_llamacpp_proc", None)
+
+        spawned = _FakeProc()
+
+        def fake_popen(args, **kwargs):
+            return spawned
+
+        monkeypatch.setattr(engine, "_llamacpp_server_running", lambda: False)
+        monkeypatch.setattr(engine.subprocess, "Popen", fake_popen)
+
+        assert engine.ensure_llamacpp_server(timeout=0) is False
+        assert spawned.terminated is True
+        assert engine._llamacpp_proc is None
+
+    def test_stop_retains_handle_when_terminate_fails(self, monkeypatch):
+        proc = _FakeProc(terminate_error=OSError("access denied"))
+        monkeypatch.setattr(engine, "_llamacpp_proc", proc)
+
+        assert engine.stop_llamacpp_server() is False
+        assert engine._llamacpp_proc is proc
+
+        proc.terminate_error = None
+        assert engine.stop_llamacpp_server() is True
+        assert proc.terminated is True
+        assert engine._llamacpp_proc is None
 
 
 # ---------------------------------------------------------------------------

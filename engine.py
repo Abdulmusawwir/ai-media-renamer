@@ -3589,6 +3589,8 @@ def _llamacpp_host_port() -> tuple[str, int]:
 
 _LLAMACPP_LOCK = threading.Lock()
 _llamacpp_proc: subprocess.Popen | None = None
+_llamacpp_proc_healthy = False
+_llamacpp_proc_pending = False
 
 
 def _wait_for_llamacpp_server(timeout: int) -> bool:
@@ -3601,6 +3603,41 @@ def _wait_for_llamacpp_server(timeout: int) -> bool:
     return False
 
 
+def _stop_owned_process_locked() -> bool:
+    """Terminate the owned server. Caller must hold ``_LLAMACPP_LOCK``.
+
+    Ownership is cleared only after the process is gone. If termination raises
+    (a Windows handle race or access error), the handle is restored so a later
+    :func:`stop_llamacpp_server` can retry instead of leaking the process.
+
+    Returns:
+        True when an owned process was stopped, False otherwise.
+    """
+    global _llamacpp_proc, _llamacpp_proc_healthy, _llamacpp_proc_pending
+    proc = _llamacpp_proc
+    if proc is None:
+        return False
+    if proc.poll() is not None:
+        _llamacpp_proc = None
+        _llamacpp_proc_healthy = False
+        _llamacpp_proc_pending = False
+        return False
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+            proc.wait(timeout=5)
+    except Exception:
+        _llamacpp_proc = proc
+        return False
+    _llamacpp_proc = None
+    _llamacpp_proc_healthy = False
+    _llamacpp_proc_pending = False
+    return True
+
+
 def ensure_llamacpp_server(timeout: int = 40) -> bool:
     """Start the configured llama.cpp server if it is not already running.
 
@@ -3611,20 +3648,38 @@ def ensure_llamacpp_server(timeout: int = 40) -> bool:
     ``_llamacpp_proc`` so :func:`stop_llamacpp_server` only stops a process this
     app started.
 
+    A spawn whose startup wait fails is stopped and forgotten, so a live but
+    unresponsive owned server cannot suppress respawn on later calls.
+
     Args:
         timeout: Maximum seconds to wait for the server to come up.
     """
-    global _llamacpp_proc
+    global _llamacpp_proc, _llamacpp_proc_healthy, _llamacpp_proc_pending
+    spawned_proc = None
     with _LLAMACPP_LOCK:
-        # Drop a handle left behind by a server that already exited (crash or
+        # Drop handles left behind by servers that already exited (crash or
         # manual stop) so a fresh spawn is allowed instead of being blocked.
         if _llamacpp_proc is not None and _llamacpp_proc.poll() is not None:
             _llamacpp_proc = None
+            _llamacpp_proc_healthy = False
+            _llamacpp_proc_pending = False
         if not wait_for_model_migration():
             logging.getLogger("video_renamer").warning("models are still being migrated")
             return False
         if _llamacpp_server_running():
+            if _llamacpp_proc is not None:
+                _llamacpp_proc_healthy = True
+                _llamacpp_proc_pending = False
             return True
+        # A live process that never answered (bad model, hung load, failed
+        # bind) must not block respawn: replace it. Skip while another caller is
+        # still waiting on this same spawn.
+        if (_llamacpp_proc is not None
+                and not _llamacpp_proc_pending
+                and not _llamacpp_proc_healthy):
+            _stop_owned_process_locked()
+            if _llamacpp_proc is not None:
+                return False
         if _llamacpp_proc is None:
             exe = _resolve_binary_path(LLAMACPP_SERVER_EXE)
             if not exe:
@@ -3665,7 +3720,7 @@ def ensure_llamacpp_server(timeout: int = 40) -> bool:
             # invalid. stderr goes to a log file so a real server crash is
             # diagnosable instead of a silent dead-end.
             try:
-                _llamacpp_proc = subprocess.Popen(
+                spawned_proc = subprocess.Popen(
                     args,
                     creationflags=_NO_WINDOW,
                     stdin=subprocess.DEVNULL,
@@ -3679,7 +3734,21 @@ def ensure_llamacpp_server(timeout: int = 40) -> bool:
                 # duplicated handles.
                 if log_fh is not None:
                     log_fh.close()
-    return _wait_for_llamacpp_server(timeout)
+            _llamacpp_proc = spawned_proc
+            _llamacpp_proc_healthy = False
+            _llamacpp_proc_pending = True
+    healthy = _wait_for_llamacpp_server(timeout)
+    if spawned_proc is not None:
+        with _LLAMACPP_LOCK:
+            if _llamacpp_proc is spawned_proc:
+                if healthy:
+                    _llamacpp_proc_healthy = True
+                    _llamacpp_proc_pending = False
+                else:
+                    # Failed startup: stop the owned server so the next call can
+                    # spawn a fresh one instead of burning the timeout again.
+                    _stop_owned_process_locked()
+    return healthy
 
 
 def stop_llamacpp_server() -> bool:
@@ -3690,26 +3759,10 @@ def stop_llamacpp_server() -> bool:
 
     Returns:
         True when an owned process was stopped, False when there was nothing
-        to stop.
+        to stop (or the stop failed and ownership was retained for a retry).
     """
-    global _llamacpp_proc
     with _LLAMACPP_LOCK:
-        proc = _llamacpp_proc
-        _llamacpp_proc = None
-        if proc is None:
-            return False
-        try:
-            if proc.poll() is not None:
-                return False
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except Exception:
-                proc.kill()
-                proc.wait(timeout=5)
-            return True
-        except Exception:
-            return False
+        return _stop_owned_process_locked()
 
 
 def wait_for_llamacpp_service(timeout: int = 120) -> bool:
