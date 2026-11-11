@@ -18,6 +18,7 @@ if getattr(sys, "frozen", False) and sys.stderr is None:
 
 import requests
 
+import engine
 from engine import (
     LLAMACPP_GGUF_CATALOG,
     SETUP_DEPENDENCIES,
@@ -52,10 +53,10 @@ if getattr(sys, "frozen", False):
 else:
     BASE_DIR = Path(__file__).parent
 
-CACHE_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "ai-media-renamer"
-BIN_DIR = CACHE_DIR / "bin"
-INSTALLER_CACHE = CACHE_DIR / "cache"
-LLAMACPP_ZIP_CACHE = CACHE_DIR / "cache" / "llamacpp.zip"
+CACHE_DIR = engine.USER_DATA_DIR / "cache"
+BIN_DIR = engine.USER_DATA_DIR / "bin"
+INSTALLER_CACHE = CACHE_DIR
+LLAMACPP_ZIP_CACHE = CACHE_DIR / "llamacpp.zip"
 LLAMACPP_EXE = BIN_DIR / "llama-server.exe"
 
 # ---------- theme colors (modern dark) ----------
@@ -541,6 +542,49 @@ def _install_ffmpeg(win) -> None:
         time.sleep(5)
 
 
+_LLAMACPP_REQUIRED_RUNTIME_FILES = (
+    "llama-server.exe",
+    "llama-server-impl.dll",
+    "llama.dll",
+    "ggml*.dll",
+    "mtmd.dll",
+    "libomp*.dll",
+)
+
+
+def _copy_llamacpp_runtime_tree(src_dir: Path, bin_dir: Path) -> list[Path]:
+    """Copy every file under ``src_dir`` into ``bin_dir``, preserving structure.
+
+    The llama.cpp release archive ships the server launcher next to the shared
+    libraries it needs (``llama-server-impl.dll``, ``llama.dll``, ``ggml*.dll``,
+    ``mtmd.dll``, ``libomp*.dll``). Copying only the launcher leaves a runtime
+    that cannot start, so the whole directory is copied recursively.
+
+    Returns:
+        Destination paths of the copied files.
+    """
+    src_dir = Path(src_dir)
+    bin_dir = Path(bin_dir)
+    copied: list[Path] = []
+    for src in sorted(src_dir.rglob("*")):
+        if not src.is_file():
+            continue
+        dst = bin_dir / src.relative_to(src_dir)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied.append(dst)
+    return copied
+
+
+def _missing_llamacpp_runtime_files(bin_dir: Path) -> list[str]:
+    """Return required runtime patterns that are absent under ``bin_dir``."""
+    bin_dir = Path(bin_dir)
+    return [
+        pattern for pattern in _LLAMACPP_REQUIRED_RUNTIME_FILES
+        if not any(bin_dir.glob(pattern))
+    ]
+
+
 def _install_llamacpp_runtime(win, step: int) -> None:
     """Download and install the llama.cpp ``llama-server`` binary (Windows CPU).
 
@@ -576,10 +620,14 @@ def _install_llamacpp_runtime(win, step: int) -> None:
             if exe_src is None:
                 raise RuntimeError("llama-server.exe not found inside archive")
             BIN_DIR.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(exe_src, LLAMACPP_EXE)
+            _copy_llamacpp_runtime_tree(exe_src.parent, BIN_DIR)
+            missing = _missing_llamacpp_runtime_files(BIN_DIR)
+            if missing:
+                raise RuntimeError(
+                    "llama.cpp runtime is incomplete; missing: "
+                    + ", ".join(missing))
             shutil.rmtree(extract_dir, ignore_errors=True)
             LLAMACPP_ZIP_CACHE.unlink(missing_ok=True)
-            _add_to_user_path(BIN_DIR)
             win.set_step(step, "\u2713 Checking llama.cpp... ready")
             win.set_progress(100)
             win.set_info("")
@@ -1268,7 +1316,6 @@ def main():
                 win.set_info("")
             else:
                 _install_exiftool(win)
-                _add_to_user_path(BIN_DIR)
             win.update()
             step += 1
 
@@ -1280,7 +1327,6 @@ def main():
                 win.set_info("")
             else:
                 _install_ffmpeg(win)
-                _add_to_user_path(BIN_DIR)
             win.update()
             step += 1
 

@@ -3045,21 +3045,35 @@ def _chromaprint_similarity(fp_a: str, fp_b: str) -> float:
 
 
 def _resolve_binary_path(name: str) -> str | None:
-    """Resolve the filesystem path of a binary, checking PyInstaller bundle first.
+    """Resolve the filesystem path of a binary.
+
+    Search order:
+      1. ``USER_DATA_DIR/bin/<name>`` then ``<name>.exe``
+      2. PyInstaller ``_MEIPASS/bin/<name>`` then ``<name>.exe``
+      3. ``PATH`` (``shutil.which``)
 
     Args:
-        name: Binary name (e.g. 'ffmpeg', 'exiftool').
+        name: Binary name (e.g. 'ffmpeg', 'exiftool', 'llama-server.exe').
 
     Returns:
         Absolute path to the binary, or None if not found.
     """
-    meipass = getattr(sys, '_MEIPASS', None)
+    names = [name]
+    if not name.lower().endswith(".exe"):
+        names.append(name + ".exe")
+
+    search_dirs = [Path(USER_DATA_DIR) / "bin"]
+    meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        candidate = os.path.join(meipass, 'bin', name)
-        if os.path.isfile(candidate):
-            return candidate
-    resolved = shutil.which(name)
-    return resolved
+        search_dirs.append(Path(meipass) / "bin")
+
+    for directory in search_dirs:
+        for candidate_name in names:
+            candidate = directory / candidate_name
+            if candidate.is_file():
+                return str(candidate)
+
+    return shutil.which(name)
 
 
 def _llamacpp_server_running() -> bool:
@@ -3573,78 +3587,129 @@ def _llamacpp_host_port() -> tuple[str, int]:
     return host, port
 
 
+_LLAMACPP_LOCK = threading.Lock()
+_llamacpp_proc: subprocess.Popen | None = None
+
+
+def _wait_for_llamacpp_server(timeout: int) -> bool:
+    """Poll the llama.cpp API until it answers or ``timeout`` seconds pass."""
+    deadline = time.time() + max(0, timeout)
+    while time.time() < deadline:
+        if _llamacpp_server_running():
+            return True
+        time.sleep(1)
+    return False
+
+
 def ensure_llamacpp_server(timeout: int = 40) -> bool:
     """Start the configured llama.cpp server if it is not already running.
 
     Uses the model paths recorded by ``configure_llamacpp_install``. Returns
     True when a server answers on the API port (either already running or
-    freshly started).
+    freshly started). A single lock guards the spawn so startup and the first
+    analysis cannot launch two servers; the spawned ``Popen`` is retained in
+    ``_llamacpp_proc`` so :func:`stop_llamacpp_server` only stops a process this
+    app started.
 
     Args:
         timeout: Maximum seconds to wait for the server to come up.
     """
-    if not wait_for_model_migration():
-        logging.getLogger("video_renamer").warning("models are still being migrated")
-        return False
-    if _llamacpp_server_running():
-        return True
-    exe = _resolve_binary_path(LLAMACPP_SERVER_EXE)
-    if not exe:
-        bundled = USER_DATA_DIR / "bin" / LLAMACPP_SERVER_EXE
-        if bundled.exists():
-            exe = str(bundled)
-    if not exe:
-        return False
-    llamacpp = config.get("model", {}).get("llamacpp", {})
-    gguf = llamacpp.get("gguf_path", "")
-    if not gguf or not Path(gguf).exists():
-        return False
-    host, port = _llamacpp_host_port()
-    args = [exe, "-m", gguf, "--host", host, "--port", str(port),
-            "-c", str(MODEL_NUM_CTX)]
-    alias = llamacpp.get("gguf_name", "")
-    if alias:
-        args += ["--alias", alias]
-    mmproj = llamacpp.get("mmproj_path", "")
-    if mmproj and Path(mmproj).exists():
-        args += ["--mmproj", mmproj]
-    try:
-        log_dir = Path(LOG_DIR)
+    global _llamacpp_proc
+    with _LLAMACPP_LOCK:
+        # Drop a handle left behind by a server that already exited (crash or
+        # manual stop) so a fresh spawn is allowed instead of being blocked.
+        if _llamacpp_proc is not None and _llamacpp_proc.poll() is not None:
+            _llamacpp_proc = None
+        if not wait_for_model_migration():
+            logging.getLogger("video_renamer").warning("models are still being migrated")
+            return False
+        if _llamacpp_server_running():
+            return True
+        if _llamacpp_proc is None:
+            exe = _resolve_binary_path(LLAMACPP_SERVER_EXE)
+            if not exe:
+                bundled = USER_DATA_DIR / "bin" / LLAMACPP_SERVER_EXE
+                if bundled.exists():
+                    exe = str(bundled)
+            if not exe:
+                return False
+            llamacpp = config.get("model", {}).get("llamacpp", {})
+            gguf = llamacpp.get("gguf_path", "")
+            if not gguf or not Path(gguf).exists():
+                return False
+            host, port = _llamacpp_host_port()
+            args = [exe, "-m", gguf, "--host", host, "--port", str(port),
+                    "-c", str(MODEL_NUM_CTX)]
+            alias = llamacpp.get("gguf_name", "")
+            if alias:
+                args += ["--alias", alias]
+            mmproj = llamacpp.get("mmproj_path", "")
+            if mmproj and Path(mmproj).exists():
+                args += ["--mmproj", mmproj]
+            log_dir = Path(LOG_DIR)
+            try:
+                log_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+            server_log = log_dir / "llamacpp_server.log"
+            try:
+                log_fh = open(server_log, "w", encoding="utf-8", errors="replace")
+            except OSError:
+                log_fh = None
+            # CREATE_NO_WINDOW alone (never DETACHED_PROCESS): for a console
+            # subsystem binary spawned from a windowed/console-less parent,
+            # CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS,
+            # so Windows may refuse to open the exe ("Error when opening the
+            # exe"). Redirect stdin too — a console child with no console and an
+            # inherited invalid stdin handle fails with [Error 6] handle
+            # invalid. stderr goes to a log file so a real server crash is
+            # diagnosable instead of a silent dead-end.
+            try:
+                _llamacpp_proc = subprocess.Popen(
+                    args,
+                    creationflags=_NO_WINDOW,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log_fh if log_fh else subprocess.DEVNULL,
+                    stderr=log_fh if log_fh else subprocess.DEVNULL,
+                )
+            except Exception:
+                return False
+            finally:
+                # Close only after the spawn attempt; the child holds its own
+                # duplicated handles.
+                if log_fh is not None:
+                    log_fh.close()
+    return _wait_for_llamacpp_server(timeout)
+
+
+def stop_llamacpp_server() -> bool:
+    """Stop the llama-server process this app started, if any.
+
+    Only the process retained in ``_llamacpp_proc`` is touched; a server that
+    was already running (or one started outside the app) is never terminated.
+
+    Returns:
+        True when an owned process was stopped, False when there was nothing
+        to stop.
+    """
+    global _llamacpp_proc
+    with _LLAMACPP_LOCK:
+        proc = _llamacpp_proc
+        _llamacpp_proc = None
+        if proc is None:
+            return False
         try:
-            log_dir.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
-        server_log = log_dir / "llamacpp_server.log"
-        try:
-            log_fh = open(server_log, "w", encoding="utf-8", errors="replace")
-        except OSError:
-            log_fh = None
-        # CREATE_NO_WINDOW alone (never DETACHED_PROCESS): for a console
-        # subsystem binary spawned from a windowed/console-less parent,
-        # CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS,
-        # so Windows may refuse to open the exe ("Error when opening the
-        # exe"). Redirect stdin too — a console child with no console and an
-        # inherited invalid stdin handle fails with [Error 6] handle
-        # invalid. stderr goes to a log file so a real server crash is
-        # diagnosable instead of a silent dead-end.
-        subprocess.Popen(
-            args,
-            creationflags=_NO_WINDOW,
-            stdin=subprocess.DEVNULL,
-            stdout=log_fh if log_fh else subprocess.DEVNULL,
-            stderr=log_fh if log_fh else subprocess.DEVNULL,
-        )
-        if log_fh is not None:
-            log_fh.close()
-        import time as _time
-        deadline = _time.time() + timeout
-        while _time.time() < deadline:
-            if _llamacpp_server_running():
-                return True
-            _time.sleep(1)
-    except Exception:
-        return False
-    return False
+            if proc.poll() is not None:
+                return False
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+                proc.wait(timeout=5)
+            return True
+        except Exception:
+            return False
 
 
 def wait_for_llamacpp_service(timeout: int = 120) -> bool:
