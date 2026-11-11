@@ -12,12 +12,14 @@ import os
 import socket
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import engine
 from server import auth as amr_auth
+from server import desktop as amr_desktop
 from server import security as amr_security
 from server.routes import register_routes
 
@@ -68,13 +70,38 @@ def create_app() -> FastAPI:
 
     register_routes(app)
 
-    # LAN-mode auth token issuer. When auth is disabled this reports the state
-    # without issuing a token so clients can detect the mode.
-    @app.post("/api/auth/token", tags=["auth"])
-    def auth_token() -> dict:
-        if not amr_auth.AUTH_ENABLED:
-            return {"enabled": False}
-        return {"enabled": True, "token": amr_auth.create_access_token({})}
+    if amr_desktop.desktop_mode():
+        # Desktop boundary: every /api/* request needs the shell token (except
+        # /health and the unregistered token issuer), and mutating requests must
+        # come from a loopback Host/Origin. The shell never gets a second LAN
+        # auth path.
+        @app.middleware("http")
+        async def _desktop_guard(request, call_next):
+            if amr_desktop.is_desktop_request(request.url.path, request.method, request):
+                if not amr_desktop.ws_token_ok(amr_desktop.bearer_token(request)):
+                    return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+                if request.method in amr_desktop.MUTATING_METHODS:
+                    if not amr_desktop.host_allowed(request) or not amr_desktop.origin_allowed(request):
+                        return JSONResponse({"detail": "Forbidden"}, status_code=403)
+            return await call_next(request)
+
+        # The LAN token issuer does not exist in desktop mode. Register an
+        # explicit 404 so the static catch-all cannot answer with a 405.
+        @app.api_route(
+            "/api/auth/token",
+            methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+            include_in_schema=False,
+        )
+        def _auth_token_not_found() -> None:
+            raise HTTPException(status_code=404, detail="Not Found")
+    else:
+        # LAN-mode auth token issuer. When auth is disabled this reports the
+        # state without issuing a token so clients can detect the mode.
+        @app.post("/api/auth/token", tags=["auth"])
+        def auth_token() -> dict:
+            if not amr_auth.AUTH_ENABLED:
+                return {"enabled": False}
+            return {"enabled": True, "token": amr_auth.create_access_token({})}
 
     @app.on_event("startup")
     def _startup() -> None:
@@ -90,7 +117,11 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["meta"])
     def health() -> dict:
-        return {"status": "ok", "version": engine.VERSION}
+        return {
+            "status": "ok",
+            "version": engine.VERSION,
+            "desktop": amr_desktop.desktop_mode(),
+        }
 
     # Serve the built React frontend LAST so API routes and /health (registered
     # above) match first and are not swallowed by the catch-all mount.

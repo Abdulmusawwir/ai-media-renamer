@@ -4,7 +4,19 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from server.routes import analysis, assets, browse, commit, config, environment, models, sessions, staging, updates
+from server.routes import (
+    analysis,
+    assets,
+    browse,
+    commit,
+    config,
+    desktop,
+    environment,
+    models,
+    sessions,
+    staging,
+    updates,
+)
 
 
 def register_routes(app: FastAPI) -> None:
@@ -19,3 +31,4 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(sessions.router)
     app.include_router(models.router)
     app.include_router(updates.router)
+    app.include_router(desktop.router)

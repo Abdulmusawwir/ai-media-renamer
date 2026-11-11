@@ -87,6 +87,7 @@ def commit(req: CommitRequest) -> dict:
     undo_records: list[dict] = []
 
     exif = engine.ExifToolSession()
+    deps.set_commit_running(True)
     try:
         for group_target, indexes in groups.items():
             target = group_target.resolve()
@@ -123,6 +124,7 @@ def commit(req: CommitRequest) -> dict:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"commit failed: {exc}")
     finally:
+        deps.set_commit_running(False)
         try:
             exif.close()
         except Exception:
