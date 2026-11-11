@@ -14,8 +14,9 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import engine
 from server import auth as amr_auth
@@ -26,6 +27,31 @@ from server.routes import register_routes
 # Built frontend output (from ``frontend/`` via ``npm run build``). When present
 # it is served at "/" (API routes registered above win over the static mount).
 _DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+
+class SPAStaticFiles(StaticFiles):
+    """Static files with ``index.html`` fallback for client-side routes.
+
+    The React router owns paths like ``/settings`` or ``/analysis`` that have no
+    file behind them. Such extension-less, non-``/api`` paths are answered with
+    ``index.html``; real files win, while missing assets (``/assets/x.js``) and
+    unknown API paths keep their 404.
+    """
+
+    async def get_response(self, path: str, scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or not self._is_spa_route(path):
+                raise
+        return await super().get_response("index.html", scope)
+
+    @staticmethod
+    def _is_spa_route(path: str) -> bool:
+        segments = path.replace("\\", "/").split("/")
+        if segments[0] == "api":
+            return False
+        return not Path(segments[-1]).suffix
 
 # NOTE: Allowing all origins is acceptable for a local single-user tool driven
 # from localhost. If you expose this server on a LAN (e.g. --host 0.0.0.0),
@@ -126,7 +152,7 @@ def create_app() -> FastAPI:
     # Serve the built React frontend LAST so API routes and /health (registered
     # above) match first and are not swallowed by the catch-all mount.
     if _DIST.is_dir():
-        app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="frontend")
+        app.mount("/", SPAStaticFiles(directory=str(_DIST), html=True), name="frontend")
 
     return app
 
