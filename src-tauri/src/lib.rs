@@ -284,7 +284,7 @@ fn create_main_window(
     if let Some(token) = token {
         let port = port.ok_or_else(|| std::io::Error::other("backend port is not set"))?;
         let script = desktop_init_script(port, token);
-        builder = builder.initialization_script(&script);
+        builder = builder.initialization_script(script.as_str());
     }
 
     Ok(builder.build()?)
