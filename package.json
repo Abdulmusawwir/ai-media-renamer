@@ -1,0 +1,13 @@
+{
+  "name": "ai-media-renamer",
+  "private": true,
+  "version": "2.2.0",
+  "description": "Tauri desktop shell for AI Media Renamer",
+  "scripts": {
+    "tauri": "tauri",
+    "dev:backend": "python desktop_backend.py --host 127.0.0.1 --port 8000 --no-launch --no-update-check"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

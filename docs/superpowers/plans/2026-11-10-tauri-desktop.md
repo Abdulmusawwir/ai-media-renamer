@@ -429,18 +429,18 @@
 - Root devDeps: `@tauri-apps/cli`.
 
 **Steps:**
-- [ ] Scaffold files. Use `npm run tauri icon icon.ico` to generate icons.
-- [ ] Add Rust unit tests in `backend.rs`:
+- [x] Scaffold files. Use `npm run tauri icon icon.ico` to generate icons.
+- [x] Add Rust unit tests in `backend.rs`:
   - `test_filter_path_args_keeps_existing_media`
   - `test_filter_path_args_ignores_dirs`
   - `test_version_compatible_exact`
   - `test_version_compatible_mismatch_debug`
   - `test_resolve_data_dir_override` (env)
   - `test_generate_token_length`
-- [ ] Add test-only health parser test.
-- [ ] Run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` in `src-tauri/`. Then `npm run build` in `frontend/`.
-- [ ] Manual release smoke: `npm run tauri build -- --debug` is not a release build; verify dev mode loads Vite with no splash. Use a local resource layout to verify backend spawn/health if available.
-- [ ] Commit: `desktop: scaffold Tauri shell and backend lifecycle`
+- [x] Add test-only health parser test.
+- [ ] Run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` in `src-tauri/`. Then `npm run build` in `frontend/`. **Blocked: no Rust/MSVC toolchain on this machine; frontend build passed.**
+- [ ] Manual release smoke: `npm run tauri build -- --debug` is not a release build; verify dev mode loads Vite with no splash. Use a local resource layout to verify backend spawn/health if available. **Blocked: no Rust build.**
+- [x] Commit: `desktop: scaffold Tauri shell and backend lifecycle`
 
 ---
 
