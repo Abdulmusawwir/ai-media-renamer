@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Save, RefreshCw, Cpu, Sparkles } from "lucide-react";
+import { Save, RefreshCw, Cpu, Sparkles, FolderOpen, FileText } from "lucide-react";
 import { useConfig, usePutConfig } from "../hooks/api";
 import { useStore, useToast } from "../store";
 import { Skeleton } from "../components/Skeleton";
 import type { Json } from "../api/client";
+import { desktop, isDesktop } from "../desktop";
 
 export default function Settings() {
   const toast = useToast();
@@ -15,6 +16,14 @@ export default function Settings() {
 
   const [text, setText] = useState<string>("");
   const [dirty, setDirty] = useState(false);
+  const [closeToTray, setCloseToTray] = useState<boolean>(true);
+  useEffect(() => {
+    if (!isDesktop) return;
+    desktop
+      .invoke<{ close_to_tray: boolean }>("get_shell_settings")
+      .then((s) => setCloseToTray(Boolean(s?.close_to_tray)))
+      .catch(() => undefined);
+  }, []);
 
   // Seed the editor when the query resolves with fresh config.
   const [seededKey, setSeededKey] = useState<string>("");
@@ -98,6 +107,47 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      {isDesktop && (
+        <div className="rounded-lg border border-border bg-bg-elev p-4">
+          <div className="mb-3 text-xs font-medium text-text-dim">
+            Desktop shell
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={closeToTray}
+              onChange={async (e) => {
+                const v = e.target.checked;
+                setCloseToTray(v);
+                try {
+                  await desktop.invoke("set_close_to_tray", { value: v });
+                  toast.success("Shell preference saved.");
+                } catch (err) {
+                  toast.error(String(err));
+                }
+              }}
+            />
+            Close to tray (hide window instead of quitting)
+          </label>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-sm hover:bg-bg"
+              onClick={() => desktop.invoke("open_logs").catch((e) => toast.error(String(e)))}
+            >
+              <FileText size={14} /> Open logs
+            </button>
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-sm hover:bg-bg"
+              onClick={() => desktop.invoke("open_data_folder").catch((e) => toast.error(String(e)))}
+            >
+              <FolderOpen size={14} /> Open data folder
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-lg border border-border bg-bg-elev p-4">
         <label className="mb-2 block text-xs font-medium text-text-dim">

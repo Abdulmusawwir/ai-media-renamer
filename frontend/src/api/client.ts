@@ -128,6 +128,10 @@ export interface BrowseResponse {
 // REST endpoints
 // ---------------------------------------------------------------------------
 
+export function getHealth(): Promise<{ status: string; version: string; desktop: boolean }> {
+  return request<{ status: string; version: string; desktop: boolean }>("GET", "/health");
+}
+
 export function getEnvironment(): Promise<EnvironmentResponse> {
   return request<EnvironmentResponse>("GET", "/api/environment");
 }
@@ -288,6 +292,11 @@ function wsBaseFor(path: string): string {
 
 let _cachedToken: string | null = null;
 let _tokenFetchedAt = 0;
+
+export function setDesktopToken(token: string | null): void {
+  _cachedToken = token;
+  _tokenFetchedAt = Date.now();
+}
 // JWT lifetime is 12h; refresh a bit earlier to avoid sending an expired token.
 const TOKEN_TTL_MS = 11 * 60 * 60 * 1000;
 

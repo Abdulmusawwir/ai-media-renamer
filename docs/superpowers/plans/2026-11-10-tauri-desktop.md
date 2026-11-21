@@ -533,12 +533,12 @@
 - No Tauri calls when `isDesktop` is false; no console errors in browser mode.
 
 **Steps:**
-- [ ] Implement bridge and state.
-- [ ] In dev: start `npm run dev:backend` in one terminal, `npm run tauri dev` in another; verify SPA loads at `127.0.0.1:5173`, no token/splash, REST/WS work.
-- [ ] Verify browser mode (`npm run dev` only) still loads and all pages work.
-- [ ] Verify native picker + drag/drop add files/folders without duplicates; verify `/settings` reload in browser mode hits SPA fallback.
-- [ ] Run `npm run build`; fix TS errors.
-- [ ] Commit: `frontend: add desktop bridge, native pickers, and file drops`
+- [x] Implement bridge and state (`frontend/src/desktop/index.ts`, `DesktopBridge.tsx`, store incomingPaths, client setDesktopToken/getHealth).
+- [ ] In dev: start `npm run dev:backend` in one terminal, `npm run tauri dev` in another; verify SPA loads at `127.0.0.1:5173`, no token/splash, REST/WS work. (Deferred — needs Rust build + backend.)
+- [ ] Verify browser mode (`npm run dev` only) still loads and all pages work. (Deferred — manual.)
+- [ ] Verify native picker + drag/drop add files/folders without duplicates; verify `/settings` reload in browser mode hits SPA fallback. (Deferred — manual.)
+- [x] Run `npm run build`; fix TS errors. (Passes.)
+- [x] Commit: `frontend: add desktop bridge, native pickers, and file drops` (below)
 
 ---
 

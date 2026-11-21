@@ -20,6 +20,7 @@ import {
   type BrowseEntry,
 } from "../api/client";
 import { useStore, useToast, type AnalysisSettings } from "../store";
+import { desktop, isDesktop } from "../desktop";
 import DirectoryPicker from "../components/DirectoryPicker";
 import { Spinner } from "../components/Skeleton";
 
@@ -88,12 +89,22 @@ export default function Analysis() {
   const toast = useToast();
   const config = useStore((s) => s.config);
   const setStaged = useStore((s) => s.setStaged);
+  const incomingPaths = useStore((s) => s.incomingPaths);
+  const pushIncomingPaths = useStore((s) => s.pushIncomingPaths);
+  const clearIncomingPaths = useStore((s) => s.clearIncomingPaths);
   const analysisSettings = useStore((s) => s.analysisSettings);
   const setAnalysisSettings = useStore((s) => s.setAnalysisSettings);
 
   const wsRef = useRef<AnalysisWSController | null>(null);
 
   const [files, setFiles] = useState<string[]>([]);
+
+  // Consume paths pushed by the desktop shell (drag/drop, second instance).
+  useEffect(() => {
+    if (!incomingPaths.length) return;
+    setFiles((prev) => Array.from(new Set([...prev, ...incomingPaths])));
+    clearIncomingPaths();
+  }, [incomingPaths, clearIncomingPaths]);
   const [profile, setProfile] = useState<string>("");
   const [showSettings, setShowSettings] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
@@ -121,7 +132,10 @@ export default function Analysis() {
     []
   );
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop });
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    noClick: isDesktop,
+  });
 
   const addFromBrowse = (entry: BrowseEntry) => {
     if (!entry.is_media) return;
@@ -390,6 +404,37 @@ export default function Analysis() {
             For server-host files, use the folder picker below.
           </p>
         </div>
+
+        {isDesktop && (
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-border bg-bg-elev-2 px-3 py-1.5 text-xs hover:bg-bg-elev"
+              onClick={async () => {
+                const picked = await desktop.pickFiles();
+                if (picked.length) {
+                  setFiles((prev) =>
+                    Array.from(new Set([...prev, ...picked]))
+                  );
+                }
+              }}
+            >
+              Choose files
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border bg-bg-elev-2 px-3 py-1.5 text-xs hover:bg-bg-elev"
+              onClick={async () => {
+                const folder = await desktop.pickFolder();
+                if (folder) {
+                  setFiles((prev) => Array.from(new Set([...prev, folder])));
+                }
+              }}
+            >
+              Choose folder
+            </button>
+          </div>
+        )}
 
         <div className="mt-4">
           <DirectoryPicker onAddFile={addFromBrowse} />
