@@ -1896,7 +1896,12 @@ class OpenAIProvider(AIProvider):
             return result
         try:
             client = self._make_client()
-            model_name = self.text_model or self._model or "gpt-4o"
+            # Resolve the text model against what the server actually has loaded:
+            # llama-server identifies models by GGUF path, not Ollama names.
+            text_model = self.text_model or ""
+            if text_model and text_model not in self.available_models():
+                text_model = ""
+            model_name = text_model or self._model or "gpt-4o"
             response = self._request_completion(
                 client,
                 model_name,
@@ -1940,10 +1945,16 @@ def _llamacpp_base_url() -> str:
     """
     env_url = os.environ.get("LLAMACPP_BASE_URL", "").strip()
     if env_url:
-        return env_url.rstrip("/") + "/v1"
+        url = env_url.rstrip("/")
+        if not url.endswith("/v1"):
+            url = url + "/v1"
+        return url
     cfg_url = config.get("model", {}).get("llamacpp", {}).get("base_url", "")
     if cfg_url:
-        return cfg_url.rstrip("/") + "/v1"
+        url = cfg_url.rstrip("/")
+        if not url.endswith("/v1"):
+            url = url + "/v1"
+        return url
     return LLAMACPP_DEFAULT_URL + "/v1"
 
 
@@ -2044,7 +2055,18 @@ class LlamaCppProvider(OpenAIProvider):
         """Point an OpenAI-compatible client at the local llama-server."""
         super().__init__(base_url=_llamacpp_base_url())
         self._api_key = "local"
-        self._model = MODEL_NAME
+        # llama-server identifies the loaded model by its GGUF path (not the
+        # Ollama-style name stored in config['model']['name']), so resolve the
+        # model id from the configured gguf_path or the server's own listing.
+        gguf = config.get("model", {}).get("llamacpp", {}).get("gguf_path", "")
+        if gguf:
+            self._model = gguf
+        else:
+            try:
+                models = self.available_models()
+                self._model = models[0] if models else ""
+            except Exception:
+                self._model = ""
 
     def available_models(self) -> list[str]:
         """List models advertised by the running llama-server.
