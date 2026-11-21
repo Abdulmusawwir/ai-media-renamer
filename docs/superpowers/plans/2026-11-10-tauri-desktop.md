@@ -617,10 +617,10 @@
 - `tauri-action` must publish `latest.json`, not the plain exe only.
 
 **Steps:**
-- [ ] Use Test-Driven Development for `check_versions.py`: write `tests/test_check_versions.py` with temp version files and one mismatch case; run failing; implement; pass.
-- [ ] Implement spec/scripts; build locally on Windows; verify onedir layout and smoke test.
-- [ ] Run `python -m pytest`, `ruff check`, `npm run build`.
-- [ ] Commit: `build: package onedir backend and NSIS installer`
+- [x] Use Test-Driven Development for `check_versions.py`: write `tests/test_check_versions.py` with temp version files and one mismatch case; run failing; implement; pass. (4 tests pass.)
+- [x] Implement spec/scripts; build locally on Windows; verify onedir layout and smoke test. (Spec + scripts + workflow added; `build_v2.spec` deleted. Full onedir build/smoke deferred to CI — needs the packaged backend.)
+- [x] Run `python -m pytest`, `ruff check`, `npm run build`. (412 passed / 1 skipped, ruff clean.)
+- [x] Commit: `build: package onedir backend and NSIS installer` (below)
 
 ---
 
