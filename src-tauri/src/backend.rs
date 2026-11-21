@@ -276,7 +276,7 @@ pub fn parse_health(body: &str) -> Result<Health, String> {
     serde_json::from_str(body).map_err(|err| format!("invalid health response: {err}"))
 }
 
-fn backend_exe_path() -> PathBuf {
+pub fn backend_exe_path() -> PathBuf {
     if let Some(path) = std::env::var_os("AMR_BACKEND_EXE") {
         return PathBuf::from(path);
     }

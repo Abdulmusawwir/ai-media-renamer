@@ -3,6 +3,7 @@
 mod backend;
 mod commands;
 mod settings;
+mod tray;
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -14,6 +15,7 @@ use backend::BackendProcess;
 use tauri::{
     AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
+use tauri_plugin_dialog::DialogExt;
 
 /// Shared shell state consumed by the command bridge and later lifecycle tasks.
 #[derive(Default)]
@@ -24,6 +26,7 @@ pub struct ShellState {
     pub pending_paths: Mutex<Vec<PathBuf>>,
     pub ready: AtomicBool,
     pub failed: AtomicBool,
+    pub quitting: AtomicBool,
     pub data_dir: Mutex<Option<PathBuf>>,
 }
 
@@ -41,8 +44,41 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::desktop_ready,
             commands::pending_paths,
-            commands::release_page_url
+            commands::release_page_url,
+            commands::get_shell_settings,
+            commands::set_close_to_tray,
+            commands::open_logs,
+            commands::open_data_folder,
+            commands::get_backend_status,
+            commands::restart_app,
+            commands::quit_app
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                let state = app.state::<ShellState>();
+                if state.quitting.load(Ordering::SeqCst) {
+                    return;
+                }
+                if crate::settings::load_shell_settings(app).close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    static NOTIFIED: std::sync::atomic::AtomicBool =
+                        std::sync::atomic::AtomicBool::new(false);
+                    if !NOTIFIED.swap(true, Ordering::SeqCst) {
+                        use tauri_plugin_dialog::MessageDialogKind;
+                        app.dialog()
+                            .message(
+                                "AI Media Renamer is still running in the system tray. \
+                                 Use the tray icon to quit.",
+                            )
+                            .title("AI Media Renamer")
+                            .kind(MessageDialogKind::Info)
+                            .show_with_result(|_| {});
+                    }
+                }
+            }
+        })
         .setup(|app| {
             setup(app)?;
             Ok(())
@@ -82,6 +118,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
             .map_err(|_| std::io::Error::other("shell state lock poisoned"))?;
         *stored = Some(data_dir.clone());
     }
+
+    tray::build_tray(&handle)?;
 
     if cfg!(debug_assertions) {
         settings::log("debug build: backend is not spawned; loading the Vite dev server");
@@ -423,7 +461,7 @@ fn open_logs(data_dir: &Path) {
     let _ = std::process::Command::new("explorer").arg(&logs).spawn();
 }
 
-fn stop_backend(app: &AppHandle) {
+pub fn stop_backend(app: &AppHandle) {
     let state = app.state::<ShellState>();
     let mut backend = state
         .backend

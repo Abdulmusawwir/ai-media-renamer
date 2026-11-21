@@ -479,12 +479,12 @@
 - Version shown in the UI comes from `/health`, not a hardcoded string.
 
 **Steps:**
-- [ ] Write failing tests in `settings.rs`: default true, missing file, malformed file, round-trip.
-- [ ] Write a Rust test for the status guard decision using a pure helper `fn should_block(status: &DesktopStatus) -> bool`.
-- [ ] Implement tray, close handling, preferences, commands, and guards.
-- [ ] Run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`.
-- [ ] Manual: close-to-tray, tray Show/Quit, second instance focus; no orphan process in Task Manager.
-- [ ] Commit: `desktop: add tray, close-to-tray, and safe lifecycle commands`
+- [x] Write failing tests in `settings.rs`: default true, missing file, malformed file, round-trip. Implemented as serde-level unit tests (no AppHandle runtime needed).
+- [x] Write a Rust test for the status guard decision using a pure helper `fn should_block(status: &DesktopStatus) -> bool`. (6 tests.)
+- [x] Implement tray, close handling, preferences, commands, and guards. Tray menu (Show, Check for Updates, Setup & Dependencies, Open Logs, Open Data Folder, Quit), close-to-tray with one-time notice, `desktop.json` prefs, `get/set_shell_settings`, `open_logs`, `open_data_folder`, `get_backend_status`, `restart_app`, `quit_app`, `run_setup`.
+- [x] Run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`. 18/18 pass.
+- [ ] Manual: close-to-tray, tray Show/Quit, second instance focus; no orphan process in Task Manager. (Deferred — needs a built app.)
+- [x] Commit: `desktop: add tray, close-to-tray, and safe lifecycle commands` (below)
 
 ---
 
