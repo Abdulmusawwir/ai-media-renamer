@@ -408,7 +408,9 @@ export default function Analysis() {
           <p className="text-sm text-text-dim">
             {isDragActive
               ? "Drop files here…"
-              : "Drag & drop files here, or click to browse"}
+              : isDesktop
+              ? "Drag & drop files here, or click to browse"
+              : "Drag & drop is desktop-only — use the folder browser below"}
           </p>
           <p className="mt-1 text-[11px] text-text-dim">
             For server-host files, use the folder picker below.
