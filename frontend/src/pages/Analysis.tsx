@@ -421,18 +421,9 @@ export default function Analysis() {
             >
               Choose files
             </button>
-            <button
-              type="button"
-              className="rounded-md border border-border bg-bg-elev-2 px-3 py-1.5 text-xs hover:bg-bg-elev"
-              onClick={async () => {
-                const folder = await desktop.pickFolder();
-                if (folder) {
-                  setFiles((prev) => Array.from(new Set([...prev, folder])));
-                }
-              }}
-            >
-              Choose folder
-            </button>
+            {/* Native folder picking is intentionally not wired to the files list:
+                the backend analyses individual files, and folder browsing is
+                already covered by the server-side DirectoryPicker below. */}
           </div>
         )}
 
