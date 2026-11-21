@@ -58,6 +58,7 @@ npm run tauri dev                 # Vite HMR + backend on 8000 (run `npm run dev
 npm run dev:backend               # windowed backend on 127.0.0.1:8000 (no launch)
 npm run tauri build               # NSIS installer + updater artifacts
 python scripts/check_versions.py --tag v2.2.0   # version consistency gate
+pwsh scripts/cargo-test-gnu.ps1                # Rust tests on the local MinGW toolchain
 ```
 
 ### Local AI runtime — llama.cpp only

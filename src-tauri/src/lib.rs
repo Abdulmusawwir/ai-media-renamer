@@ -413,7 +413,6 @@ fn show_failure_dialog(app: AppHandle, error: String) {
     );
 
     let app_for_callback = app.clone();
-    let error_for_callback = error;
     app.dialog()
         .message(message)
         .title("AI Media Renamer")
@@ -430,11 +429,9 @@ fn show_failure_dialog(app: AppHandle, error: String) {
             }
             MessageDialogResult::No => {
                 open_logs(&data_dir);
-                prompt_failure(app_for_callback, error_for_callback);
             }
             MessageDialogResult::Custom(ref label) if label.as_str() == "Open Logs" => {
                 open_logs(&data_dir);
-                prompt_failure(app_for_callback, error_for_callback);
             }
             _ => quit(&app_for_callback),
         });
