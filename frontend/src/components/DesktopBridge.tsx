@@ -9,37 +9,44 @@ export default function DesktopBridge() {
 
   useEffect(() => {
     if (!isDesktop) return;
+    const cleanups: Array<() => void> = [];
     let cancelled = false;
-    let unlistenDrop: (() => void) | undefined;
-    let unlistenOpen: (() => void) | undefined;
-    let unlistenCheck: (() => void) | undefined;
 
     (async () => {
-      unlistenDrop = await desktop.installDesktopDropHandler((paths) => {
-        pushIncomingPaths(paths);
-      });
-
-      // Drain any paths queued by a second instance at startup.
       try {
-        const pending = await desktop.invoke<string[]>("pending_paths");
+        const unlistenDrop = await desktop.installDesktopDropHandler((paths) => {
+          pushIncomingPaths(paths);
+        });
+        if (cancelled) {
+          unlistenDrop();
+          return;
+        }
+        cleanups.push(unlistenDrop);
+
+        const pending = await desktop.invoke<string[]>("pending_paths").catch(() => [] as string[]);
         if (!cancelled && Array.isArray(pending) && pending.length) {
           pushIncomingPaths(pending);
         }
-      } catch {
-        /* ignore */
-      }
 
-      unlistenOpen = await desktop.listen<string[]>("desktop://open-paths", (paths) => {
-        if (Array.isArray(paths)) pushIncomingPaths(paths);
-      });
+        const unlistenOpen = await desktop.listen<string[]>("desktop://open-paths", (paths) => {
+          if (Array.isArray(paths)) pushIncomingPaths(paths);
+        });
+        if (cancelled) {
+          unlistenOpen();
+          return;
+        }
+        cleanups.push(unlistenOpen);
 
-      unlistenCheck = await desktop.listen("desktop://check-updates", () => {
-        setPendingUpdateCheck(true);
-      });
+        const unlistenCheck = await desktop.listen("desktop://check-updates", () => {
+          setPendingUpdateCheck(true);
+        });
+        if (cancelled) {
+          unlistenCheck();
+          return;
+        }
+        cleanups.push(unlistenCheck);
 
-      // Notify the shell that the SPA has mounted.
-      try {
-        await desktop.invoke("desktop_ready");
+        await desktop.invoke("desktop_ready").catch(() => undefined);
       } catch {
         /* ignore */
       }
@@ -47,12 +54,16 @@ export default function DesktopBridge() {
 
     return () => {
       cancelled = true;
-      unlistenDrop?.();
-      unlistenOpen?.();
-      unlistenCheck?.();
+      cleanups.forEach((fn) => {
+        try {
+          fn();
+        } catch {
+          /* ignore */
+        }
+      });
       clearIncomingPaths();
     };
-  }, [pushIncomingPaths, clearIncomingPaths]);
+  }, [pushIncomingPaths, clearIncomingPaths, setPendingUpdateCheck]);
 
   return null;
 }
