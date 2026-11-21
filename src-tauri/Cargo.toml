@@ -7,7 +7,10 @@ edition = "2021"
 
 [lib]
 name = "ai_media_renamer_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Windows desktop only: the staticlib/cdylib targets in Tauri's template exist
+# for mobile, and their PE export table overflows the MinGW linker
+# ("export ordinal too large") on this crate.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -21,12 +24,13 @@ tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
-ureq = "2.12"
+ureq = { version = "2.12", default-features = false }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_Security",
   "Win32_System_JobObjects",
   "Win32_System_Threading",
 ] }

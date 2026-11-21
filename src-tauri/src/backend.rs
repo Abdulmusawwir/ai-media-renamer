@@ -18,11 +18,14 @@ const HEALTH_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
 
 /// Media and document extensions accepted from second-instance file arguments.
+///
+/// Mirrors `video_extensions`, `image_extensions`, `document_extensions`, and
+/// `audio_extensions` in `config.json`.
 const MEDIA_EXTENSIONS: &[&str] = &[
-    ".mp4", ".mov", ".avi", ".mkv", ".webm", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp",
-    ".tif", ".tiff", ".heic", ".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma", ".opus",
-    ".aiff", ".alac", ".ape", ".wv", ".pdf", ".docx", ".doc", ".txt", ".md", ".rtf", ".xlsx",
-    ".csv", ".pptx",
+    ".avi", ".flv", ".m4v", ".mkv", ".mov", ".mp4", ".mts", ".ts", ".webm", ".wmv", ".bmp", ".gif",
+    ".heic", ".jpeg", ".jpg", ".png", ".raw", ".tif", ".tiff", ".webp", ".csv", ".doc", ".docx",
+    ".md", ".pdf", ".pptx", ".rtf", ".txt", ".xlsx", ".aac", ".aiff", ".alac", ".ape", ".flac",
+    ".m4a", ".mp3", ".ogg", ".opus", ".wav", ".wma", ".wv",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -98,15 +101,37 @@ pub fn resolve_data_dir() -> PathBuf {
         }
     }
     if let Some(appdata) = std::env::var_os("APPDATA") {
-        return PathBuf::from(appdata).join("ai-media-renamer");
+        if !appdata.is_empty() {
+            return PathBuf::from(appdata).join("ai-media-renamer");
+        }
     }
-    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
-        return PathBuf::from(home)
+    if let Some(home) = home_dir() {
+        return home
             .join("AppData")
             .join("Roaming")
             .join("ai-media-renamer");
     }
     PathBuf::from(".").join("ai-media-renamer")
+}
+
+/// Resolve the user profile the way Python's `Path.home()` does on Windows.
+fn home_dir() -> Option<PathBuf> {
+    if let Some(profile) = std::env::var_os("USERPROFILE") {
+        if !profile.is_empty() {
+            return Some(PathBuf::from(profile));
+        }
+    }
+    if let (Some(drive), Some(path)) = (std::env::var_os("HOMEDRIVE"), std::env::var_os("HOMEPATH"))
+    {
+        if !drive.is_empty() && !path.is_empty() {
+            let mut home = PathBuf::from(drive);
+            home.push(path);
+            return Some(home);
+        }
+    }
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
 }
 
 /// Keep only existing media/document files from command line arguments.
@@ -157,15 +182,16 @@ pub fn version_compatible(shell: &str, backend: &str, debug: bool) -> bool {
 pub fn spawn_backend(port: u16, token: &str) -> Result<BackendProcess, String> {
     let data_dir = resolve_data_dir();
     let log_dir = data_dir.join("logs");
-    std::fs::create_dir_all(&log_dir)
-        .map_err(|err| format!("could not create log directory {}: {err}", log_dir.display()))?;
+    std::fs::create_dir_all(&log_dir).map_err(|err| {
+        format!(
+            "could not create log directory {}: {err}",
+            log_dir.display()
+        )
+    })?;
 
     let exe = backend_exe_path();
     if !exe.is_file() {
-        return Err(format!(
-            "backend executable not found at {}",
-            exe.display()
-        ));
+        return Err(format!("backend executable not found at {}", exe.display()));
     }
 
     let log_path = log_dir.join("backend-process.log");
@@ -324,7 +350,7 @@ mod job {
                     return Err(format!("could not configure Job Object: {err}"));
                 }
 
-                let process = child.as_raw_handle() as HANDLE;
+                let process = child.as_raw_handle();
                 if AssignProcessToJobObject(job, process) == 0 {
                     let err = io::Error::last_os_error();
                     CloseHandle(job);
@@ -376,15 +402,21 @@ mod tests {
     fn test_filter_path_args_keeps_existing_media() {
         let dir = temp_dir();
         let video = dir.join("clip.mp4");
+        let stream = dir.join("capture.flv");
+        let image = dir.join("scan.raw");
         let document = dir.join("notes.txt");
         let unsupported = dir.join("installer.exe");
         fs::write(&video, b"video").expect("write video");
+        fs::write(&stream, b"stream").expect("write stream");
+        fs::write(&image, b"image").expect("write image");
         fs::write(&document, b"document").expect("write document");
         fs::write(&unsupported, b"binary").expect("write unsupported");
         let missing = dir.join("missing.mp4");
 
         let args = vec![
             video.to_string_lossy().into_owned(),
+            stream.to_string_lossy().into_owned(),
+            image.to_string_lossy().into_owned(),
             document.to_string_lossy().into_owned(),
             unsupported.to_string_lossy().into_owned(),
             missing.to_string_lossy().into_owned(),
@@ -392,10 +424,16 @@ mod tests {
         ];
         let filtered = filter_path_args(&args);
 
-        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered.len(), 4);
         assert!(filtered
             .iter()
             .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("clip.mp4")));
+        assert!(filtered
+            .iter()
+            .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("capture.flv")));
+        assert!(filtered
+            .iter()
+            .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("scan.raw")));
         assert!(filtered
             .iter()
             .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("notes.txt")));

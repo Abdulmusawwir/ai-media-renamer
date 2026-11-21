@@ -6,8 +6,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::ShellState;
 
-const RELEASE_PAGE: &str =
-    "https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest";
+const RELEASE_PAGE: &str = "https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest";
 
 /// Called by the SPA once it has mounted. Shows the main window, closes the
 /// splash, and navigates to the backend if the window is not already there.

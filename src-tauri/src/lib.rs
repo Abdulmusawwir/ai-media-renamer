@@ -16,6 +16,7 @@ use tauri::{
 };
 
 /// Shared shell state consumed by the command bridge and later lifecycle tasks.
+#[derive(Default)]
 pub struct ShellState {
     pub backend: Mutex<Option<BackendProcess>>,
     pub port: Mutex<Option<u16>>,
@@ -24,25 +25,6 @@ pub struct ShellState {
     pub ready: AtomicBool,
     pub failed: AtomicBool,
     pub data_dir: Mutex<Option<PathBuf>>,
-}
-
-impl Default for ShellState {
-    fn default() -> Self {
-        Self {
-            backend: Mutex::new(None),
-            port: Mutex::new(None),
-            token: Mutex::new(None),
-            pending_paths: Mutex::new(Vec::new()),
-            ready: AtomicBool::new(false),
-            failed: AtomicBool::new(false),
-            data_dir: Mutex::new(None),
-        }
-    }
-}
-
-enum FailureChoice {
-    Retry,
-    Quit,
 }
 
 /// Build and run the desktop shell.
@@ -82,7 +64,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
 
     // The backend and the setup child must resolve the same data root.
     std::env::set_var("AMR_DATA_DIR", &data_dir);
-    let _ = settings::init_logging(&data_dir);
+    if let Err(err) = settings::init_logging(&data_dir) {
+        settings::log(&format!("could not initialise the shell log: {err}"));
+    }
 
     settings::log(&format!(
         "shell starting: version {}, data root {}",
@@ -107,34 +91,47 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let mut splash = Some(create_splash(&handle)?);
-    loop {
-        match start_backend(&handle) {
-            Ok(()) => break,
+    // Startup runs off the main thread so the event loop keeps dispatching
+    // while the backend boots and while startup dialogs are shown.
+    create_splash(&handle)?;
+    start_release(&handle);
+    Ok(())
+}
+
+fn start_release(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        stop_backend(&app);
+        match start_backend(&app) {
+            Ok(()) => finish_startup(app),
             Err(err) => {
                 settings::log(&format!("backend startup failed: {err}"));
-                if let Some(window) = splash.take() {
-                    let _ = window.close();
-                }
-                match show_failure_dialog(&handle, &err, &data_dir) {
-                    FailureChoice::Retry => {
-                        splash = Some(create_splash(&handle)?);
-                    }
-                    FailureChoice::Quit => {
-                        let state = handle.state::<ShellState>();
-                        state.failed.store(true, Ordering::SeqCst);
-                        handle.exit(1);
-                        return Ok(());
-                    }
-                }
+                prompt_failure(app, err);
             }
         }
-    }
+    });
+}
 
-    let (port, token) = read_connection(&handle)?;
-    create_main_window(&handle, Some(port), Some(&token))?;
-    spawn_ready_fallback(handle.clone());
-    Ok(())
+fn finish_startup(app: AppHandle) {
+    let (port, token) = match read_connection(&app) {
+        Ok(connection) => connection,
+        Err(err) => {
+            prompt_failure(app, err);
+            return;
+        }
+    };
+
+    // Window creation is marshalled to the main thread by Tauri; doing it from
+    // this worker avoids the WebView2 deadlock that hits synchronous event
+    // handlers on Windows.
+    match create_main_window(&app, Some(port), Some(&token)) {
+        Ok(_) => spawn_ready_fallback(app),
+        Err(err) => {
+            let message = format!("could not create the main window: {err}");
+            settings::log(&message);
+            prompt_failure(app, message);
+        }
+    }
 }
 
 fn handle_second_instance(app: &AppHandle, argv: Vec<String>, cwd: String) {
@@ -157,7 +154,7 @@ fn handle_second_instance(app: &AppHandle, argv: Vec<String>, cwd: String) {
         let state = app.state::<ShellState>();
         if let Ok(mut pending) = state.pending_paths.lock() {
             pending.extend(paths.clone());
-        }
+        };
     }
 
     focus_main(app);
@@ -198,8 +195,11 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
         match backend::wait_for_health(port, Duration::from_secs(30)) {
             Ok(health) => {
                 let shell_version = env!("CARGO_PKG_VERSION");
-                if !backend::version_compatible(shell_version, &health.version, cfg!(debug_assertions))
-                {
+                if !backend::version_compatible(
+                    shell_version,
+                    &health.version,
+                    cfg!(debug_assertions),
+                ) {
                     let _ = process.stop();
                     return Err(format!(
                         "backend version {} does not match shell version {}; reinstall the app",
@@ -222,8 +222,7 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
                     *state
                         .token
                         .lock()
-                        .map_err(|_| "shell state lock poisoned".to_string())? =
-                        Some(token);
+                        .map_err(|_| "shell state lock poisoned".to_string())? = Some(token);
                     *state
                         .backend
                         .lock()
@@ -306,8 +305,8 @@ fn create_splash(app: &AppHandle) -> Result<WebviewWindow, Box<dyn Error>> {
 
 fn desktop_init_script(port: u16, token: &str) -> String {
     let token = serde_json::to_string(token).unwrap_or_else(|_| "\"\"".to_string());
-    let version = serde_json::to_string(env!("CARGO_PKG_VERSION"))
-        .unwrap_or_else(|_| "\"\"".to_string());
+    let version =
+        serde_json::to_string(env!("CARGO_PKG_VERSION")).unwrap_or_else(|_| "\"\"".to_string());
     format!(
         r#"
         (() => {{
@@ -342,40 +341,80 @@ fn spawn_ready_fallback(app: AppHandle) {
     });
 }
 
-fn show_failure_dialog(app: &AppHandle, error: &str, data_dir: &Path) -> FailureChoice {
+fn prompt_failure(app: AppHandle, error: String) {
+    let main = app.clone();
+    if let Err(err) = main.run_on_main_thread(move || show_failure_dialog(app, error)) {
+        settings::log(&format!("could not show the failure dialog: {err}"));
+    }
+}
+
+/// Non-blocking Retry / Open Logs / Quit dialog.
+///
+/// The splash window is hidden rather than closed: closing the last window
+/// would let the event loop request an exit while the dialog is still open.
+fn show_failure_dialog(app: AppHandle, error: String) {
     use tauri_plugin_dialog::{
         DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
     };
 
-    loop {
-        let message = format!(
-            "AI Media Renamer could not start its backend.\n\n{error}\n\nLogs: {}",
-            settings::logs_dir(data_dir).display()
-        );
-        let result = app
-            .dialog()
-            .message(message)
-            .title("AI Media Renamer")
-            .kind(MessageDialogKind::Error)
-            .buttons(MessageDialogButtons::YesNoCancelCustom(
-                "Retry".to_string(),
-                "Open Logs".to_string(),
-                "Quit".to_string(),
-            ))
-            .blocking_show_with_result();
-
-        match result {
-            MessageDialogResult::Yes => return FailureChoice::Retry,
-            MessageDialogResult::No => open_logs(data_dir),
-            MessageDialogResult::Custom(ref label) if label == "Retry" => {
-                return FailureChoice::Retry;
-            }
-            MessageDialogResult::Custom(ref label) if label == "Open Logs" => {
-                open_logs(data_dir);
-            }
-            _ => return FailureChoice::Quit,
-        }
+    if let Some(splash) = app.get_webview_window("splash") {
+        let _ = splash.hide();
     }
+
+    let data_dir = app
+        .state::<ShellState>()
+        .data_dir
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+        .unwrap_or_else(backend::resolve_data_dir);
+
+    let message = format!(
+        "AI Media Renamer could not start its backend.\n\n{error}\n\nLogs: {}",
+        settings::logs_dir(&data_dir).display()
+    );
+
+    let app_for_callback = app.clone();
+    let error_for_callback = error;
+    app.dialog()
+        .message(message)
+        .title("AI Media Renamer")
+        .kind(MessageDialogKind::Error)
+        .buttons(MessageDialogButtons::YesNoCancelCustom(
+            "Retry".to_string(),
+            "Open Logs".to_string(),
+            "Quit".to_string(),
+        ))
+        .show_with_result(move |result| match result {
+            MessageDialogResult::Yes => retry_startup(app_for_callback),
+            MessageDialogResult::Custom(ref label) if label.as_str() == "Retry" => {
+                retry_startup(app_for_callback)
+            }
+            MessageDialogResult::No => {
+                open_logs(&data_dir);
+                prompt_failure(app_for_callback, error_for_callback);
+            }
+            MessageDialogResult::Custom(ref label) if label.as_str() == "Open Logs" => {
+                open_logs(&data_dir);
+                prompt_failure(app_for_callback, error_for_callback);
+            }
+            _ => quit(&app_for_callback),
+        });
+}
+
+fn retry_startup(app: AppHandle) {
+    if let Some(splash) = app.get_webview_window("splash") {
+        let _ = splash.show();
+        let _ = splash.set_focus();
+    }
+    settings::log("retrying backend startup");
+    start_release(&app);
+}
+
+fn quit(app: &AppHandle) {
+    let state = app.state::<ShellState>();
+    state.failed.store(true, Ordering::SeqCst);
+    app.exit(1);
 }
 
 fn open_logs(data_dir: &Path) {

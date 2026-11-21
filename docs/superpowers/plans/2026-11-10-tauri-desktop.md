@@ -438,8 +438,8 @@
   - `test_resolve_data_dir_override` (env)
   - `test_generate_token_length`
 - [x] Add test-only health parser test.
-- [ ] Run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` in `src-tauri/`. Then `npm run build` in `frontend/`. **Blocked: no Rust/MSVC toolchain on this machine; frontend build passed.**
-- [ ] Manual release smoke: `npm run tauri build -- --debug` is not a release build; verify dev mode loads Vite with no splash. Use a local resource layout to verify backend spawn/health if available. **Blocked: no Rust build.**
+- [x] Run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` in `src-tauri/`. Then `npm run build` in `frontend/`. **Done on the MinGW (`x86_64-pc-windows-gnu`) toolchain: fmt clean, clippy clean with `-D warnings`, 8/8 unit tests pass, frontend build passed.** Two toolchain-only workarounds are needed locally (not repo code): put `target/debug/build/webview2-com-sys-*/out/x64` on `PATH` so the test harness can load `WebView2Loader.dll`, and pass a `Microsoft.Windows.Common-Controls` v6 manifest object via `RUSTFLAGS="-C link-arg=<manifest.o>"` because the GNU linker keeps MinGW's default manifest for test harnesses only.
+- [ ] Manual release smoke: `npm run tauri build -- --debug` is not a release build; verify dev mode loads Vite with no splash. Use a local resource layout to verify backend spawn/health if available. **Still deferred: needs a packaged `dist/AIMediaRenamerBackend/` and an installer run; not required to close Task 7's code gate.**
 - [x] Commit: `desktop: scaffold Tauri shell and backend lifecycle`
 
 ---
