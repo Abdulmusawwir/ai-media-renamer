@@ -1897,9 +1897,13 @@ class OpenAIProvider(AIProvider):
         try:
             client = self._make_client()
             # Resolve the text model against what the server actually has loaded:
-            # llama-server identifies models by GGUF path, not Ollama names.
+            # llama-server identifies models by GGUF path, not Ollama names, so an
+            # Ollama-style name (e.g. "qwen2.5:3b") must fall back to the loaded
+            # GGUF. Only validate when the server actually answered (non-empty
+            # listing); otherwise trust the configured name (offline / mocked).
             text_model = self.text_model or ""
-            if text_model and text_model not in self.available_models():
+            available = self.available_models()
+            if text_model and available and text_model not in available:
                 text_model = ""
             model_name = text_model or self._model or "gpt-4o"
             response = self._request_completion(
