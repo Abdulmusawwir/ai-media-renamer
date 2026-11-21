@@ -125,11 +125,21 @@ export default function Analysis() {
   const onDrop = useCallback(
     (accepted: File[]) => {
       const paths = accepted
-        .map((f) => (f as File & { path?: string }).path || f.name)
-        .filter(Boolean);
+        .map((f) => (f as File & { path?: string }).path)
+        .filter((p): p is string => Boolean(p));
+      if (paths.length === 0) {
+        // Browser builds do not expose filesystem paths; use the folder browser
+        // (or the native pickers in desktop mode) instead of drag-and-drop.
+        if (!isDesktop) {
+          toast.info(
+            "Drag-and-drop is only available in the desktop app. Use the folder browser below to add files."
+          );
+        }
+        return;
+      }
       setFiles((prev) => Array.from(new Set([...prev, ...paths])));
     },
-    []
+    [isDesktop, toast]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
