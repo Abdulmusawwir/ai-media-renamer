@@ -75,3 +75,10 @@
 - **Document format support added** — PRD originally listed only video/image formats. PDF/DOCX/XLSX/PPTX/TXT/MD/RTF text extraction added in v1.4.3. PRD updated in v1.5.0 to include document formats in Upload & Ingestion section.
 - **Subtitle/audio track analysis now in scope** — PRD originally listed as out-of-scope. Audio transcription via `faster-whisper` added to v1.5.0 plan (Layer 19). PRD updated to remove from out-of-scope, add to AI Analysis Pipeline.
 - ~~**PRD described the v1 Streamlit/Ollama product** — `prd.md` still claimed a Streamlit UI, Ollama daemon, `~/Desktop/RenamedMedia` output, a Plotly analytics dashboard, 40 categories, 8 profiles, and `st.rerun()` staging.~~ _Resolution (docs-audit pass): `prd.md` now describes the v2 SPA/FastAPI architecture, llama.cpp-only runtime, 54 categories, 9 profiles with auto-routing, in-place commit, saved sessions, and the real out-of-scope list. `implementation_plan.md` and `REMEDIATION.md` are explicitly marked historical._
+
+
+## Desktop shell (v2.2.0, branch feat/tauri-desktop)
+
+- **Tauri v2 shell** added under `src-tauri/` (Rust): backend lifecycle (port/token, job object, health/version gate, splash, retry/open-logs/quit), tray + close-to-tray + `desktop.json` prefs, desktop token boundary in `server/desktop.py`, SPA fallback, `desktop_backend.py` entry point, React desktop bridge + native pickers/drag-drop, in-app updater UI.
+- **Runtime DLL bug (audit #6)** resolved by Task 3: `_resolve_binary_path` + `stop_llamacpp_server` + full adjacent-DLL install with verification.
+- **Deferred/manual:** release smoke, updater key generation, N->N+1 update verification, manual close-to-tray/tray smoke (needs a built installer).

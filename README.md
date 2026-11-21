@@ -137,3 +137,18 @@ If this saves you a weekend a month, consider [sponsoring the project on GitHub]
 Free forever · Open source · Runs on your machine, not ours
 
 </div>
+
+
+---
+
+## Desktop app (v2.2.0)
+
+AI Media Renamer ships as a signed per-user NSIS installer built on a Tauri v2 shell:
+
+- **Install:** run the `AI Media Renamer_*.exe` installer (per-user, no admin). The app lives in the tray; closing the window hides it.
+- **Setup:** first launch runs the dependency wizard (llama.cpp runtime + a GGUF model). Re-run anytime from the tray ("Setup & Dependencies").
+- **Data:** config, logs, sessions, undo log, and models live under `%APPDATA%\ai-media-renamer` (override with `AMR_DATA_DIR`).
+- **Updates:** in-app signed updates via the Tauri updater; "Check for Updates" in Settings or the tray.
+- **Browser & CLI still work:** `python launch.py` and `python cli.py` are unchanged.
+
+Build from source: `npm run tauri build` (see `scripts/build-desktop.ps1`).

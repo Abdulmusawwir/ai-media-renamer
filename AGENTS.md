@@ -53,6 +53,11 @@ python cli.py "path/to/dir" --export-csv staging.csv                # export aft
 python cli.py "path/to/dir" --import-csv staging.csv                # skip analysis, load from CSV
 ruff check .                      # lint
 pytest                            # unit tests
+# Desktop (Tauri v2 shell, branch feat/tauri-desktop, v2.2.0)
+npm run tauri dev                 # Vite HMR + backend on 8000 (run `npm run dev:backend` first)
+npm run dev:backend               # windowed backend on 127.0.0.1:8000 (no launch)
+npm run tauri build               # NSIS installer + updater artifacts
+python scripts/check_versions.py --tag v2.2.0   # version consistency gate
 ```
 
 ### Local AI runtime — llama.cpp only
