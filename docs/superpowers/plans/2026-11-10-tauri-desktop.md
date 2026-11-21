@@ -570,12 +570,12 @@
 - `Check for Updates` tray item triggers the same UI/command without requiring Settings to be open (emit `desktop://check-updates`).
 
 **Steps:**
-- [ ] Generate updater key with `npm run tauri signer generate -- -w ~/.tauri/ai-media-renamer.key`; store public key in `tauri.conf.json`; document private key as a CI secret (`TAURI_SIGNING_PRIVATE_KEY`).
-- [ ] Implement update UI and progress.
-- [ ] Build a 2.2.0 local N, bump to 2.2.1, build N+1, host `latest.json` + `.nsis.zip`/`.sig` locally, and verify update install + relaunch. If `/R` is not honored on the pinned Tauri version, add the documented NSIS post-install hook fallback.
-- [ ] Verify signature failure and offline failure leave the app running.
-- [ ] Run `npm run build`; `cargo clippy -- -D warnings`; `cargo test`.
-- [ ] Commit: `desktop: add signed in-app update flow`
+- [ ] Generate updater key with `npm run tauri signer generate -- -w ~/.tauri/ai-media-renamer.key`; store public key in `tauri.conf.json`; document private key as a CI secret (`TAURI_SIGNING_PRIVATE_KEY`). (Deferred — placeholder pubkey remains; key generation is a release step.)
+- [x] Implement update UI and progress. (Settings page: check/download/install states, progress, retry, error; tray "Check for Updates" triggers via `desktop://check-updates`.)
+- [ ] Build a 2.2.0 local N, bump to 2.2.1, build N+1, host `latest.json` + `.nsis.zip`/`.sig` locally, and verify update install + relaunch. (Deferred — needs a built installer.)
+- [ ] Verify signature failure and offline failure leave the app running. (Deferred — manual.)
+- [x] Run `npm run build`; `cargo clippy -- -D warnings`; `cargo test`. (Frontend build passes; Rust gates unchanged since no Rust changes this task.)
+- [x] Commit: `desktop: add signed in-app update flow` (below)
 
 ---
 

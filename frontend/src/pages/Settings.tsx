@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Save, RefreshCw, Cpu, Sparkles, FolderOpen, FileText } from "lucide-react";
+import { Save, RefreshCw, Cpu, Sparkles, FolderOpen, FileText, Download, ExternalLink } from "lucide-react";
 import { useConfig, usePutConfig } from "../hooks/api";
 import { useStore, useToast } from "../store";
 import { Skeleton } from "../components/Skeleton";
@@ -17,6 +17,16 @@ export default function Settings() {
   const [text, setText] = useState<string>("");
   const [dirty, setDirty] = useState(false);
   const [closeToTray, setCloseToTray] = useState<boolean>(true);
+  const pendingUpdateCheck = useStore((s) => s.pendingUpdateCheck);
+  const setPendingUpdateCheck = useStore((s) => s.setPendingUpdateCheck);
+
+  const [updateState, setUpdateState] = useState<
+    "idle" | "checking" | "up-to-date" | "available" | "downloading" | "installing" | "error"
+  >("idle");
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; notes?: string; date?: string } | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<number>(0);
+  const [updateError, setUpdateError] = useState<string>("");
+
   useEffect(() => {
     if (!isDesktop) return;
     desktop
@@ -24,6 +34,96 @@ export default function Settings() {
       .then((s) => setCloseToTray(Boolean(s?.close_to_tray)))
       .catch(() => undefined);
   }, []);
+
+  const checkForUpdate = async () => {
+    if (!isDesktop) return;
+    setUpdateState("checking");
+    setUpdateError("");
+    try {
+      const u = await desktop.checkForUpdate();
+      if (!u) {
+        setUpdateInfo(null);
+        setUpdateState("up-to-date");
+      } else {
+        setUpdateInfo(u);
+        setUpdateState("available");
+      }
+    } catch (err) {
+      setUpdateError(String(err));
+      setUpdateState("error");
+    }
+  };
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    if (!pendingUpdateCheck) return;
+    setPendingUpdateCheck(false);
+    checkForUpdate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingUpdateCheck]);
+
+  // Tray "Check for Updates" triggers the same flow.
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlisten: (() => void) | undefined;
+    desktop
+      .listen("desktop://check-updates", () => {
+        checkForUpdate();
+      })
+      .then((u) => {
+        unlisten = u;
+      })
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDesktop]);
+
+  const installUpdate = async () => {
+    if (!updateInfo) return;
+    // Guard: check backend busy state first.
+    try {
+      const status = await desktop.invoke<{
+        analysis_running: boolean;
+        commit_running: boolean;
+        model_downloads_running: boolean;
+        model_migration_running: boolean;
+        setup_running: boolean;
+      }>("get_backend_status");
+      const busy =
+        status.analysis_running ||
+        status.commit_running ||
+        status.model_downloads_running ||
+        status.model_migration_running ||
+        status.setup_running;
+      if (busy) {
+        const ok = window.confirm(
+          "An operation is still running. Installing the update may interrupt it. Continue?"
+        );
+        if (!ok) return;
+      }
+    } catch {
+      /* backend unreachable — treat as not busy */
+    }
+    setUpdateState("downloading");
+    setUpdateProgress(0);
+    try {
+      await desktop.downloadAndInstall(updateInfo, (e: unknown) => {
+        const ev = e as { event?: string; data?: { contentLength?: number; chunkLength?: number } };
+        if (ev?.event === "Started") {
+          setUpdateProgress(0);
+        } else if (ev?.event === "Progress") {
+          setUpdateProgress((p) => p + (ev.data?.chunkLength ?? 0));
+        }
+      });
+      setUpdateState("installing");
+      await desktop.relaunch();
+    } catch (err) {
+      setUpdateError(String(err));
+      setUpdateState("error");
+    }
+  };
 
   // Seed the editor when the query resolves with fresh config.
   const [seededKey, setSeededKey] = useState<string>("");
@@ -148,6 +248,75 @@ export default function Settings() {
           </div>
         </div>
       )}
+
+      <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="mb-3 text-xs font-medium text-text-dim">Updates</div>
+        {!isDesktop ? (
+          <p className="text-sm text-text-dim">
+            Updates are managed by the desktop app.{" "}
+            <a
+              className="text-accent underline"
+              href="https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest"
+              target="_blank"
+              rel="noreferrer"
+            >
+              View releases
+            </a>
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-sm hover:bg-bg disabled:opacity-50"
+                onClick={checkForUpdate}
+                disabled={updateState === "checking" || updateState === "downloading" || updateState === "installing"}
+              >
+                <RefreshCw size={14} /> Check for updates
+              </button>
+              {updateState === "checking" && <span className="text-xs text-text-dim">Checking…</span>}
+              {updateState === "up-to-date" && <span className="text-xs text-ok">You're up to date.</span>}
+            </div>
+            {updateState === "available" && updateInfo && (
+              <div className="rounded-md border border-border bg-bg p-3 text-sm">
+                <div className="font-medium">Version {updateInfo.version} available</div>
+                {updateInfo.notes && (
+                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs text-text-dim">
+                    {updateInfo.notes}
+                  </pre>
+                )}
+                <button
+                  type="button"
+                  className="mt-3 flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-2"
+                  onClick={installUpdate}
+                >
+                  <Download size={14} /> Install update
+                </button>
+              </div>
+            )}
+            {updateState === "downloading" && (
+              <div className="text-sm text-text-dim">
+                Downloading update… {updateProgress > 0 ? `${updateProgress} bytes` : ""}
+              </div>
+            )}
+            {updateState === "installing" && (
+              <div className="text-sm text-text-dim">Installing and relaunching…</div>
+            )}
+            {updateState === "error" && (
+              <div className="space-y-2">
+                <div className="text-sm text-err">{updateError || "Update failed."}</div>
+                <button
+                  type="button"
+                  className="rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-xs hover:bg-bg"
+                  onClick={checkForUpdate}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="rounded-lg border border-border bg-bg-elev p-4">
         <label className="mb-2 block text-xs font-medium text-text-dim">
