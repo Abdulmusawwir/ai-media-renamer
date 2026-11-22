@@ -53,7 +53,6 @@ hidden_imports = [
     "pptx",
     "huggingface_hub",
     "tokenizers",
-    "exiftool",
 ]
 
 excludes = [
