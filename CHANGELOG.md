@@ -6,6 +6,10 @@
 - **Fix: web commits landed in the server's working directory.** `POST /api/commit` defaulted `target_dir` to `"."` and the UI never sent one, so staged files were moved to whatever directory the backend was started from. With no `target_dir` the route now commits each asset in place next to its original file, matching the CLI; an explicit `target_dir` still moves everything into that folder.
 - **Fix: web commits could not be rolled back.** The server route never wrote an undo batch, so "Rollback last batch" reverted an older CLI batch (or nothing). Successful server commits are now logged with per-asset original/new paths and injected metadata keys.
 - **Fix: batch commit results could be misaligned.** `execute_commit_batch()` now returns one result per input asset in input order, even when some assets fail.
+- **Fix: RTF control words and font tables leaked into AI prompts.** RTF text now has destination groups dropped and escapes decoded; legacy-encoded Markdown/TXT no longer turns an em dash into U+FFFD.
+- **Fix: the AI server could stay dead after a mid-session crash.** A 15 s watchdog restarts a llama.cpp server this backend owns; foreign servers are never touched.
+- **Fix: `/health` was mistaken for full readiness.** The sidebar now reports tools, AI server and model separately, and startup writes a single `startup summary:` log line.
+- **Changed:** route pages are lazy-loaded (main bundle ~34 kB), and `scripts/dev-all.ps1` starts the full local stack in one command. A regression test covers config/session/undo survival across an in-place upgrade.
 
 ## [v2.2.0] — 2026-11-22
 

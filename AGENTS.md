@@ -96,6 +96,11 @@ pwsh scripts/cargo-test-gnu.ps1                # Rust tests on the local MinGW t
 - `-ss` before `-i` (input seeking) for speed; `-vframes 1`; scale via `VIDEO_GRID_SCALE`.
 - Images: downscaled via FFmpeg to `IMAGE_PREVIEW_MAX_EDGE` (1024px) in memory.
 
+### Text extraction (engine.py)
+- TXT/MD/RTF go through `extract_text_plain()`: UTF-8 first, then cp1252 so legacy punctuation survives; newlines are normalised.
+- RTF is cleaned by `_strip_rtf_control_words()` before analysis — destination groups (font/colour tables, pictures) are dropped, `\'hh`/`\uN?` escapes decoded, `\par`/`\tab` mapped.
+- `server/routes/analysis.py::_classify()` delegates to `engine.asset_kind()`; do not reintroduce a second extension list there.
+
 ### ExifTool metadata (engine.py — most commonly misconfigured)
 - `XMP-dc:Subject=` — one arg PER TAG. Never comma-separated.
 - `EXIF:XPKeywords=` — images only (Windows "Tags" column).
