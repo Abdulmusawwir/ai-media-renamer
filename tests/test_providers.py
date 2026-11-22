@@ -171,6 +171,7 @@ class TestLlamaCppProvider:
         mock_response = MagicMock()
         mock_response.choices = [mock_choice]
         mock_client.chat.completions.create.return_value = mock_response
+        self.prov.model = "vision-model"
         self.prov.text_model = ""
         result = self.prov.analyze_text("Some document text")
         assert result["ok"] is True
@@ -190,6 +191,7 @@ class TestLlamaCppProvider:
         mock_response = MagicMock()
         mock_response.choices = [mock_choice]
         mock_client.chat.completions.create.return_value = mock_response
+        self.prov.model = "vision-model"
         self.prov.text_model = "qwen2.5:3b"
         result = self.prov.analyze("fake_base64")
         assert result["ok"] is True
