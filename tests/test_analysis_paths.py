@@ -61,3 +61,18 @@ def test_missing_relative_path_is_reported_as_absolute(monkeypatch, tmp_path):
 def test_absolute_missing_path_keeps_its_shape(tmp_path):
     missing = Path(tmp_path) / "gone" / "x.jpg"
     assert _resolve_input_path(str(missing)) == missing
+
+
+def test_classify_delegates_to_engine_asset_kind(tmp_path):
+    from server.routes.analysis import _classify
+
+    cases = {
+        "clip.mp4": ("video", False),
+        "photo.jpg": ("image", False),
+        "voice.m4a": ("audio", True),
+        "report.pdf": ("document", True),
+        "sheet.xlsx": ("document", True),
+        "unknown.xyz": ("image", False),
+    }
+    for name, expected in cases.items():
+        assert _classify(tmp_path / name) == expected, name

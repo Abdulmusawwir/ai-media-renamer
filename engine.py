@@ -1380,8 +1380,92 @@ def extract_text_pptx(path: Path) -> str | None:
         return None
 
 
+_RTF_SKIP_GROUPS = frozenset({
+    "fonttbl", "colortbl", "stylesheet", "info", "pict", "object",
+    "header", "footer", "generator", "listtable", "listoverridetable",
+    "rsidtbl", "xmlnstbl", "themedata", "datastore",
+})
+
+
+def _strip_rtf_control_words(text: str) -> str:
+    """Convert a minimal RTF document to readable plain text.
+
+    Handles the pieces real exports actually use: destination groups (font,
+    colour and style tables) are dropped, ``\\par``/``\\line`` become newlines,
+    ``\\tab`` becomes a tab, ``\\'hh`` hex bytes are decoded as Windows-1252 and
+    ``\\uN?`` Unicode escapes become characters. Unrecognised control words are
+    skipped rather than leaking into AI prompts.
+    """
+    out: list[str] = []
+    stack: list[bool] = []
+    skipping = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "{":
+            stack.append(skipping)
+            i += 1
+            continue
+        if ch == "}":
+            skipping = stack.pop() if stack else False
+            i += 1
+            continue
+        if ch != "\\":
+            if not skipping:
+                out.append(ch)
+            i += 1
+            continue
+
+        if i + 1 < n and text[i + 1] in "\\{}":
+            if not skipping:
+                out.append(text[i + 1])
+            i += 2
+            continue
+        if i + 3 < n and text[i + 1] == "'":
+            pair = text[i + 2:i + 4]
+            if re.fullmatch(r"[0-9a-fA-F]{2}", pair):
+                if not skipping:
+                    out.append(bytes([int(pair, 16)]).decode("cp1252", errors="replace"))
+                i += 4
+                continue
+        match = re.match(r"\\u(-?\d+)\??", text[i:])
+        if match:
+            if not skipping:
+                out.append(chr(int(match.group(1)) & 0xFFFF))
+            i += match.end()
+            continue
+        match = re.match(r"\\([a-zA-Z]+)(-?\d+)? ?", text[i:])
+        if match:
+            word = match.group(1)
+            if word in _RTF_SKIP_GROUPS:
+                skipping = True
+            elif not skipping:
+                out.append("\n" if word in {"par", "line"} else "\t" if word == "tab" else "")
+            i += match.end()
+            continue
+        i += 1
+    return "".join(out).replace("\r\n", "\n")
+
+
+def _decode_text_bytes(raw: bytes) -> str:
+    """Decode a plain-text file, preferring UTF-8 but accepting legacy bytes."""
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        try:
+            return raw.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        pass
+    # cp1252 keeps typographic punctuation (e.g. 0x97 = em dash) that a strict
+    # UTF-8 read would replace with U+FFFD.
+    return raw.decode("cp1252", errors="replace")
+
+
 def extract_text_plain(path: Path) -> str | None:
-    """Extract text from a plain text file (TXT, MD, RTF).
+    """Extract text from TXT, MD and RTF files.
 
     Args:
         path: Path to the text file.
@@ -1390,8 +1474,10 @@ def extract_text_plain(path: Path) -> str | None:
         File content as text, or None on failure.
     """
     try:
-        content = path.read_text(encoding='utf-8', errors='replace')
-        return content.strip() or None
+        text = _decode_text_bytes(path.read_bytes()).replace("\r\n", "\n").replace("\r", "\n")
+        if path.suffix.lower() == ".rtf":
+            text = _strip_rtf_control_words(text)
+        return text.strip() or None
     except Exception:
         return None
 

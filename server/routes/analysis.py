@@ -56,17 +56,14 @@ def _resolve_input_path(raw: str) -> Path:
 def _classify(path: Path) -> tuple[str, bool]:
     """Return (encoder_kind, is_text) for a media file path.
 
-    ``is_text`` is True for audio (transcription) and document (text) assets,
-    which are analyzed with the text/document AI path instead of vision.
+    Delegates to :func:`engine.asset_kind` so extension lists and profile
+    auto-routing cannot drift apart. Spreadsheets use the document extractor;
+    audio and documents (including spreadsheets) take the text AI path.
     """
-    suffix = path.suffix.lower()
-    if suffix in engine.VIDEO_EXTENSIONS:
-        return "video", False
-    if suffix in engine.AUDIO_EXTENSIONS:
-        return "audio", True
-    if suffix in engine.DOCUMENT_EXTENSIONS:
+    kind = engine.asset_kind(path)
+    if kind == "spreadsheet":
         return "document", True
-    return "image", False
+    return kind, kind in ("audio", "document")
 
 
 def _extract(path: Path, kind: str):
