@@ -13,7 +13,7 @@ import Commit from "./pages/Commit";
 import Sessions from "./pages/Sessions";
 import Settings from "./pages/Settings";
 import Models from "./pages/Models";
-import { getAnalysisToken, setDesktopToken } from "./api/client";
+import { getAnalysisToken, setAuthReady, setDesktopToken } from "./api/client";
 import { isDesktop } from "./desktop";
 
 // Best-effort: fetch a LAN auth token up front so REST calls (staging, commit,
@@ -23,7 +23,7 @@ if (isDesktop) {
   const w = window as unknown as { __AMR_DESKTOP_TOKEN__?: string };
   setDesktopToken(w.__AMR_DESKTOP_TOKEN__ ?? null);
 } else {
-  getAnalysisToken().catch(() => undefined);
+  setAuthReady(getAnalysisToken());
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
