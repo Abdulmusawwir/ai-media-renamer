@@ -7,6 +7,25 @@
 - **Fix: web commits could not be rolled back.** The server route never wrote an undo batch, so "Rollback last batch" reverted an older CLI batch (or nothing). Successful server commits are now logged with per-asset original/new paths and injected metadata keys.
 - **Fix: batch commit results could be misaligned.** `execute_commit_batch()` now returns one result per input asset in input order, even when some assets fail.
 
+## [v2.2.0] — 2026-11-22
+
+### Added
+- **Desktop app:** signed Tauri v2 shell with a per-user NSIS installer, tray with close-to-tray, native file/folder pickers and drag-and-drop, and in-app signed updates. Browser and CLI modes are unchanged.
+- **AI server auto-start:** the backend warms a loopback llama.cpp server at startup when a GGUF is configured; it only stops a process it spawned.
+- **LAN auth now covers reads:** with `AMR_AUTH_ENABLED=1`, every `/api/*` route requires a bearer token, not just mutating ones.
+- **Folder picker can navigate by pasted path** and starts at the user's home folder.
+
+### Fixed
+- **Desktop commands were blocked by the Tauri ACL.** Custom commands were registered in Rust but not granted to the webview; `desktop_ready`, second-instance paths and Settings actions now work, and startup no longer waits 10 s for the fallback.
+- **Backend shutdown could kill another process's llama-server.** Shutdown now stops only a server it spawned.
+- **Missing-file errors were ambiguous.** Analysis now repairs cosmetic path noise and reports the exact resolved path.
+- **Version chip could show a stale `v2.0.0`.** `/health` is now proxied in Vite dev and the chip only renders a real version.
+- **Drag-and-drop in a browser silently produced unusable paths.** Pathless drops are rejected with a clear message; the folder browser is the supported web path.
+- **llama.cpp model resolution** no longer doubles `/v1` in the base URL or sends Ollama-style model IDs.
+
+### Changed
+- Frontend vendor code is split into separate chunks (main bundle ~63 kB); the PyInstaller spec and CI updater JSON are aligned with the NSIS bundle.
+
 ## [v2.1.0] — 2026-11-06
 
 ### Reliability

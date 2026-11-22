@@ -1,5 +1,7 @@
 # Tauri Desktop Shell Implementation Plan
 
+> **Status: implemented in v2.2.0.** This is the historical execution plan; its unchecked boxes are a record of the original task order, not current work. For the live architecture use `AGENTS.md`, `README_TECH.md` and `audit.md`. Release smoke, NSIS install and signature verification were completed locally; a real published N→N+1 update and the manual tray smoke remain for a human.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship AI Media Renamer 2.2.0 as a signed-updater, installer-based Windows desktop app: a Tauri v2 shell that owns the window, tray, single-instance behavior, file drops, Python sidecar lifecycle, and in-app updates, while keeping the existing React SPA, FastAPI backend, browser mode, and CLI.

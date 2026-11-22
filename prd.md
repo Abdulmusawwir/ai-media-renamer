@@ -34,7 +34,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 ## MVP Features Checklist
 
 ### Upload & Ingestion
-- [x] Drag-and-drop file upload via browser (extension + file-size validation)
+- [x] Add media by drag-and-drop in the desktop app, or by the server-side folder browser in web mode (browsers never expose real paths from a dropped file, so pathless drops are rejected)
 - [x] Support video formats: MP4, M4V, MOV, AVI, MKV, WebM, FLV, WMV, MTS, TS
 - [x] Support image formats: JPG, JPEG, PNG, WebP, GIF, BMP, TIFF, TIF, HEIC, RAW
 - [x] Support document formats: PDF, DOCX, XLSX, CSV, PPTX, TXT, MD, RTF (text extraction, no frame extraction)
@@ -140,7 +140,7 @@ Processes bulk deliveries from multiple shooters. Needs to enforce consistent na
 | **AI Model / Runtime** | llama.cpp only (`llama-server`, OpenAI-compatible API) | Fully local vision/text models; vision requires the `mmproj` projector. Multiple prompt profiles with per-type auto-routing |
 | **Metadata Engine** | ExifTool 12+ | Industry standard for cross-format metadata; `-stay_open` mode for persistent subprocess performance |
 | **Media Decoding** | FFmpeg 6+ | Hardware-accelerated single-frame extraction and in-memory image downscaling |
-| **Desktop Bundler** | PyInstaller 6+ (`build_v2.spec`) | Single-file executable that bundles the built SPA, FFmpeg/ExifTool, and llama.cpp; `_resolve_binary_path()` |
+| **Desktop packaging** | Tauri v2 shell + PyInstaller 6+ (`build_desktop.spec`) | Signed NSIS installer bundling the backend, built SPA and llama.cpp runtime; native picker/tray/updater; `_resolve_binary_path()` |
 | **Config** | JSON (`config.json`) | Human-editable, no parser needed beyond stdlib `json` |
 | **Logging** | JSON Lines | Append-only, redacted paths by default |
 | **OS** | Windows 10/11 | Primary target (NLE ecosystem). Linux/macOS secondary (compatible but untested) |

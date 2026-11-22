@@ -57,6 +57,7 @@ pytest                            # unit tests
 npm run tauri dev                 # Vite HMR + backend on 8000 (run `npm run dev:backend` first)
 npm run dev:backend               # windowed backend on 127.0.0.1:8000 (no launch)
 npm run tauri build               # NSIS installer + updater artifacts
+pwsh scripts/build-desktop.ps1    # full pipeline: SPA, PyInstaller backend, installer
 python scripts/check_versions.py --tag v2.2.0   # version consistency gate
 pwsh scripts/cargo-test-gnu.ps1                # Rust tests on the local MinGW toolchain
 ```
@@ -65,6 +66,12 @@ pwsh scripts/cargo-test-gnu.ps1                # Rust tests on the local MinGW t
 - Widget wizard installs `llama-server.exe` (~18 MB) + a GGUF vision/text model for fresh installs (`LLAMACPP_GGUF_CATALOG`, `configure_llamacpp_install`, `ensure_llamacpp_server`). llama.cpp is the only supported local runtime.
 - `llama-server` speaks OpenAI-compatible API on `http://127.0.0.1:8080/v1`; `LlamaCppProvider` uses it. Text-only analysis (documents/audio) goes through `OpenAIProvider._analyze_prompt_only()` with the text model.
 - Runtime chosen at wizard time persists in the setup profile (`runtime` field: `""`, `"llamacpp"`).
+- The backend warms the local server at startup via `server.main.start_llamacpp_in_background()` when a GGUF exists and the base URL is loopback. It never blocks startup and `shutdown` only stops a process this backend spawned (`_llamacpp_proc`), so an externally started server survives a backend restart.
+
+### Auth & desktop boundaries
+- With `AMR_AUTH_ENABLED=1`, **all** `/api/*` routes use `deps.require_auth` (reads included); `/health` and `/api/auth/token` stay public. Desktop mode is gated separately by the shell's bearer token in `server/main.py`.
+- Tauri v2 is deny-by-default: every command in `src-tauri/src/lib.rs::generate_handler!` must also be granted in `src-tauri/permissions/desktop.toml` and referenced by both capability files. `tests/test_desktop_permissions.py` enforces this.
+- Browser mode cannot expose real filesystem paths from drag-and-drop; the folder browser (`DirectoryPicker`) is the supported browser path. Native drag-drop and pickers are desktop-only.
 
 ### Module roles
 | File | Role | Must never |
