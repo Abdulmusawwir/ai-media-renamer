@@ -42,13 +42,14 @@ def _resolve_input_path(raw: str) -> Path:
     """
     text = os.path.expandvars(str(raw).strip().strip('"').strip("'").strip())
     candidate = Path(text).expanduser()
-    if candidate.exists() or candidate.is_absolute():
+    if candidate.is_absolute():
         return candidate
+    # Relative input: try the working directory first (historical behaviour),
+    # then the user's home, and always hand back an absolute path.
     for base in (Path.cwd(), Path.home()):
         alt = base / candidate
         if alt.exists():
             return alt
-    # Nothing matched: report an absolute path so the message is unambiguous.
     return Path.cwd() / candidate
 
 
