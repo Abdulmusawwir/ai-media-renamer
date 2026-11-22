@@ -8,8 +8,10 @@ present; otherwise the API is reachable on its own.
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -52,6 +54,59 @@ class SPAStaticFiles(StaticFiles):
         if segments[0] == "api":
             return False
         return not Path(segments[-1]).suffix
+
+
+# Seconds to wait for a freshly spawned llama-server to answer its health probe.
+_LLAMACPP_WARMUP_TIMEOUT = 120
+
+
+def should_autostart_llamacpp() -> bool:
+    """Return True when this install expects a *local* llama.cpp server.
+
+    Requires a configured GGUF that actually exists and a loopback API base
+    URL. A remote server URL (or no model yet) means there is nothing for this
+    process to start.
+    """
+    model_cfg = engine.config.get("model", {}) or {}
+    llamacpp = model_cfg.get("llamacpp", {}) or {}
+    gguf = str(llamacpp.get("gguf_path") or "").strip()
+    if not gguf or not Path(gguf).is_file():
+        return False
+    try:
+        host, _port = engine._llamacpp_host_port()
+    except Exception:
+        return False
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
+def start_llamacpp_in_background() -> bool:
+    """Warm up the local AI server without blocking startup.
+
+    The desktop installer ships ``llama-server.exe``, so starting it here means
+    the first analysis does not fail with "the server is not running". A missing
+    binary or model just leaves it down; the analysis route already reports that
+    with an actionable message. Returns True when a warm-up thread was started.
+    """
+    if not should_autostart_llamacpp():
+        return False
+    try:
+        if engine._llamacpp_server_running():
+            return False
+    except Exception:
+        pass
+
+    def _warmup() -> None:
+        log = logging.getLogger(__name__)
+        try:
+            if not engine.ensure_llamacpp_server(timeout=_LLAMACPP_WARMUP_TIMEOUT):
+                log.warning(
+                    "llama.cpp server did not start; analysis will report it"
+                )
+        except Exception:  # pragma: no cover - defensive
+            log.warning("llama.cpp auto-start raised", exc_info=True)
+
+    threading.Thread(target=_warmup, name="llamacpp-warmup", daemon=True).start()
+    return True
 
 # NOTE: Allowing all origins is acceptable for a local single-user tool driven
 # from localhost. If you expose this server on a LAN (e.g. --host 0.0.0.0),
@@ -138,6 +193,23 @@ def create_app() -> FastAPI:
             engine.start_model_migration()
             # Best-effort: confirm the environment check runs without raising.
             engine.check_environment()
+        except Exception:
+            pass
+        # Bring the bundled local AI server up in the background so the first
+        # analysis does not fail on a cold install.
+        try:
+            start_llamacpp_in_background()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "llama.cpp auto-start could not be scheduled", exc_info=True
+            )
+
+    @app.on_event("shutdown")
+    def _shutdown() -> None:
+        # Only stops a server this process started; an externally launched
+        # llama-server is left alone.
+        try:
+            engine.stop_llamacpp_server()
         except Exception:
             pass
 
