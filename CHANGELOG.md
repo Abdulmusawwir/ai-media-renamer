@@ -16,6 +16,9 @@
 ### Fixed
 - Closing the window with "close to tray" enabled no longer shows a modal "still running in the system tray" dialog; the app hides silently and still logs the event.
 
+### Verified
+- Published release with installer, signature and `latest.json`; a real 2.2.0 → 2.2.1 in-app update installed and relaunched successfully.
+
 ## [v2.2.0] — 2026-11-22
 
 ### Added
