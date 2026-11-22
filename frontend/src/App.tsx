@@ -63,6 +63,18 @@ export default function App() {
     ? environment.ffmpeg && environment.exiftool
     : false;
 
+  // Keep "backend reachable" separate from "AI ready": /health only proves
+  // FastAPI is alive, while /api/environment also knows about llama.cpp.
+  const engineStatus = !environment
+    ? { ok: false, label: "Backend not reachable", title: "No response from /api/environment" }
+    : !envOk
+    ? { ok: false, label: "Missing ffmpeg/exiftool", title: "Required media tools are missing" }
+    : !environment.llamacpp_running
+    ? { ok: false, label: "AI server not ready", title: "llama-server is not answering on the configured port" }
+    : !environment.model_available
+    ? { ok: false, label: "No AI model", title: "No vision GGUF is configured or available" }
+    : { ok: true, label: "Engine + AI ready", title: "Tools, llama.cpp and the model are all available" };
+
   // Responsive floor: 1024px is the supported minimum width. Below that, show
   // a dismissible banner (the app is not laid out for narrow viewports).
   const [showNarrow, setShowNarrow] = useState(false);
@@ -178,16 +190,10 @@ export default function App() {
         </nav>
         <div className="mt-auto flex items-center gap-2 px-2 pt-3 text-[11px] text-text-dim">
           <span
-            className={`h-2 w-2 rounded-full ${
-              environment ? (envOk ? "bg-ok" : "bg-warn") : "bg-warn"
-            }`}
-            title="ffmpeg / exiftool availability"
+            className={`h-2 w-2 rounded-full ${engineStatus.ok ? "bg-ok" : "bg-warn"}`}
+            title={engineStatus.title}
           />
-          {environment
-            ? envOk
-              ? "Engine tools ready"
-              : "Missing ffmpeg/exiftool"
-            : "Backend not reachable"}
+          {engineStatus.label}
         </div>
       </aside>
 

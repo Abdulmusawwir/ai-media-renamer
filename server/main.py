@@ -238,13 +238,26 @@ def create_app() -> FastAPI:
     def _startup() -> None:
         # Ensure the engine config is loaded and environment probes are usable.
         engine.load_config(quiet=True)
+        env: dict = {}
         try:
             # Migrate any legacy GGUF cache before a server/model is requested.
             engine.start_model_migration()
             # Best-effort: confirm the environment check runs without raising.
-            engine.check_environment()
+            env = engine.check_environment() or {}
         except Exception:
             pass
+        # One line that answers "is it actually ready?" without guessing from
+        # /health (which only proves FastAPI is alive).
+        logging.getLogger(__name__).info(
+            "startup summary: version=%s desktop=%s ffmpeg=%s exiftool=%s "
+            "llamacpp=%s model=%s",
+            engine.VERSION,
+            amr_desktop.desktop_mode(),
+            bool(env.get("ffmpeg")),
+            bool(env.get("exiftool")),
+            bool(env.get("llamacpp_running")),
+            bool(env.get("model_available")),
+        )
         # Bring the bundled local AI server up in the background so the first
         # analysis does not fail on a cold install.
         try:
