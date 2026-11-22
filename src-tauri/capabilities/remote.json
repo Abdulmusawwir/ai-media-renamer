@@ -13,6 +13,7 @@
     "core:webview:default",
     "dialog:default",
     "process:default",
-    "updater:default"
+    "updater:default",
+    "desktop-commands"
   ]
 }

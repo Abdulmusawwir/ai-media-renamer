@@ -1,0 +1,22 @@
+# Permissions for the shell's own Tauri commands.
+#
+# Tauri v2 is deny-by-default: registering a command with `generate_handler!`
+# does not make it callable from the webview. Without this grant every custom
+# `invoke()` is rejected by the ACL, which silently broke `desktop_ready`,
+# second-instance file paths and the Settings actions in the installed app.
+
+[[permission]]
+identifier = "desktop-commands"
+description = "Allow the shell windows to call AI Media Renamer's own commands."
+commands.allow = [
+  "desktop_ready",
+  "pending_paths",
+  "release_page_url",
+  "get_shell_settings",
+  "set_close_to_tray",
+  "open_logs",
+  "open_data_folder",
+  "get_backend_status",
+  "restart_app",
+  "quit_app",
+]
