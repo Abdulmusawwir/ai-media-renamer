@@ -15,7 +15,6 @@ use backend::BackendProcess;
 use tauri::{
     AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
-use tauri_plugin_dialog::DialogExt;
 
 /// Shared shell state consumed by the command bridge and later lifecycle tasks.
 #[derive(Default)]
@@ -61,21 +60,12 @@ pub fn run() {
                     return;
                 }
                 if crate::settings::load_shell_settings(app).close_to_tray {
+                    // Hide silently: a modal dialog here is confusing when the
+                    // wizard or a restart closes the window as part of its own
+                    // flow. The tray icon and its "Show" item are the cue.
                     api.prevent_close();
                     let _ = window.hide();
-                    static NOTIFIED: std::sync::atomic::AtomicBool =
-                        std::sync::atomic::AtomicBool::new(false);
-                    if !NOTIFIED.swap(true, Ordering::SeqCst) {
-                        use tauri_plugin_dialog::MessageDialogKind;
-                        app.dialog()
-                            .message(
-                                "AI Media Renamer is still running in the system tray. \
-                                 Use the tray icon to quit.",
-                            )
-                            .title("AI Media Renamer")
-                            .kind(MessageDialogKind::Info)
-                            .show_with_result(|_| {});
-                    }
+                    settings::log("window closed; app remains in the system tray");
                 }
             }
         })

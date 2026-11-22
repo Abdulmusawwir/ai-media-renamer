@@ -15,8 +15,8 @@ def run(tag, latest_json=None, cwd=None):
 
 
 def test_versions_match():
-    # Current repo is at 2.2.0 after the bump.
-    result = run("v2.2.0")
+    # Current repo is at 2.2.1 after the bump.
+    result = run("v2.2.1")
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -29,14 +29,14 @@ def test_version_mismatch_reported():
 def test_latest_json_validates():
     tmp = ROOT / "tests" / "_lj.json"
     data = {
-        "version": "2.2.0",
+        "version": "2.2.1",
         "url": "https://example.com/x.nsis.zip",
         "signature": "abc",
         "platforms": {"windows-x86_64": {"url": "u", "signature": "s"}},
     }
     tmp.write_text(json.dumps(data), encoding="utf-8")
     try:
-        result = run("v2.2.0", latest_json=tmp)
+        result = run("v2.2.1", latest_json=tmp)
         assert result.returncode == 0, result.stdout + result.stderr
     finally:
         tmp.unlink(missing_ok=True)
@@ -47,7 +47,7 @@ def test_latest_json_mismatch_reported():
     data = {"version": "1.0.0", "url": "u", "signature": "s"}
     tmp.write_text(json.dumps(data), encoding="utf-8")
     try:
-        result = run("v2.2.0", latest_json=tmp)
+        result = run("v2.2.1", latest_json=tmp)
         assert result.returncode != 0
     finally:
         tmp.unlink(missing_ok=True)
