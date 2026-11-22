@@ -11,7 +11,7 @@ from server.schemas import ConfigPutRequest
 router = APIRouter(prefix="/api", tags=["config"])
 
 
-@router.get("/config")
+@router.get("/config", dependencies=[Depends(deps.require_auth)])
 def get_config() -> dict:
     """Return the current config with sensitive keys stripped."""
     return deps.get_engine_config()

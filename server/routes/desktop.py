@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 import engine
 import server.routes.models as models_routes
@@ -11,7 +11,7 @@ from server import deps, desktop
 router = APIRouter(prefix="/api", tags=["desktop"])
 
 
-@router.get("/desktop/status")
+@router.get("/desktop/status", dependencies=[Depends(deps.require_auth)])
 def desktop_status() -> dict:
     """Return the single source of truth for busy state.
 

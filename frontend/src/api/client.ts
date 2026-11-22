@@ -21,6 +21,11 @@ export function setAuthReady(probe: Promise<unknown>): void {
   );
 }
 
+/** Bearer header for raw fetches that bypass the shared request helper. */
+export function authHeaders(): Record<string, string> {
+  return _cachedToken ? { Authorization: `Bearer ${_cachedToken}` } : {};
+}
+
 interface RequestOptions {
   /** Skip waiting for the startup auth probe (used by the probe itself). */
   skipAuthWait?: boolean;
@@ -36,10 +41,7 @@ async function request<T = any>(
   if (!opts.skipAuthWait && !_cachedToken && _authReady) {
     await _authReady;
   }
-  const headers: Record<string, string> = {};
-  // Attach the LAN auth bearer token (populated by getAnalysisToken) so REST
-  // calls respect AMR_AUTH_ENABLED in the same way the WebSocket does.
-  if (_cachedToken) headers["Authorization"] = `Bearer ${_cachedToken}`;
+  const headers: Record<string, string> = { ...authHeaders() };
   // Explicitly omit credentials (the app authenticates via bearer tokens, not
   // cookies). This keeps every request on the simple (non-credentialed) CORS
   // path, which is required for the permissive `Access-Control-Allow-Origin: *`

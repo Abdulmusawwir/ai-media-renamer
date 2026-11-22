@@ -9,7 +9,7 @@ from server import deps
 router = APIRouter(prefix="/api", tags=["assets"])
 
 
-@router.get("/assets")
+@router.get("/assets", dependencies=[Depends(deps.require_auth)])
 def get_assets() -> dict:
     """Return the current in-memory staging list."""
     return {"assets": deps.get_active_staging(), "count": len(deps.ACTIVE_STAGING)}

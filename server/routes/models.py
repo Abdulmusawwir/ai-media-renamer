@@ -30,7 +30,9 @@ def _record_state(name: str, **fields: Any) -> None:
         _DOWNLOAD_STATE[name] = state
 
 
-@router.get("/models", response_model=ModelsResponse)
+@router.get(
+    "/models", response_model=ModelsResponse, dependencies=[Depends(deps.require_auth)]
+)
 def get_models() -> dict:
     """Return registered providers, the active provider, and available models."""
     providers = engine.list_providers()
@@ -113,7 +115,9 @@ def download_model(req: ModelsDownloadRequest) -> dict:
     return {"accepted": True, "model": model_name}
 
 
-@router.get("/models/{name}/download-status")
+@router.get(
+    "/models/{name}/download-status", dependencies=[Depends(deps.require_auth)]
+)
 def download_status(name: str) -> dict:
     """Return the download progress/state for ``name``.
 

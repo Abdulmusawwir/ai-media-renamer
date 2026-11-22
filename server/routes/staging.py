@@ -12,7 +12,7 @@ from server.schemas import StagingBulkRequest, StagingImportRequest
 router = APIRouter(prefix="/api", tags=["staging"])
 
 
-@router.get("/staging")
+@router.get("/staging", dependencies=[Depends(deps.require_auth)])
 def get_staging() -> dict:
     """Return the current staging list."""
     return {"assets": deps.get_active_staging(), "count": len(deps.ACTIVE_STAGING)}
@@ -44,7 +44,7 @@ def bulk_edit(req: StagingBulkRequest) -> dict:
     return {"applied": applied}
 
 
-@router.get("/staging/export")
+@router.get("/staging/export", dependencies=[Depends(deps.require_auth)])
 def export_staging() -> PlainTextResponse:
     """Return the staging list serialized as CSV text."""
     csv_text = engine.export_staging_csv(deps.ACTIVE_STAGING)

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ChevronRight, File, Folder, FolderOpen, Plus, Clock } from "lucide-react";
-import { browseFolder, type BrowseEntry, type BrowseResponse } from "../api/client";
+import { authHeaders, browseFolder, type BrowseEntry, type BrowseResponse } from "../api/client";
 import { useToast } from "../store";
 
 const RECENTS_KEY = "amr:recent-dirs";
@@ -57,7 +57,10 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
         // browse-specific issue. Surfaces as part of the toast.
         let diag = "";
         try {
-          const probe = await fetch("/api/environment", { method: "GET" });
+          const probe = await fetch("/api/environment", {
+            method: "GET",
+            headers: authHeaders(),
+          });
           diag = probe.ok
             ? " (but /api/environment IS reachable)"
             : ` (and /api/environment -> ${probe.status})`;
