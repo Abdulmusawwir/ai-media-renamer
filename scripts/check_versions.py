@@ -21,6 +21,7 @@ VERSION_SOURCES = [
     ("VERSION", re.compile(r"^\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$", re.M)),
     ("engine.py", re.compile(r'^VERSION\s*=\s*"([^"]+)"', re.M)),
     ("pyproject.toml", re.compile(r'^version\s*=\s*"([^"]+)"', re.M)),
+    ("server/__init__.py", re.compile(r'^__version__\s*=\s*"([^"]+)"', re.M)),
     ("frontend/package.json", re.compile(r'"version"\s*:\s*"([^"]+)"')),
     ("package.json", re.compile(r'"version"\s*:\s*"([^"]+)"')),
     ("src-tauri/Cargo.toml", re.compile(r'^version\s*=\s*"([^"]+)"', re.M)),

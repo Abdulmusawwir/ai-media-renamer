@@ -33,7 +33,7 @@ def browse(path: str = Query(default="", description="Folder path to list")) -> 
     server root (the directory picker is expected to choose arbitrary local
     folders). Returns media-kind flags per entry.
     """
-    root = Path.cwd()
+    root = Path.home()
     target = Path(path) if path else root
     try:
         target = target.resolve()

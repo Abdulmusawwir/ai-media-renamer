@@ -208,14 +208,12 @@ export default function App() {
         )}
         <header className="flex h-14 items-center justify-between border-b border-border bg-bg-elev px-5">
           <h1 className="text-[15px] font-semibold">AI Media Renamer</h1>
-          <div className="flex items-center gap-2 text-xs text-text-dim">
-            <Cpu size={14} />
-            {healthVersion
-              ? `v${healthVersion}`
-              : config && config.version
-              ? `v${String(config.version)}`
-              : "v2.0.0"}
-          </div>
+          {Boolean(healthVersion || (config && config.version)) && (
+            <div className="flex items-center gap-2 text-xs text-text-dim">
+              <Cpu size={14} />
+              v{healthVersion ?? String(config?.version)}
+            </div>
+          )}
         </header>
         <main className="flex-1 overflow-auto p-5">
           <motion.div

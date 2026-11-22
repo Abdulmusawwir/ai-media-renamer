@@ -129,6 +129,19 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
         </button>
         <span className="break-all">{browse?.path ?? "—"}</span>
       </div>
+      <div className="mb-3 flex gap-2">
+        <input
+          type="text"
+          className="flex-1 rounded-md border border-border bg-bg px-2 py-1.5 text-xs"
+          placeholder="Paste a folder path and press Enter"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              const val = (e.target as HTMLInputElement).value.trim();
+              if (val) doBrowse(val);
+            }
+          }}
+        />
+      </div>
 
       <div className="max-h-72 overflow-auto rounded-md border border-border bg-bg p-1">
         {busy && <div className="p-3 text-xs text-text-dim">Loading…</div>}

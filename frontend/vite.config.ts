@@ -23,6 +23,13 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           ws: true,
         },
+        // The app's health probe lives at /health (root), not /api/health.
+        // Without this entry the dev server answers it with index.html and the
+        // version chip silently falls back to its hardcoded default.
+        "/health": {
+          target: proxyTarget,
+          changeOrigin: true,
+        },
       },
     },
     preview: {
