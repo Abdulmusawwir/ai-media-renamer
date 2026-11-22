@@ -13,6 +13,8 @@ progress). Both flows accumulate staged assets into ``deps.ACTIVE_STAGING``.
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import threading
 from pathlib import Path
 
@@ -23,7 +25,31 @@ from server import auth, deps, desktop
 from server.schemas import AnalyzeRequest
 from server.ws import make_event, manager
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api", tags=["analysis"])
+
+
+def _resolve_input_path(raw: str) -> Path:
+    """Best-effort repair of a client-supplied asset path.
+
+    Clients normally send absolute paths from the folder picker, but a payload
+    can still arrive with surrounding quotes, stray whitespace, ``~``/env
+    placeholders, or a bare filename. Repairing those here keeps a cosmetic
+    difference in the request from turning into an unexplained "file not
+    found". The literal path is always tried first, so behaviour for a correct
+    absolute path is unchanged.
+    """
+    text = os.path.expandvars(str(raw).strip().strip('"').strip("'").strip())
+    candidate = Path(text).expanduser()
+    if candidate.exists() or candidate.is_absolute():
+        return candidate
+    for base in (Path.cwd(), Path.home()):
+        alt = base / candidate
+        if alt.exists():
+            return alt
+    # Nothing matched: report an absolute path so the message is unambiguous.
+    return Path.cwd() / candidate
 
 
 def _classify(path: Path) -> tuple[str, bool]:
@@ -118,14 +144,35 @@ def run_analysis(
 
         emit(make_event("extraction_progress", processed=0, total=total))
 
+        logger.info(
+            "analysis start: %d file(s); first=%r",
+            total,
+            files[0] if files else None,
+        )
+
         for idx, raw in enumerate(files, 1):
             if cancel_event is not None and cancel_event.is_set():
                 emit(make_event("cancelled"))
                 break
 
-            path = Path(raw)
+            path = _resolve_input_path(raw)
             if not path.exists():
-                emit(make_event("asset_error", name=raw, error="file not found", index=idx, total=total))
+                logger.warning(
+                    "analysis: file not found raw=%r resolved=%r cwd=%r",
+                    raw,
+                    str(path),
+                    str(Path.cwd()),
+                )
+                emit(make_event(
+                    "asset_error",
+                    name=raw,
+                    error=(
+                        f"file not found: {path}"
+                        + ("" if str(path) == str(raw) else f" (received {raw!r})")
+                    ),
+                    index=idx,
+                    total=total,
+                ))
                 continue
 
             kind, is_text = _classify(path)
