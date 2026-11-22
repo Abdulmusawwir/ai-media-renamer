@@ -41,6 +41,29 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           ws: true,
         },
+        "/health": {
+          target: proxyTarget,
+          changeOrigin: true,
+        },
+      },
+    },
+    // Split the heavy third-party libraries into their own chunks. The app is a
+    // local desktop UI, so the win is not bandwidth but a smaller parse for the
+    // initial route and cache-stable vendor files across releases.
+    build: {
+      chunkSizeWarningLimit: 700,
+      rollupOptions: {
+        output: {
+          manualChunks(id: string) {
+            if (!id.includes("node_modules")) return undefined;
+            if (id.includes("recharts") || id.includes("d3-") || id.includes("victory-vendor")) {
+              return "charts";
+            }
+            if (id.includes("framer-motion")) return "motion";
+            if (id.includes("@tauri-apps")) return "tauri";
+            return "vendor";
+          },
+        },
       },
     },
   };
