@@ -7,6 +7,8 @@ These tests cover the gating only — nothing is ever spawned here.
 
 from __future__ import annotations
 
+from fastapi.testclient import TestClient
+
 import engine
 from server import main as server_main
 
@@ -56,3 +58,26 @@ def test_start_skips_spawn_when_already_running(monkeypatch, tmp_path):
 def test_start_skips_when_gate_is_closed(monkeypatch):
     monkeypatch.setattr(engine, "config", {"model": {}})
     assert server_main.start_llamacpp_in_background() is False
+
+
+def test_shutdown_leaves_a_foreign_server_running(monkeypatch):
+    """A server another backend owns must survive this process's shutdown."""
+    monkeypatch.setattr(server_main, "start_llamacpp_in_background", lambda: False)
+    monkeypatch.setattr(engine, "_llamacpp_proc", None)
+    calls = []
+    monkeypatch.setattr(engine, "stop_llamacpp_server", lambda: calls.append(True))
+
+    with TestClient(server_main.app):
+        pass
+    assert calls == []
+
+
+def test_shutdown_stops_an_owned_server(monkeypatch):
+    monkeypatch.setattr(server_main, "start_llamacpp_in_background", lambda: False)
+    monkeypatch.setattr(engine, "_llamacpp_proc", object())
+    calls = []
+    monkeypatch.setattr(engine, "stop_llamacpp_server", lambda: calls.append(True))
+
+    with TestClient(server_main.app):
+        pass
+    assert calls == [True]

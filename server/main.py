@@ -206,12 +206,16 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     def _shutdown() -> None:
-        # Only stops a server this process started; an externally launched
-        # llama-server is left alone.
-        try:
-            engine.stop_llamacpp_server()
-        except Exception:
-            pass
+        # Only stop a server this process actually spawned. A server that was
+        # up before startup belongs to another shell/session and must survive
+        # this backend's shutdown.
+        with engine._LLAMACPP_LOCK:
+            spawned = engine._llamacpp_proc is not None
+        if spawned:
+            try:
+                engine.stop_llamacpp_server()
+            except Exception:
+                pass
 
     @app.get("/health", tags=["meta"])
     def health() -> dict:
