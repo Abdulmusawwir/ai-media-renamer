@@ -12,6 +12,7 @@ import logging
 import os
 import socket
 import threading
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -58,6 +59,45 @@ class SPAStaticFiles(StaticFiles):
 
 # Seconds to wait for a freshly spawned llama-server to answer its health probe.
 _LLAMACPP_WARMUP_TIMEOUT = 120
+# How often the watchdog checks a server this backend started itself.
+_LLAMACPP_WATCHDOG_INTERVAL = 15
+
+# Set only when this backend actually spawned the server, never for one that was
+# already running (and therefore belongs to another process/session).
+_llamacpp_watchdog_managed = False
+_llamacpp_watchdog_lock = threading.Lock()
+
+
+def _set_watchdog_managed(value: bool) -> None:
+    global _llamacpp_watchdog_managed
+    with _llamacpp_watchdog_lock:
+        _llamacpp_watchdog_managed = bool(value)
+
+
+def _watchdog_is_managed() -> bool:
+    with _llamacpp_watchdog_lock:
+        return _llamacpp_watchdog_managed
+
+
+def llamacpp_watchdog_tick() -> None:
+    """One watchdog pass. Separated from the sleep loop so it is testable."""
+    if not _watchdog_is_managed() or not should_autostart_llamacpp():
+        return
+    log = logging.getLogger(__name__)
+    try:
+        if engine._llamacpp_server_running():
+            return
+        log.warning("llama.cpp server stopped; restarting it")
+        if not engine.ensure_llamacpp_server(timeout=_LLAMACPP_WARMUP_TIMEOUT):
+            log.warning("llama.cpp server did not come back; analysis will report it")
+    except Exception:  # pragma: no cover - defensive
+        log.warning("llama.cpp watchdog raised", exc_info=True)
+
+
+def _llamacpp_watchdog_loop() -> None:
+    while True:
+        time.sleep(_LLAMACPP_WATCHDOG_INTERVAL)
+        llamacpp_watchdog_tick()
 
 
 def should_autostart_llamacpp() -> bool:
@@ -102,6 +142,16 @@ def start_llamacpp_in_background() -> bool:
                 log.warning(
                     "llama.cpp server did not start; analysis will report it"
                 )
+                return
+            with engine._LLAMACPP_LOCK:
+                owned = engine._llamacpp_proc is not None
+            if owned:
+                _set_watchdog_managed(True)
+                threading.Thread(
+                    target=_llamacpp_watchdog_loop,
+                    name="llamacpp-watchdog",
+                    daemon=True,
+                ).start()
         except Exception:  # pragma: no cover - defensive
             log.warning("llama.cpp auto-start raised", exc_info=True)
 
@@ -209,6 +259,7 @@ def create_app() -> FastAPI:
         # Only stop a server this process actually spawned. A server that was
         # up before startup belongs to another shell/session and must survive
         # this backend's shutdown.
+        _set_watchdog_managed(False)
         with engine._LLAMACPP_LOCK:
             spawned = engine._llamacpp_proc is not None
         if spawned:

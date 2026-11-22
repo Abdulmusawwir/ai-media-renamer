@@ -34,6 +34,10 @@ pip install -r requirements.txt
 python launch.py
 ```
 
+To run the full local stack (llama-server, backend and Vite) with one command, use `pwsh scripts/dev-all.ps1`; Ctrl+C stops only the processes it started.
+
+> On a local MinGW Rust toolchain, `tauri build` prints a GNU ld warning about "multiple non-default manifests". It is cosmetic: the NSIS installer is produced and runs correctly, and CI's MSVC toolchain does not emit it.
+
 ### Prerequisites
 - **A local AI runtime** — **llama.cpp** (the only supported runtime) — `llama-server` + a GGUF vision model (7B Qwen2-VL, or lighter 2B on CPU), auto-downloaded by the setup wizard; documents/audio route to a compact text model (Qwen2.5-3B)
 - **ExifTool 12+** — [exiftool.org](https://exiftool.org)
@@ -101,7 +105,7 @@ There is **no telemetry**. The app never collects or transmits usage data — no
 - **Atomic config writes** — `save_config()` writes to a temp file and `os.replace`s it, so a crash mid-save can never leave a truncated `config.json`.
 - **Import-safe startup** — config load/validation is deferred and non-fatal; a broken config degrades gracefully (`CONFIG_LOAD_ERROR` + a minimal fallback) instead of crashing the process at import time.
 - **Single-job analysis** — the server streams one `analyze_asset_with_ai()` result per asset over the WebSocket, with one shared cancellation `threading.Event` (`server/deps.py`). Re-analysis restarts the same loop for selected files only.
-- **AI server warm-up** — the backend starts a local llama.cpp server in the background when a GGUF is configured and the base URL is loopback; it only stops a process it spawned. If the server still is not answering, `run_analysis()` emits an `error` event and completes with `count=0` instead of staging an empty batch.
+- **AI server warm-up and watchdog** — the backend starts a local llama.cpp server in the background when a GGUF is configured and the base URL is loopback; it only stops a process it spawned. If that server dies mid-session, a 15 s watchdog restarts it. If it still is not answering, `run_analysis()` emits an `error` event and completes with `count=0` instead of staging an empty batch.
 - **Server startup** — `launch.py` picks the first free port in 8000–8010, binds `127.0.0.1` and `::1`, and opens the browser.
 - **ExifTool lifecycle** — each commit opens one `ExifToolSession` and closes it in a `finally`; the batch path sends one `-execute` per file with a bounded read timeout.
 - **CLI validation** — mutually-exclusive argument groups (`--export-csv`/`--import-csv`, `--rollback`/`--reset-config`, `--sort-folders`/`--no-sort-folders`) and a config-synced default case style.

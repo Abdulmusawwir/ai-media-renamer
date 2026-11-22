@@ -58,6 +58,7 @@ npm run tauri dev                 # Vite HMR + backend on 8000 (run `npm run dev
 npm run dev:backend               # windowed backend on 127.0.0.1:8000 (no launch)
 npm run tauri build               # NSIS installer + updater artifacts
 pwsh scripts/build-desktop.ps1    # full pipeline: SPA, PyInstaller backend, installer
+pwsh scripts/dev-all.ps1          # start llama-server + backend + Vite with one command
 python scripts/check_versions.py --tag v2.2.0   # version consistency gate
 pwsh scripts/cargo-test-gnu.ps1                # Rust tests on the local MinGW toolchain
 ```
@@ -67,6 +68,7 @@ pwsh scripts/cargo-test-gnu.ps1                # Rust tests on the local MinGW t
 - `llama-server` speaks OpenAI-compatible API on `http://127.0.0.1:8080/v1`; `LlamaCppProvider` uses it. Text-only analysis (documents/audio) goes through `OpenAIProvider._analyze_prompt_only()` with the text model.
 - Runtime chosen at wizard time persists in the setup profile (`runtime` field: `""`, `"llamacpp"`).
 - The backend warms the local server at startup via `server.main.start_llamacpp_in_background()` when a GGUF exists and the base URL is loopback. It never blocks startup and `shutdown` only stops a process this backend spawned (`_llamacpp_proc`), so an externally started server survives a backend restart.
+- If this backend spawned the server, a watchdog (`llamacpp_watchdog_tick()`, 15 s interval) restarts it if it dies mid-session. Foreign servers are never watched or stopped.
 
 ### Auth & desktop boundaries
 - With `AMR_AUTH_ENABLED=1`, **all** `/api/*` routes use `deps.require_auth` (reads included); `/health` and `/api/auth/token` stay public. Desktop mode is gated separately by the shell's bearer token in `server/main.py`.

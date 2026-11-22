@@ -5,6 +5,10 @@
 #   3. npm ci at repo root
 #   4. npm run tauri build
 #   5. Assert outputs: nsis *.exe, *.sig, latest.json
+#
+# Note: building with the local MinGW toolchain prints a harmless GNU ld warning
+# (".rsrc merge failure: multiple non-default manifests"). The installer is still
+# produced and runs correctly; CI uses MSVC and does not print it.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path

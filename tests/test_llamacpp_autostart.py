@@ -60,6 +60,53 @@ def test_start_skips_when_gate_is_closed(monkeypatch):
     assert server_main.start_llamacpp_in_background() is False
 
 
+def test_watchdog_ignores_foreign_servers(monkeypatch):
+    monkeypatch.setattr(server_main, "_llamacpp_watchdog_managed", False)
+
+    def _boom(*_a, **_k):  # pragma: no cover - must never run
+        raise AssertionError("watchdog must not touch a foreign server")
+
+    monkeypatch.setattr(engine, "ensure_llamacpp_server", _boom)
+    server_main.llamacpp_watchdog_tick()
+
+
+def test_watchdog_does_nothing_when_server_is_healthy(monkeypatch):
+    monkeypatch.setattr(server_main, "_llamacpp_watchdog_managed", True)
+    monkeypatch.setattr(server_main, "should_autostart_llamacpp", lambda: True)
+    monkeypatch.setattr(engine, "_llamacpp_server_running", lambda: True)
+
+    def _boom(*_a, **_k):  # pragma: no cover - must never run
+        raise AssertionError("healthy server must not be restarted")
+
+    monkeypatch.setattr(engine, "ensure_llamacpp_server", _boom)
+    server_main.llamacpp_watchdog_tick()
+
+
+def test_watchdog_restarts_a_dead_owned_server(monkeypatch):
+    monkeypatch.setattr(server_main, "_llamacpp_watchdog_managed", True)
+    monkeypatch.setattr(server_main, "should_autostart_llamacpp", lambda: True)
+    monkeypatch.setattr(engine, "_llamacpp_server_running", lambda: False)
+    calls = []
+    monkeypatch.setattr(
+        engine, "ensure_llamacpp_server",
+        lambda timeout: calls.append(timeout) or True,
+    )
+    server_main.llamacpp_watchdog_tick()
+    assert len(calls) == 1
+    assert calls[0] == server_main._LLAMACPP_WARMUP_TIMEOUT
+
+
+def test_watchdog_respects_the_autostart_gate(monkeypatch):
+    monkeypatch.setattr(server_main, "_llamacpp_watchdog_managed", True)
+    monkeypatch.setattr(server_main, "should_autostart_llamacpp", lambda: False)
+
+    def _boom(*_a, **_k):  # pragma: no cover - must never run
+        raise AssertionError("watchdog must respect the gate")
+
+    monkeypatch.setattr(engine, "ensure_llamacpp_server", _boom)
+    server_main.llamacpp_watchdog_tick()
+
+
 def test_shutdown_leaves_a_foreign_server_running(monkeypatch):
     """A server another backend owns must survive this process's shutdown."""
     monkeypatch.setattr(server_main, "start_llamacpp_in_background", lambda: False)
