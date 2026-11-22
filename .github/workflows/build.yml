@@ -63,6 +63,9 @@ jobs:
           releaseName: "AI Media Renamer ${{ github.ref_name }}"
           releaseBody: "See CHANGELOG.md for details."
           releaseDraft: true
+          # Only the NSIS bundle is produced; make the updater JSON explicit
+          # so a future MSI target cannot silently become the update artifact.
+          updaterJsonPreferNsis: true
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
