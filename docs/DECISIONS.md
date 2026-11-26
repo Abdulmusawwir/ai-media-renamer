@@ -16,7 +16,7 @@ Current architectural and UI rules. These are facts for the next session, not su
 
 - `main` is protected by the GitHub ruleset **Protect main**: changes arrive by pull request and the `tests` check must pass.
 - Local checkpoint commits on `pipeline/<date>` are permitted only after Gate A approval; pushing and deploying are never implied.
-- Release v2.2.5 exists on GitHub but predates the `pipeline/2026-11-26` UI changes. Those changes require a new build before users receive them.
+- Release v2.2.6 exists on GitHub and includes the UI changes from the merged `pipeline/2026-11-26` branch.
 - No database, migrations or cron schedules exist in this project.
 
 ## Why these choices
