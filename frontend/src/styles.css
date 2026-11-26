@@ -467,6 +467,35 @@ tbody tr:hover {
   }
 }
 
+.ui-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.ui-tooltip {
+  position: absolute;
+  left: 50%;
+  z-index: 50;
+  transform: translateX(-50%);
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  background: #0b0e16;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ui-tooltip-top {
+  bottom: calc(100% + 6px);
+}
+.ui-tooltip-bottom {
+  top: calc(100% + 6px);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
