@@ -614,7 +614,7 @@ export default function Staging() {
           </div>
           {chartData.length === 0 ? (
             <div className="py-10 text-center text-xs text-text-dim">
-              No data
+              <div className="ui-empty">No data</div>
             </div>
           ) : (
             <div className="h-48">
