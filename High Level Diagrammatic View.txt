@@ -1,45 +1,47 @@
-AI Media Renamer v2.1.0 — high-level architecture
+AI Media Renamer v2.2.5 - high-level architecture
 
-[ Client Layer ]
-        │
-        ├── React SPA (Vite + TS + Tailwind)  frontend/src/pages/
-        │      Analysis · Staging · Commit & Export · Sessions · Settings · Models
-        │      REST (bearer token when AMR_AUTH_ENABLED=1) + WS /api/analyze/stream?token=
-        │
-        └── CLI  (cli.py)
-               scan → extract → analyze → stage → commit / --dry-run / --rollback
+[ Desktop shell ]  Tauri v2 app (src-tauri/, Rust)
+        |
+        +-- Splash, then spawns bundled backend on a random loopback port with a per-launch token
+        +-- Tray icon, close-to-tray, native file/folder pickers and drop handling
+        +-- Signed in-app updater (NSIS installer + .sig + latest.json)
+        +-- Loads the React SPA served by the backend, so browser and desktop share one UI
 
-        ▼
+[ Browser mode ]  launch.py -> uvicorn on 127.0.0.1 and ::1, ports 8000-8010
+        |
+        +-- Serves the built React SPA and the REST/WS API
 
-[ API Layer ]  launch.py → uvicorn :8000-8010 (127.0.0.1 + ::1)
-        │   server/main.py  (FastAPI, static SPA mount, CORS, optional AMR_RATE_LIMIT)
-        │   server/routes/*.py   server/deps.py (ACTIVE_STAGING + cancel Event)
-        ▼
+[ Client layer ]  React 18 + TypeScript + Vite (frontend/src/pages/)
+        |
+        +-- Analysis, Staging, Commit & Export, Sessions, Settings, Models
+        +-- REST with optional bearer token (AMR_AUTH_ENABLED=1) + WS /api/analyze/stream?token=
+        +-- CLI (cli.py): scan -> extract -> analyze -> stage -> commit / --dry-run / --rollback
 
-[ First-run Setup ]
-        bootstrap.py (Tk wizard) → bin/ ExifTool, FFmpeg, llama-server + GGUF (+ required mmproj)
-        Models page → /api/models, /api/models/download, /api/models/{name}/download-status
-        ensure_llamacpp_server() → logs/llamacpp_server.log
+[ API layer ]  server/main.py (FastAPI), server/routes/*.py, server/deps.py
+        |
+        +-- ACTIVE_STAGING + shared cancel Event; one analysis job at a time
+        +-- /api/browse for server-host folders; /api/desktop/status for the shell
 
-        ▼
+[ First-run setup ]  bootstrap.py (Tk wizard)
+        |
+        +-- Installs llama-server.exe + GGUF vision model and mmproj into the user data dir
+        +-- Models page: /api/models, /api/models/download, /api/models/{name}/download-status
+        +-- ensure_llamacpp_server() + watchdog; logs/llamacpp_server.log
 
-[ Core Engine ]  engine.py (pure, importable, no UI imports)
-        ├─ Config: load_config / save_config (atomic os.replace), CONFIG_LOAD_ERROR
-        ├─ Profiles: 9 prompt_profiles + auto_route, resolve_profile_for_path, profile_scope
-        ├─ Extract: FFmpeg single midpoint frame (VIDEO_GRID_SCALE), in-memory image downscale
-        │           (IMAGE_PREVIEW_MAX_EDGE=1024), document text extraction, faster-whisper audio
-        ├─ Analyze: LlamaCppProvider → OpenAI-compatible /v1/chat/completions
-        │           vision model for media; compact text model for documents/audio
-        ├─ Staging: naming templates, case styles, 54 categories, duplicate detection
-        └─ Commit:  collision-safe rename + ExifTool -stay_open metadata; undo_log.jsonl rollback
-
-        ▼
+[ Core engine ]  engine.py (pure, importable, no UI imports)
+        |
+        +-- Config: load_config / save_config (atomic os.replace), CONFIG_LOAD_ERROR
+        +-- Profiles: 9 prompt_profiles + auto_route, resolve_profile_for_path, profile_scope
+        +-- Extract: FFmpeg single midpoint frame, in-memory image downscale, document text, faster-whisper audio
+        +-- Analyze: LlamaCppProvider -> OpenAI-compatible /v1/chat/completions
+        +-- Staging: naming templates, case styles, 54 categories, duplicate detection
+        +-- Commit: collision-safe move + ExifTool -stay_open metadata; undo_log.jsonl rollback
 
 [ Output ]
         CLI  : in place in the scanned directory (or category subfolders when naming.sort_folders)
-        API  : POST /api/commit target_dir (default "."), POST /api/rollback
-
-        ▼
+        API  : POST /api/commit (in-place by default when target_dir is omitted), POST /api/rollback
 
 [ Local state ]
-        config.json · sessions · logs/renamer_YYYY-MM-DD.jsonl · logs/llamacpp_server.log · undo_log.jsonl
+        %APPDATA%\ai-media-renamer : config.json, setup.json, sessions, logs, models, bin, undo_log.jsonl
+        %APPDATA%\com.abdulmusawwir.ai-media-renamer : desktop.json (tray settings)
+        AMR_DATA_DIR overrides the user data root.
