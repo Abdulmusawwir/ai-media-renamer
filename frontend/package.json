@@ -1,7 +1,7 @@
 {
   "name": "ai-media-renamer-frontend",
   "private": true,
-  "version": "2.2.2",
+  "version": "2.2.3",
   "type": "module",
   "description": "React 18 + TypeScript frontend for the AI Media Renamer FastAPI backend",
   "scripts": {

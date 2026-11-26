@@ -18,8 +18,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE = ROOT / "src-tauri/target/release/bundle/nsis"
-INSTALLER = BUNDLE / "AI Media Renamer_2.2.2_x64-setup.exe"
-SIG_FILE = BUNDLE / "AI Media Renamer_2.2.2_x64-setup.exe.sig"
+INSTALLER = BUNDLE / "AI Media Renamer_2.2.3_x64-setup.exe"
+SIG_FILE = BUNDLE / "AI Media Renamer_2.2.3_x64-setup.exe.sig"
 
 pytestmark = pytest.mark.skipif(
     not (INSTALLER.is_file() and SIG_FILE.is_file()),
