@@ -132,6 +132,29 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
         </button>
         <span className="break-all">{browse?.path ?? "—"}</span>
       </div>
+      {browse?.drives && browse.drives.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1">
+          <span className="mr-1 text-[11px] uppercase tracking-wide text-text-dim">
+            Drives
+          </span>
+          {browse.drives.map((drive) => (
+            <button
+              key={drive}
+              type="button"
+              onClick={() => doBrowse(drive)}
+              className={`rounded-full border px-2.5 py-1 text-xs hover:border-accent hover:text-accent ${
+                browse.path.toLowerCase().startsWith(drive.toLowerCase())
+                  ? "border-accent text-accent"
+                  : "border-border bg-bg text-text-dim"
+              }`}
+              title={`Browse ${drive}`}
+            >
+              {drive}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="mb-3 flex gap-2">
         <input
           type="text"

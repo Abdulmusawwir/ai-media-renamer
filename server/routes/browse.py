@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,6 +11,25 @@ import engine
 from server import deps
 
 router = APIRouter(prefix="/api", tags=["browse"])
+
+
+def logical_drives() -> list[str]:
+    """Return mounted drive roots so the picker can switch volumes."""
+    if os.name != "nt":
+        return []
+    try:
+        import ctypes
+
+        mask = ctypes.windll.kernel32.GetLogicalDrives()  # type: ignore[attr-defined]
+    except Exception:
+        return []
+    drives = []
+    for index in range(26):
+        if mask & (1 << index):
+            drive = f"{chr(ord('A') + index)}:\\"
+            if Path(drive).exists():
+                drives.append(drive)
+    return drives
 
 
 def _is_media(name: str) -> str | None:
@@ -72,6 +92,7 @@ def browse(path: str = Query(default="", description="Folder path to list")) -> 
     return {
         "path": str(target),
         "parent": str(target.parent) if target != target.parent else None,
+        "drives": logical_drives(),
         "folders": folders,
         "files": files,
     }

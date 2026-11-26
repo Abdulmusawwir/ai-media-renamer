@@ -144,6 +144,7 @@ export interface BrowseEntry {
 export interface BrowseResponse {
   path: string;
   parent: string | null;
+  drives?: string[];
   folders: BrowseEntry[];
   files: BrowseEntry[];
 }
