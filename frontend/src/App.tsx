@@ -14,17 +14,18 @@ import {
 import { useEnvironment, useConfig, useSaveSession } from "./hooks/api";
 import { useStore, useToast } from "./store";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { Tooltip } from "./components/Tooltip";
 import DesktopBridge from "./components/DesktopBridge";
 import { getHealth } from "./api/client";
 import { isDesktop } from "./desktop";
 
 const NAV_ITEMS = [
-  { to: "/analysis", label: "Analysis", icon: Upload },
-  { to: "/staging", label: "Staging", icon: Layers },
-  { to: "/commit", label: "Commit & Export", icon: Film },
-  { to: "/sessions", label: "Sessions", icon: History },
-  { to: "/settings", label: "Settings", icon: SettingsIcon },
-  { to: "/models", label: "Models", icon: Boxes },
+  { to: "/analysis", label: "Analysis", icon: Upload, hint: "Add media and run AI analysis" },
+  { to: "/staging", label: "Staging", icon: Layers, hint: "Review and edit AI suggestions" },
+  { to: "/commit", label: "Commit & Export", icon: Film, hint: "Write changes to disk or export" },
+  { to: "/sessions", label: "Sessions", icon: History, hint: "Open or delete saved sessions" },
+  { to: "/settings", label: "Settings", icon: SettingsIcon, hint: "Configure the engine and updates" },
+  { to: "/models", label: "Models", icon: Boxes, hint: "Download or inspect local models" },
 ];
 
 export default function App() {
@@ -187,20 +188,21 @@ export default function App() {
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) =>
-                  `flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                    isActive
-                      ? "bg-accent text-white"
-                      : "text-text-dim hover:bg-bg-elev-2 hover:text-text"
-                  }`
-                }
-              >
-                <Icon size={16} />
-                {item.label}
-              </NavLink>
+              <Tooltip key={item.to} label={item.hint} side="bottom">
+                <NavLink
+                  to={item.to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      isActive
+                        ? "bg-accent text-white"
+                        : "text-text-dim hover:bg-bg-elev-2 hover:text-text"
+                    }`
+                  }
+                >
+                  <Icon size={16} />
+                  {item.label}
+                </NavLink>
+              </Tooltip>
             );
           })}
         </nav>
@@ -219,13 +221,15 @@ export default function App() {
             <span className="flex-1">
               Best viewed at 1024px or wider.
             </span>
-            <button
-              className="ui-btn-icon shrink-0 rounded p-1 hover:bg-warn/20"
-              onClick={() => setShowNarrow(false)}
-              aria-label="Dismiss"
-            >
-              <X size={14} />
-            </button>
+            <Tooltip label="Dismiss layout warning">
+              <button
+                className="ui-btn-icon shrink-0 rounded p-1 hover:bg-warn/20"
+                onClick={() => setShowNarrow(false)}
+                aria-label="Dismiss"
+              >
+                <X size={14} />
+              </button>
+            </Tooltip>
           </div>
         )}
         <header className="flex h-14 items-center justify-between border-b border-border bg-bg-elev px-5">

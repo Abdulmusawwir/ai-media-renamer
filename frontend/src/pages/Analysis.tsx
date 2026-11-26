@@ -22,6 +22,7 @@ import {
 import { useStore, useToast, type AnalysisSettings } from "../store";
 import { desktop, isDesktop } from "../desktop";
 import DirectoryPicker from "../components/DirectoryPicker";
+import { Tooltip } from "../components/Tooltip";
 import { Spinner } from "../components/Skeleton";
 
 const MAX_WS_RETRIES = 3;
@@ -482,13 +483,15 @@ export default function Analysis() {
                 >
                   <FolderOpen size={13} className="shrink-0 text-text-dim" />
                   <span className="flex-1 truncate">{f}</span>
-                  <button
-                    className="ui-btn-icon shrink-0 text-text-dim hover:text-danger"
-                    onClick={() => removeFile(f)}
-                    aria-label="Remove"
-                  >
-                    <X size={13} />
-                  </button>
+                  <Tooltip label={`Remove ${f.split(/[\\/]/).pop() ?? f}`}>
+                    <button
+                      className="ui-btn-icon shrink-0 text-text-dim hover:text-danger"
+                      onClick={() => removeFile(f)}
+                      aria-label="Remove"
+                    >
+                      <X size={13} />
+                    </button>
+                  </Tooltip>
                 </li>
               ))}
             </ul>
