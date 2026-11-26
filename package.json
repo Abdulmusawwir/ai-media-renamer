@@ -5,6 +5,7 @@
   "description": "Tauri desktop shell for AI Media Renamer",
   "scripts": {
     "tauri": "tauri",
+    "build:desktop": "pwsh scripts/build-desktop.ps1",
     "dev:backend": "python desktop_backend.py --host 127.0.0.1 --port 8000 --no-launch --no-update-check"
   },
   "devDependencies": {

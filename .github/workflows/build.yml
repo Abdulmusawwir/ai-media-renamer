@@ -61,7 +61,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "AI Media Renamer ${{ github.ref_name }}"
-          releaseBody: "See CHANGELOG.md for details."
+          releaseBody: "See CHANGELOG.md, attached below, for details."
           releaseDraft: true
           # Only the NSIS bundle is produced; make the updater JSON explicit
           # so a future MSI target cannot silently become the update artifact.
@@ -72,3 +72,4 @@ jobs:
           files: |
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/nsis/*.sig
+            CHANGELOG.md

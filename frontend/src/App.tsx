@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { X } from "lucide-react";
 import {
@@ -62,6 +62,22 @@ export default function App() {
   const envOk = environment
     ? environment.ffmpeg && environment.exiftool
     : false;
+
+  // The AI server starts behind the scenes, so the first answer can say it is
+  // not ready yet. Ask again briefly instead of showing a stale warning.
+  const readinessChecks = useRef(0);
+  useEffect(() => {
+    if (!isDesktop || environment?.llamacpp_running || readinessChecks.current >= 10) {
+      return;
+    }
+    const refetch = envQuery.refetch;
+    const timer = window.setInterval(() => {
+      readinessChecks.current += 1;
+      void refetch();
+      if (readinessChecks.current >= 10) window.clearInterval(timer);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [isDesktop, environment?.llamacpp_running, envQuery.refetch]);
 
   // Keep "backend reachable" separate from "AI ready": /health only proves
   // FastAPI is alive, while /api/environment also knows about llama.cpp.

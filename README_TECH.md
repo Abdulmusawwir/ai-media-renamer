@@ -12,18 +12,18 @@ Pre-built installers are available on the [Releases page](https://github.com/Abd
 
 ### Building from Source
 
-Node.js 18+ is required for the SPA and Rust + Tauri v2 for the installer. The full script is `scripts/build-desktop.ps1`.
+Node.js 24+ is required for the SPA and Rust + Tauri v2 for the installer.
 
 ```bash
 # Browser mode (FastAPI + React SPA)
 pip install -r requirements.txt
 python launch.py
 
-# Desktop release (Python backend bundle + NSIS installer)
-cd frontend && npm ci && npm run build && cd ..
-pyinstaller build_desktop.spec --noconfirm   # -> dist/AIMediaRenamerBackend/
-npm run tauri build                          # -> src-tauri/target/release/bundle/nsis/
+# Desktop release - use this single command
+npm run build:desktop
 ```
+
+`npm run build:desktop` runs `scripts/build-desktop.ps1`: it removes any stale bundled backend, rebuilds the SPA and backend bundle, then builds the NSIS installer and checks both the installer and its signature. Running `npm run tauri build` on its own can package an old UI and is not supported.
 
 ---
 

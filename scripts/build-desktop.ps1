@@ -4,7 +4,10 @@
 #   2. pyinstaller build_desktop.spec --noconfirm
 #   3. npm ci at repo root
 #   4. npm run tauri build
-#   5. Assert outputs: nsis *.exe, *.sig, latest.json
+#   5. Assert outputs: nsis *.exe and *.sig
+#
+# This is the ONLY supported desktop build command. Running `npm run tauri build`
+# on its own can package a stale bundled backend. Use `npm run build:desktop`.
 #
 # Note: building with the local MinGW toolchain prints a harmless GNU ld warning
 # (".rsrc merge failure: multiple non-default manifests"). The installer is still
@@ -22,6 +25,11 @@ npm run build
 Pop-Location
 
 Write-Host "=== 2. Backend (PyInstaller onedir) ==="
+# Remove the previous bundle first. PyInstaller copies frontend/dist into it,
+# so keeping an old folder would silently package a stale UI.
+if (Test-Path "dist/AIMediaRenamerBackend") {
+    Remove-Item "dist/AIMediaRenamerBackend" -Recurse -Force
+}
 pip install -r requirements.txt pyinstaller
 pyinstaller build_desktop.spec --noconfirm
 if (-not (Test-Path "dist/AIMediaRenamerBackend/AIMediaRenamerBackend.exe")) {
@@ -40,4 +48,5 @@ $exe = Get-ChildItem "$bundle/*.exe" -ErrorAction SilentlyContinue
 $sig = Get-ChildItem "$bundle/*.sig" -ErrorAction SilentlyContinue
 if (-not $exe) { throw "NSIS installer (.exe) not found in $bundle" }
 if (-not $sig) { throw "Signature (.sig) not found in $bundle" }
+if ($exe.Count -ne $sig.Count) { throw "Installer/signature count mismatch in $bundle" }
 Write-Host "Build complete: $($exe[0].FullName)"

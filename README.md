@@ -110,6 +110,8 @@ By default the server binds to loopback (`127.0.0.1`) and runs **unauthenticated
 
 ## Roadmap — we're just getting started
 
+- [x] **v2.2.3 — Update error handling** — failed update checks show a real error; install no longer re-checks; close-to-tray no longer fires during startup.
+- [x] **v2.2.2 / v2.2.1 — Desktop fixes** — silent close-to-tray, signed updater artifacts and verified 2.2.0 → 2.2.1 update.
 - [x] **v2.2.0 — Desktop app** — signed Tauri v2 shell with a per-user NSIS installer, tray, in-app updates, native pickers, bundled backend and AI-server auto-start.
 - [x] **v2.1.0 — Auto-routing & release fix** — documents, spreadsheets, and audio are routed to their own naming profiles automatically, and the release build now compiles the React SPA before packaging.
 - [x] **v2.0.0 — React + FastAPI rewrite** — llama.cpp-only local runtime, REST + WebSocket API, loopback-first LAN auth (JWT), and a packaged `AIMediaRenamer.exe`.
