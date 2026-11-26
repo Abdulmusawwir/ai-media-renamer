@@ -38,6 +38,12 @@ To run the full local stack (llama-server, backend and Vite) with one command, u
 
 > On a local MinGW Rust toolchain, `tauri build` prints a GNU ld warning about "multiple non-default manifests". It is cosmetic: the NSIS installer is produced and runs correctly, and CI's MSVC toolchain does not emit it.
 
+### Development workflow
+
+`main` is protected by the GitHub ruleset **Protect main**: changes reach it through a pull request, and the **Tests** check must pass first. Workflow: make a branch, commit, push the branch, open a pull request, then merge once the check is green. Direct pushes to `main` are rejected.
+
+The check runs Python lint/tests, the frontend typecheck/build and Vitest tests, and Rust format/lint/tests on every pull request and push to `main`. Locally, run `pwsh scripts/dev-all.ps1` for the dev stack and `npm run build:desktop` for a release build.
+
 ### Prerequisites
 - **A local AI runtime** — **llama.cpp** (the only supported runtime) — `llama-server` + a GGUF vision model (7B Qwen2-VL, or lighter 2B on CPU), auto-downloaded by the setup wizard; documents/audio route to a compact text model (Qwen2.5-3B)
 - **ExifTool 12+** — [exiftool.org](https://exiftool.org)

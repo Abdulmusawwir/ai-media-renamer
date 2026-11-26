@@ -52,6 +52,13 @@ jobs:
       - name: Frontend tests
         run: npm test --prefix frontend
 
+      # tauri.conf.json bundles ../dist/AIMediaRenamerBackend as a resource.
+      # The test checkout has no PyInstaller output, so create an empty folder
+      # or the Tauri build script fails before Cargo can compile anything.
+      - name: Prepare Tauri resource placeholder
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "dist/AIMediaRenamerBackend" | Out-Null
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
