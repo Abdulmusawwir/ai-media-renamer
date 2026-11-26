@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 import engine
+from server import deps
 
 router = APIRouter(prefix="/api", tags=["browse"])
 
@@ -25,15 +26,20 @@ def _is_media(name: str) -> str | None:
     return None
 
 
-@router.get("/browse")
+@router.get("/browse", dependencies=[Depends(deps.require_auth)])
 def browse(path: str = Query(default="", description="Folder path to list")) -> dict:
-    """List files and subfolders of ``path`` (default: current working dir).
+    """List files and subfolders of ``path`` (default: the user's home dir).
+
+    This endpoint can enumerate any folder the backend process can read, so it
+    is one of the few *read* routes gated by ``deps.require_auth``: when LAN
+    auth is enabled, a caller must present a bearer token (desktop mode is
+    already covered by the shell's own bearer-token middleware).
 
     The path is resolved and validated to exist; listings are not restricted to a
     server root (the directory picker is expected to choose arbitrary local
     folders). Returns media-kind flags per entry.
     """
-    root = Path.cwd()
+    root = Path.home()
     target = Path(path) if path else root
     try:
         target = target.resolve()

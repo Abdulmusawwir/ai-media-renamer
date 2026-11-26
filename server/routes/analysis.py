@@ -13,33 +13,57 @@ progress). Both flows accumulate staged assets into ``deps.ACTIVE_STAGING``.
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import threading
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 import engine
-from server import auth, deps
+from server import auth, deps, desktop
 from server.schemas import AnalyzeRequest
 from server.ws import make_event, manager
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api", tags=["analysis"])
+
+
+def _resolve_input_path(raw: str) -> Path:
+    """Best-effort repair of a client-supplied asset path.
+
+    Clients normally send absolute paths from the folder picker, but a payload
+    can still arrive with surrounding quotes, stray whitespace, ``~``/env
+    placeholders, or a bare filename. Repairing those here keeps a cosmetic
+    difference in the request from turning into an unexplained "file not
+    found". The literal path is always tried first, so behaviour for a correct
+    absolute path is unchanged.
+    """
+    text = os.path.expandvars(str(raw).strip().strip('"').strip("'").strip())
+    candidate = Path(text).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    # Relative input: try the working directory first (historical behaviour),
+    # then the user's home, and always hand back an absolute path.
+    for base in (Path.cwd(), Path.home()):
+        alt = base / candidate
+        if alt.exists():
+            return alt
+    return Path.cwd() / candidate
 
 
 def _classify(path: Path) -> tuple[str, bool]:
     """Return (encoder_kind, is_text) for a media file path.
 
-    ``is_text`` is True for audio (transcription) and document (text) assets,
-    which are analyzed with the text/document AI path instead of vision.
+    Delegates to :func:`engine.asset_kind` so extension lists and profile
+    auto-routing cannot drift apart. Spreadsheets use the document extractor;
+    audio and documents (including spreadsheets) take the text AI path.
     """
-    suffix = path.suffix.lower()
-    if suffix in engine.VIDEO_EXTENSIONS:
-        return "video", False
-    if suffix in engine.AUDIO_EXTENSIONS:
-        return "audio", True
-    if suffix in engine.DOCUMENT_EXTENSIONS:
+    kind = engine.asset_kind(path)
+    if kind == "spreadsheet":
         return "document", True
-    return "image", False
+    return kind, kind in ("audio", "document")
 
 
 def _extract(path: Path, kind: str):
@@ -89,97 +113,122 @@ def run_analysis(
     ``send_cb`` (optional) receives each WebSocket event dict as it happens.
     ``cancel_event`` (optional) aborts the run when set.
     """
-    if profile:
-        engine.set_active_profile(profile)
+    deps.set_analysis_running(True)
+    try:
+        if profile:
+            engine.set_active_profile(profile)
 
-    template_string = settings.get("template_string")
-    case_style = settings.get("case_style", engine.DEFAULT_CASE_STYLE)
-    max_chars = int(settings.get("max_chars", engine.DEFAULT_MAX_FILENAME_CHARS) or 0)
+        template_string = settings.get("template_string")
+        case_style = settings.get("case_style", engine.DEFAULT_CASE_STYLE)
+        max_chars = int(settings.get("max_chars", engine.DEFAULT_MAX_FILENAME_CHARS) or 0)
 
-    staging: list[dict] = []
-    total = len(files)
+        staging: list[dict] = []
+        total = len(files)
 
-    def emit(event: dict) -> None:
-        if send_cb is not None:
-            send_cb(event)
+        def emit(event: dict) -> None:
+            if send_cb is not None:
+                send_cb(event)
 
-    # Upfront check: if the local AI server is not running, fail fast with a
-    # clear error instead of silently erroring on every file.
-    if not engine._llamacpp_server_running():
-        emit(make_event("error", detail=(
-            "The llama.cpp server is not running on "
-            f"{engine._llamacpp_host_port()[0]}:{engine._llamacpp_host_port()[1]}. "
-            "Run the setup wizard (python bootstrap.py) or start llama-server manually."
-        )))
-        emit(make_event("complete", staged=[], count=0))
+        # Upfront check: if the local AI server is not running, fail fast with a
+        # clear error instead of silently erroring on every file.
+        if not engine._llamacpp_server_running():
+            emit(make_event("error", detail=(
+                "The llama.cpp server is not running on "
+                f"{engine._llamacpp_host_port()[0]}:{engine._llamacpp_host_port()[1]}. "
+                "Run the setup wizard (python bootstrap.py) or start llama-server manually."
+            )))
+            emit(make_event("complete", staged=[], count=0))
+            return staging
+
+        emit(make_event("extraction_progress", processed=0, total=total))
+
+        logger.info(
+            "analysis start: %d file(s); first=%r",
+            total,
+            files[0] if files else None,
+        )
+
+        for idx, raw in enumerate(files, 1):
+            if cancel_event is not None and cancel_event.is_set():
+                emit(make_event("cancelled"))
+                break
+
+            path = _resolve_input_path(raw)
+            if not path.exists():
+                logger.warning(
+                    "analysis: file not found raw=%r resolved=%r cwd=%r",
+                    raw,
+                    str(path),
+                    str(Path.cwd()),
+                )
+                emit(make_event(
+                    "asset_error",
+                    name=raw,
+                    error=(
+                        f"file not found: {path}"
+                        + ("" if str(path) == str(raw) else f" (received {raw!r})")
+                    ),
+                    index=idx,
+                    total=total,
+                ))
+                continue
+
+            kind, is_text = _classify(path)
+            try:
+                preview = _extract(path, kind)
+            except Exception as exc:  # extraction can fail (missing ffmpeg etc.)
+                emit(make_event("asset_error", name=path.name, error=str(exc), index=idx, total=total))
+                continue
+
+            if not preview:
+                emit(make_event("asset_error", name=path.name, error="extraction failed", index=idx, total=total))
+                continue
+
+            # Text assets (documents/spreadsheets/audio) are analyzed with their own
+            # profile when auto-routing is on; visual assets keep the run's profile.
+            asset_profile = engine.resolve_profile_for_path(path, profile)
+            try:
+                with engine.profile_scope(asset_profile):
+                    if is_text:
+                        ai = engine.analyze_document_with_ai(preview)
+                    else:
+                        ai = engine.analyze_asset_with_ai(preview)
+                    if not ai.get("ok"):
+                        detail = ai.get("detail") or ai.get("error") or "analysis failed"
+                        emit(make_event(
+                            "asset_error", name=path.name, error=str(detail), index=idx, total=total,
+                        ))
+                        continue
+                    # Build inside the scope so category validation uses this profile.
+                    asset = _build_asset(path, ai.get("data", {}), is_text, kind, preview)
+            except Exception as exc:
+                emit(make_event("asset_error", name=path.name, error=str(exc), index=idx, total=total))
+                continue
+
+            asset["profile"] = asset_profile
+
+            if template_string:
+                rendered = engine.apply_naming_template(
+                    template_string,
+                    {
+                        "category": asset["category"],
+                        "topic": asset["topic"],
+                        "description": asset["description"],
+                        "new_filename": asset["staged_name"],
+                    },
+                )
+                rendered = engine.apply_case_style(rendered, case_style)
+                rendered = engine.truncate_filename(rendered, max_chars)
+                asset["staged_name"] = rendered
+
+            staging.append(asset)
+            emit(make_event("asset_analyzed", asset=asset, index=idx, total=total))
+
+        emit(make_event("complete", staged=staging, count=len(staging)))
+        deps.set_active_staging(staging)
         return staging
-
-    emit(make_event("extraction_progress", processed=0, total=total))
-
-    for idx, raw in enumerate(files, 1):
-        if cancel_event is not None and cancel_event.is_set():
-            emit(make_event("cancelled"))
-            break
-
-        path = Path(raw)
-        if not path.exists():
-            emit(make_event("asset_error", name=raw, error="file not found", index=idx, total=total))
-            continue
-
-        kind, is_text = _classify(path)
-        try:
-            preview = _extract(path, kind)
-        except Exception as exc:  # extraction can fail (missing ffmpeg etc.)
-            emit(make_event("asset_error", name=path.name, error=str(exc), index=idx, total=total))
-            continue
-
-        if not preview:
-            emit(make_event("asset_error", name=path.name, error="extraction failed", index=idx, total=total))
-            continue
-
-        # Text assets (documents/spreadsheets/audio) are analyzed with their own
-        # profile when auto-routing is on; visual assets keep the run's profile.
-        asset_profile = engine.resolve_profile_for_path(path, profile)
-        try:
-            with engine.profile_scope(asset_profile):
-                if is_text:
-                    ai = engine.analyze_document_with_ai(preview)
-                else:
-                    ai = engine.analyze_asset_with_ai(preview)
-                if not ai.get("ok"):
-                    detail = ai.get("detail") or ai.get("error") or "analysis failed"
-                    emit(make_event(
-                        "asset_error", name=path.name, error=str(detail), index=idx, total=total,
-                    ))
-                    continue
-                # Build inside the scope so category validation uses this profile.
-                asset = _build_asset(path, ai.get("data", {}), is_text, kind, preview)
-        except Exception as exc:
-            emit(make_event("asset_error", name=path.name, error=str(exc), index=idx, total=total))
-            continue
-
-        asset["profile"] = asset_profile
-
-        if template_string:
-            rendered = engine.apply_naming_template(
-                template_string,
-                {
-                    "category": asset["category"],
-                    "topic": asset["topic"],
-                    "description": asset["description"],
-                    "new_filename": asset["staged_name"],
-                },
-            )
-            rendered = engine.apply_case_style(rendered, case_style)
-            rendered = engine.truncate_filename(rendered, max_chars)
-            asset["staged_name"] = rendered
-
-        staging.append(asset)
-        emit(make_event("asset_analyzed", asset=asset, index=idx, total=total))
-
-    emit(make_event("complete", staged=staging, count=len(staging)))
-    deps.set_active_staging(staging)
-    return staging
+    finally:
+        deps.set_analysis_running(False)
 
 
 @router.post("/analyze", dependencies=[Depends(deps.require_auth)])
@@ -195,7 +244,11 @@ def post_analyze(req: AnalyzeRequest) -> dict:
     cancel_event = deps.reset_cancel_event()
 
     def _worker() -> None:
-        run_analysis(req.files, req.profile, req.settings, send_cb=None, cancel_event=cancel_event)
+        try:
+            run_analysis(req.files, req.profile, req.settings, send_cb=None, cancel_event=cancel_event)
+        finally:
+            # Guard against a crash before ``run_analysis`` reaches its own finally.
+            deps.set_analysis_running(False)
 
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
@@ -205,10 +258,15 @@ def post_analyze(req: AnalyzeRequest) -> dict:
 @router.websocket("/analyze/stream")
 async def ws_analyze(websocket: WebSocket) -> None:
     """Stream analysis progress. Client sends init/cancel control messages."""
-    # When LAN auth is enabled, the bearer token travels as a query param
-    # (browsers cannot set Authorization headers on WebSocket handshakes).
-    if auth.AUTH_ENABLED:
-        token = websocket.query_params.get("token")
+    # Tokens travel as a query param (browsers cannot set Authorization headers
+    # on WebSocket handshakes). Desktop mode verifies the shell token; otherwise
+    # keep the existing optional LAN JWT path.
+    token = websocket.query_params.get("token")
+    if desktop.desktop_mode():
+        if not desktop.ws_token_ok(token):
+            await websocket.close(code=1008)
+            return
+    elif auth.AUTH_ENABLED:
         if not token or auth.verify_token(token) is None:
             await websocket.close(code=1008)
             return
@@ -241,11 +299,15 @@ async def ws_analyze(websocket: WebSocket) -> None:
 
             # Run the (blocking) engine pipeline on a worker thread so this
             # async loop stays free to receive a possible cancel message.
-            analysis_thread = threading.Thread(
-                target=run_analysis,
-                args=(files, profile, settings, _send, cancel_event),
-                daemon=True,
-            )
+            def _run_thread(
+                files=files, profile=profile, settings=settings, cancel_event=cancel_event
+            ) -> None:
+                try:
+                    run_analysis(files, profile, settings, _send, cancel_event)
+                finally:
+                    deps.set_analysis_running(False)
+
+            analysis_thread = threading.Thread(target=_run_thread, daemon=True)
             analysis_thread.start()
     except WebSocketDisconnect:
         manager.disconnect(websocket)

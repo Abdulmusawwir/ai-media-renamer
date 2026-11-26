@@ -44,6 +44,48 @@ class TestExtractTextPlain:
         assert result is None
 
 
+class TestExtractTextPlainEncoding:
+    def test_cp1252_em_dash_is_not_replacement_char(self, tmp_path: Path) -> None:
+        f = tmp_path / "notes.md"
+        f.write_bytes("Café — summary".encode("cp1252"))
+        result = extract_text_plain(f)
+        assert result is not None
+        assert "—" in result
+        assert "\ufffd" not in result
+
+    def test_utf8_bom_is_stripped(self, tmp_path: Path) -> None:
+        f = tmp_path / "notes.md"
+        f.write_bytes(b"\xef\xbb\xbf# Title")
+        assert extract_text_plain(f) == "# Title"
+
+
+class TestExtractTextRTF:
+    def test_control_words_and_tables_are_stripped(self, tmp_path: Path) -> None:
+        f = tmp_path / "report.rtf"
+        f.write_bytes(
+            rb"{\rtf1\ansi\deff0{\fonttbl{\f0 Arial;}}"
+            rb"\f0\fs24 Hello \b world\b0\par Second line}"
+        )
+        result = extract_text_plain(f)
+        assert result == "Hello world\nSecond line"
+        assert "\\rtf" not in result
+        assert "fonttbl" not in result
+
+    def test_hex_and_unicode_escapes_are_decoded(self, tmp_path: Path) -> None:
+        f = tmp_path / "report.rtf"
+        f.write_bytes(rb"{\rtf1 Caf\'e9 and \u8212? here}")
+        result = extract_text_plain(f)
+        assert result is not None
+        assert "Café" in result
+        assert "—" in result
+        assert "\\'" not in result
+
+    def test_picture_group_is_dropped(self, tmp_path: Path) -> None:
+        f = tmp_path / "report.rtf"
+        f.write_bytes(rb"{\rtf1 Keep this{\pict\pngblip ffff} and this}")
+        assert extract_text_plain(f) == "Keep this and this"
+
+
 class TestExtractTextCSV:
     def test_extract_csv(self, tmp_path: Path) -> None:
         """CSV files return pipe-delimited rows."""

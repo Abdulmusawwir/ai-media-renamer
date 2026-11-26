@@ -8,28 +8,52 @@
 const RAW_BASE = (import.meta.env.VITE_API_BASE ?? "").trim();
 export const API_BASE = RAW_BASE === "" ? "" : RAW_BASE.replace(/\/$/, "");
 
+// Resolves once the startup auth probe has finished (see main.tsx). Requests
+// issued before that would otherwise race the token fetch and 401 against
+// auth-protected routes. The probe itself opts out of waiting (it *is* the
+// thing being awaited).
+let _authReady: Promise<void> | null = null;
+
+export function setAuthReady(probe: Promise<unknown>): void {
+  _authReady = probe.then(
+    () => undefined,
+    () => undefined
+  );
+}
+
+/** Bearer header for raw fetches that bypass the shared request helper. */
+export function authHeaders(): Record<string, string> {
+  return _cachedToken ? { Authorization: `Bearer ${_cachedToken}` } : {};
+}
+
+interface RequestOptions {
+  /** Skip waiting for the startup auth probe (used by the probe itself). */
+  skipAuthWait?: boolean;
+}
+
 async function request<T = any>(
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
+  opts: RequestOptions = {}
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
-  const headers: Record<string, string> = {};
-  // Attach the LAN auth bearer token (populated by getAnalysisToken) so REST
-  // calls respect AMR_AUTH_ENABLED in the same way the WebSocket does.
-  if (_cachedToken) headers["Authorization"] = `Bearer ${_cachedToken}`;
+  if (!opts.skipAuthWait && !_cachedToken && _authReady) {
+    await _authReady;
+  }
+  const headers: Record<string, string> = { ...authHeaders() };
   // Explicitly omit credentials (the app authenticates via bearer tokens, not
   // cookies). This keeps every request on the simple (non-credentialed) CORS
   // path, which is required for the permissive `Access-Control-Allow-Origin: *`
   // served by the backend to actually take effect on cross-origin loads.
-  const opts: RequestInit = { method, headers, credentials: "omit" };
+  const init: RequestInit = { method, headers, credentials: "omit" };
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
-    opts.body = JSON.stringify(body);
+    init.body = JSON.stringify(body);
   }
   let res: Response;
   try {
-    res = await fetch(url, opts);
+    res = await fetch(url, init);
   } catch (e) {
     // Network-level failure (server down, wrong origin, CORS, mixed content).
     // Surface the URL so the failure is diagnosable from the UI toast.
@@ -127,6 +151,10 @@ export interface BrowseResponse {
 // ---------------------------------------------------------------------------
 // REST endpoints
 // ---------------------------------------------------------------------------
+
+export function getHealth(): Promise<{ status: string; version: string; desktop: boolean }> {
+  return request<{ status: string; version: string; desktop: boolean }>("GET", "/health");
+}
 
 export function getEnvironment(): Promise<EnvironmentResponse> {
   return request<EnvironmentResponse>("GET", "/api/environment");
@@ -288,6 +316,11 @@ function wsBaseFor(path: string): string {
 
 let _cachedToken: string | null = null;
 let _tokenFetchedAt = 0;
+
+export function setDesktopToken(token: string | null): void {
+  _cachedToken = token;
+  _tokenFetchedAt = Date.now();
+}
 // JWT lifetime is 12h; refresh a bit earlier to avoid sending an expired token.
 const TOKEN_TTL_MS = 11 * 60 * 60 * 1000;
 
@@ -306,7 +339,9 @@ export async function getAnalysisToken(): Promise<string | null> {
   try {
     const res = await request<{ enabled: boolean; token?: string }>(
       "POST",
-      "/api/auth/token"
+      "/api/auth/token",
+      undefined,
+      { skipAuthWait: true }
     );
     if (res.enabled && res.token) {
       _cachedToken = res.token;

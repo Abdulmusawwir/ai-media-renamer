@@ -60,9 +60,9 @@ This is the tool that fixes it.
 
 ### Packaged / one-click
 
-1. Download `AIMediaRenamer.exe` from the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest) — no installation, no accounts.
-2. Double-click. The wizard sets up the local AI runtime on first launch, then opens the app in your browser on a loopback port (8000–8010).
-3. Drop in your files → **Run AI Analysis** → review in the staging table → **Commit** (one-click Rollback reverses the batch).
+1. Download the `AI Media Renamer_*_x64-setup.exe` installer from the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest) — per-user, no admin, no accounts.
+2. Run it and launch the app. The wizard sets up the local AI runtime on first launch; the desktop app runs in its own window with a tray icon (closing hides it by default).
+3. Add files by drag-and-drop, the native picker, or the folder browser → **Run AI Analysis** → review in the staging table → **Commit** (one-click Rollback reverses the batch).
 
 ### Run from source (dev)
 
@@ -94,7 +94,7 @@ Run `start.bat` — it ensures Python (via winget if missing), installs the pack
 
 By default the server binds to loopback (`127.0.0.1`) and runs **unauthenticated** — safe because nothing is exposed beyond your own machine. Two opt-in knobs exist:
 
-- **LAN sharing** — set `AMR_AUTH_ENABLED=1` to require a bearer token. The backend issues a short-lived JWT at `/api/auth/token`, and the frontend fetches it automatically and attaches it to both REST calls and the analysis WebSocket, so enabling auth stays transparent.
+- **LAN sharing** — set `AMR_AUTH_ENABLED=1` to require a bearer token on all `/api/*` routes (reads and writes). The backend issues a short-lived JWT at `/api/auth/token`, and the frontend fetches it automatically and attaches it to both REST calls and the analysis WebSocket, so enabling auth stays transparent.
 - **Custom secret** — set `AMR_JWT_SECRET` to override the dev fallback secret in any multi-user/LAN scenario.
 
 ---
@@ -110,6 +110,7 @@ By default the server binds to loopback (`127.0.0.1`) and runs **unauthenticated
 
 ## Roadmap — we're just getting started
 
+- [x] **v2.2.0 — Desktop app** — signed Tauri v2 shell with a per-user NSIS installer, tray, in-app updates, native pickers, bundled backend and AI-server auto-start.
 - [x] **v2.1.0 — Auto-routing & release fix** — documents, spreadsheets, and audio are routed to their own naming profiles automatically, and the release build now compiles the React SPA before packaging.
 - [x] **v2.0.0 — React + FastAPI rewrite** — llama.cpp-only local runtime, REST + WebSocket API, loopback-first LAN auth (JWT), and a packaged `AIMediaRenamer.exe`.
 - [x] **Security hardening pass** — v1.6.3: checksum-verified downloads, frozen lockfile, secret redaction, keychain fail-closed, loopback-only server with LAN opt-in, input-validation hardening, log path redaction
@@ -137,3 +138,18 @@ If this saves you a weekend a month, consider [sponsoring the project on GitHub]
 Free forever · Open source · Runs on your machine, not ours
 
 </div>
+
+
+---
+
+## Desktop app (v2.2.0)
+
+AI Media Renamer ships as a signed per-user NSIS installer built on a Tauri v2 shell:
+
+- **Install:** run the `AI Media Renamer_*.exe` installer (per-user, no admin). The app lives in the tray; closing the window hides it.
+- **Setup:** first launch runs the dependency wizard (llama.cpp runtime + a GGUF model). Re-run anytime from the tray ("Setup & Dependencies").
+- **Data:** config, logs, sessions, undo log, and models live under `%APPDATA%\ai-media-renamer` (override with `AMR_DATA_DIR`).
+- **Updates:** in-app signed updates via the Tauri updater; "Check for Updates" in Settings or the tray.
+- **Browser & CLI still work:** `python launch.py` and `python cli.py` are unchanged.
+
+Build from source: `npm run tauri build` (see `scripts/build-desktop.ps1`).

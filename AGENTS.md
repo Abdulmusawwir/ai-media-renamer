@@ -53,12 +53,27 @@ python cli.py "path/to/dir" --export-csv staging.csv                # export aft
 python cli.py "path/to/dir" --import-csv staging.csv                # skip analysis, load from CSV
 ruff check .                      # lint
 pytest                            # unit tests
+# Desktop (Tauri v2 shell, branch feat/tauri-desktop, v2.2.0)
+npm run tauri dev                 # Vite HMR + backend on 8000 (run `npm run dev:backend` first)
+npm run dev:backend               # windowed backend on 127.0.0.1:8000 (no launch)
+npm run tauri build               # NSIS installer + updater artifacts
+pwsh scripts/build-desktop.ps1    # full pipeline: SPA, PyInstaller backend, installer
+pwsh scripts/dev-all.ps1          # start llama-server + backend + Vite with one command
+python scripts/check_versions.py --tag v2.2.0   # version consistency gate
+pwsh scripts/cargo-test-gnu.ps1                # Rust tests on the local MinGW toolchain
 ```
 
 ### Local AI runtime — llama.cpp only
 - Widget wizard installs `llama-server.exe` (~18 MB) + a GGUF vision/text model for fresh installs (`LLAMACPP_GGUF_CATALOG`, `configure_llamacpp_install`, `ensure_llamacpp_server`). llama.cpp is the only supported local runtime.
 - `llama-server` speaks OpenAI-compatible API on `http://127.0.0.1:8080/v1`; `LlamaCppProvider` uses it. Text-only analysis (documents/audio) goes through `OpenAIProvider._analyze_prompt_only()` with the text model.
 - Runtime chosen at wizard time persists in the setup profile (`runtime` field: `""`, `"llamacpp"`).
+- The backend warms the local server at startup via `server.main.start_llamacpp_in_background()` when a GGUF exists and the base URL is loopback. It never blocks startup and `shutdown` only stops a process this backend spawned (`_llamacpp_proc`), so an externally started server survives a backend restart.
+- If this backend spawned the server, a watchdog (`llamacpp_watchdog_tick()`, 15 s interval) restarts it if it dies mid-session. Foreign servers are never watched or stopped.
+
+### Auth & desktop boundaries
+- With `AMR_AUTH_ENABLED=1`, **all** `/api/*` routes use `deps.require_auth` (reads included); `/health` and `/api/auth/token` stay public. Desktop mode is gated separately by the shell's bearer token in `server/main.py`.
+- Tauri v2 is deny-by-default: every command in `src-tauri/src/lib.rs::generate_handler!` must also be granted in `src-tauri/permissions/desktop.toml` and referenced by both capability files. `tests/test_desktop_permissions.py` enforces this.
+- Browser mode cannot expose real filesystem paths from drag-and-drop; the folder browser (`DirectoryPicker`) is the supported browser path. Native drag-drop and pickers are desktop-only.
 
 ### Module roles
 | File | Role | Must never |
@@ -80,6 +95,11 @@ pytest                            # unit tests
 - AI receives a single representative frame per video — no more grid descriptions in summaries.
 - `-ss` before `-i` (input seeking) for speed; `-vframes 1`; scale via `VIDEO_GRID_SCALE`.
 - Images: downscaled via FFmpeg to `IMAGE_PREVIEW_MAX_EDGE` (1024px) in memory.
+
+### Text extraction (engine.py)
+- TXT/MD/RTF go through `extract_text_plain()`: UTF-8 first, then cp1252 so legacy punctuation survives; newlines are normalised.
+- RTF is cleaned by `_strip_rtf_control_words()` before analysis — destination groups (font/colour tables, pictures) are dropped, `\'hh`/`\uN?` escapes decoded, `\par`/`\tab` mapped.
+- `server/routes/analysis.py::_classify()` delegates to `engine.asset_kind()`; do not reintroduce a second extension list there.
 
 ### ExifTool metadata (engine.py — most commonly misconfigured)
 - `XMP-dc:Subject=` — one arg PER TAG. Never comma-separated.

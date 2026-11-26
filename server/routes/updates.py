@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 import engine
+from server import deps
 
 router = APIRouter(prefix="/api", tags=["updates"])
 
 
-@router.get("/updates/check")
+@router.get("/updates/check", dependencies=[Depends(deps.require_auth)])
 def check_updates() -> dict:
     """Return a stub update-availability response.
 

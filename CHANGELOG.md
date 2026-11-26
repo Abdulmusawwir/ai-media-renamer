@@ -6,6 +6,37 @@
 - **Fix: web commits landed in the server's working directory.** `POST /api/commit` defaulted `target_dir` to `"."` and the UI never sent one, so staged files were moved to whatever directory the backend was started from. With no `target_dir` the route now commits each asset in place next to its original file, matching the CLI; an explicit `target_dir` still moves everything into that folder.
 - **Fix: web commits could not be rolled back.** The server route never wrote an undo batch, so "Rollback last batch" reverted an older CLI batch (or nothing). Successful server commits are now logged with per-asset original/new paths and injected metadata keys.
 - **Fix: batch commit results could be misaligned.** `execute_commit_batch()` now returns one result per input asset in input order, even when some assets fail.
+- **Fix: RTF control words and font tables leaked into AI prompts.** RTF text now has destination groups dropped and escapes decoded; legacy-encoded Markdown/TXT no longer turns an em dash into U+FFFD.
+- **Fix: the AI server could stay dead after a mid-session crash.** A 15 s watchdog restarts a llama.cpp server this backend owns; foreign servers are never touched.
+- **Fix: `/health` was mistaken for full readiness.** The sidebar now reports tools, AI server and model separately, and startup writes a single `startup summary:` log line.
+- **Changed:** route pages are lazy-loaded (main bundle ~34 kB), and `scripts/dev-all.ps1` starts the full local stack in one command. A regression test covers config/session/undo survival across an in-place upgrade.
+
+## [v2.2.1] — 2026-11-22
+
+### Fixed
+- Closing the window with "close to tray" enabled no longer shows a modal "still running in the system tray" dialog; the app hides silently and still logs the event.
+
+### Verified
+- Published release with installer, signature and `latest.json`; a real 2.2.0 → 2.2.1 in-app update installed and relaunched successfully.
+
+## [v2.2.0] — 2026-11-22
+
+### Added
+- **Desktop app:** signed Tauri v2 shell with a per-user NSIS installer, tray with close-to-tray, native file/folder pickers and drag-and-drop, and in-app signed updates. Browser and CLI modes are unchanged.
+- **AI server auto-start:** the backend warms a loopback llama.cpp server at startup when a GGUF is configured; it only stops a process it spawned.
+- **LAN auth now covers reads:** with `AMR_AUTH_ENABLED=1`, every `/api/*` route requires a bearer token, not just mutating ones.
+- **Folder picker can navigate by pasted path** and starts at the user's home folder.
+
+### Fixed
+- **Desktop commands were blocked by the Tauri ACL.** Custom commands were registered in Rust but not granted to the webview; `desktop_ready`, second-instance paths and Settings actions now work, and startup no longer waits 10 s for the fallback.
+- **Backend shutdown could kill another process's llama-server.** Shutdown now stops only a server it spawned.
+- **Missing-file errors were ambiguous.** Analysis now repairs cosmetic path noise and reports the exact resolved path.
+- **Version chip could show a stale `v2.0.0`.** `/health` is now proxied in Vite dev and the chip only renders a real version.
+- **Drag-and-drop in a browser silently produced unusable paths.** Pathless drops are rejected with a clear message; the folder browser is the supported web path.
+- **llama.cpp model resolution** no longer doubles `/v1` in the base URL or sends Ollama-style model IDs.
+
+### Changed
+- Frontend vendor code is split into separate chunks (main bundle ~63 kB); the PyInstaller spec and CI updater JSON are aligned with the NSIS bundle.
 
 ## [v2.1.0] — 2026-11-06
 

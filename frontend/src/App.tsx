@@ -14,6 +14,9 @@ import {
 import { useEnvironment, useConfig, useSaveSession } from "./hooks/api";
 import { useStore, useToast } from "./store";
 import ErrorBoundary from "./components/ErrorBoundary";
+import DesktopBridge from "./components/DesktopBridge";
+import { getHealth } from "./api/client";
+import { isDesktop } from "./desktop";
 
 const NAV_ITEMS = [
   { to: "/analysis", label: "Analysis", icon: Upload },
@@ -35,6 +38,19 @@ export default function App() {
   const saveSessionMutation = useSaveSession();
   const toast = useToast();
 
+  const [healthVersion, setHealthVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getHealth()
+      .then((h) => {
+        if (!cancelled && h?.version) setHealthVersion(String(h.version));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (envQuery.data) setEnvironment(envQuery.data);
   }, [envQuery.data, setEnvironment]);
@@ -46,6 +62,18 @@ export default function App() {
   const envOk = environment
     ? environment.ffmpeg && environment.exiftool
     : false;
+
+  // Keep "backend reachable" separate from "AI ready": /health only proves
+  // FastAPI is alive, while /api/environment also knows about llama.cpp.
+  const engineStatus = !environment
+    ? { ok: false, label: "Backend not reachable", title: "No response from /api/environment" }
+    : !envOk
+    ? { ok: false, label: "Missing ffmpeg/exiftool", title: "Required media tools are missing" }
+    : !environment.llamacpp_running
+    ? { ok: false, label: "AI server not ready", title: "llama-server is not answering on the configured port" }
+    : !environment.model_available
+    ? { ok: false, label: "No AI model", title: "No vision GGUF is configured or available" }
+    : { ok: true, label: "Engine + AI ready", title: "Tools, llama.cpp and the model are all available" };
 
   // Responsive floor: 1024px is the supported minimum width. Below that, show
   // a dismissible banner (the app is not laid out for narrow viewports).
@@ -129,7 +157,9 @@ export default function App() {
   }, [location.pathname, saveSessionMutation, toast]);
 
   return (
-    <div className="flex min-h-screen bg-bg text-text">
+    <>
+      <DesktopBridge />
+      <div className="flex min-h-screen bg-bg text-text">
       <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-bg-elev p-3">
         <div className="mb-4 flex items-center gap-2 px-2 py-1">
           <span className="rounded-md bg-accent px-2 py-1 text-xs font-bold text-white">
@@ -160,16 +190,10 @@ export default function App() {
         </nav>
         <div className="mt-auto flex items-center gap-2 px-2 pt-3 text-[11px] text-text-dim">
           <span
-            className={`h-2 w-2 rounded-full ${
-              environment ? (envOk ? "bg-ok" : "bg-warn") : "bg-warn"
-            }`}
-            title="ffmpeg / exiftool availability"
+            className={`h-2 w-2 rounded-full ${engineStatus.ok ? "bg-ok" : "bg-warn"}`}
+            title={engineStatus.title}
           />
-          {environment
-            ? envOk
-              ? "Engine tools ready"
-              : "Missing ffmpeg/exiftool"
-            : "Backend not reachable"}
+          {engineStatus.label}
         </div>
       </aside>
 
@@ -190,12 +214,12 @@ export default function App() {
         )}
         <header className="flex h-14 items-center justify-between border-b border-border bg-bg-elev px-5">
           <h1 className="text-[15px] font-semibold">AI Media Renamer</h1>
-          <div className="flex items-center gap-2 text-xs text-text-dim">
-            <Cpu size={14} />
-            {config && config.version
-              ? `v${String(config.version)}`
-              : "v2.0.0"}
-          </div>
+          {Boolean(healthVersion || (config && config.version)) && (
+            <div className="flex items-center gap-2 text-xs text-text-dim">
+              <Cpu size={14} />
+              v{healthVersion ?? String(config?.version)}
+            </div>
+          )}
         </header>
         <main className="flex-1 overflow-auto p-5">
           <motion.div
@@ -214,5 +238,6 @@ export default function App() {
         </main>
       </div>
     </div>
+    </>
   );
 }

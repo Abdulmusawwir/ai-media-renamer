@@ -30,7 +30,9 @@ def _record_state(name: str, **fields: Any) -> None:
         _DOWNLOAD_STATE[name] = state
 
 
-@router.get("/models", response_model=ModelsResponse)
+@router.get(
+    "/models", response_model=ModelsResponse, dependencies=[Depends(deps.require_auth)]
+)
 def get_models() -> dict:
     """Return registered providers, the active provider, and available models."""
     providers = engine.list_providers()
@@ -59,21 +61,34 @@ def get_models() -> dict:
     }
 
 
+def _make_progress_callback(name: str):
+    """Return an ``on_progress`` callback bound to ``name`` via a closure.
+
+    Binding the model name per download removes the old shared
+    ``_current_download_name`` global, which was racy when two downloads ran.
+    """
+
+    def _on_progress(downloaded: int, total: int) -> None:
+        _record_state(name, downloaded=downloaded, total=total)
+
+    return _on_progress
+
+
 def _run_download(name: str) -> None:
     """Background worker: download ``name`` and record its progress/state."""
     try:
-        engine.download_llamacpp_model(name, on_progress=_on_progress)
+        engine.download_llamacpp_model(name, on_progress=_make_progress_callback(name))
         _record_state(name, state="done", error=None)
     except Exception as exc:  # surface the failure to the status endpoint
         _record_state(name, state="error", error=str(exc))
 
 
-def _on_progress(downloaded: int, total: int) -> None:
-    _record_state(name=_current_download_name, downloaded=downloaded, total=total)
-
-
-# ``_on_progress`` needs the in-flight model name; stash it on the worker thread.
-_current_download_name = ""
+def models_active_downloads() -> bool:
+    """Return True when any model download is currently in the ``downloading`` state."""
+    with _STATE_LOCK:
+        return any(
+            state.get("state") == "downloading" for state in _DOWNLOAD_STATE.values()
+        )
 
 
 @router.post("/models/download", dependencies=[Depends(deps.require_auth)])
@@ -93,8 +108,6 @@ def download_model(req: ModelsDownloadRequest) -> dict:
     _record_state(model_name, state="downloading", downloaded=0, total=None, error=None)
 
     def _worker() -> None:
-        global _current_download_name
-        _current_download_name = model_name
         _run_download(model_name)
 
     thread = threading.Thread(target=_worker, name=f"model-dl-{model_name}", daemon=True)
@@ -102,7 +115,9 @@ def download_model(req: ModelsDownloadRequest) -> dict:
     return {"accepted": True, "model": model_name}
 
 
-@router.get("/models/{name}/download-status")
+@router.get(
+    "/models/{name}/download-status", dependencies=[Depends(deps.require_auth)]
+)
 def download_status(name: str) -> dict:
     """Return the download progress/state for ``name``.
 

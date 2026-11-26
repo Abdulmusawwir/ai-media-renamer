@@ -7,6 +7,11 @@ dist/
 task.md
 .streamlit/secrets.toml
 
+# Node / Tauri
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+
 # Python caches
 .pytest_cache/
 .ruff_cache/

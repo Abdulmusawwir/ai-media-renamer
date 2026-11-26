@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Media Renamer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b1020;
+        --panel: #141b2d;
+        --accent: #6d8dff;
+        --text: #eef2ff;
+        --muted: #9aa7c7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at 20% 15%, rgba(109, 141, 255, 0.28), transparent 45%),
+          radial-gradient(circle at 85% 90%, rgba(109, 141, 255, 0.16), transparent 40%),
+          var(--bg);
+        color: var(--text);
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        user-select: none;
+      }
+
+      main {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 28px 34px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px;
+        background: rgba(20, 27, 45, 0.82);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+      }
+
+      .mark {
+        display: grid;
+        place-items: center;
+        width: 56px;
+        height: 56px;
+        border-radius: 16px;
+        background: linear-gradient(145deg, #7d9aff, #4d6cf0);
+        color: #fff;
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+      }
+
+      h1 {
+        margin: 4px 0 0;
+        font-size: 19px;
+        font-weight: 600;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .spinner {
+        margin-top: 10px;
+        width: 26px;
+        height: 26px;
+        border: 3px solid rgba(255, 255, 255, 0.12);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .spinner {
+          animation-duration: 2.4s;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark">AI</div>
+      <h1>AI Media Renamer</h1>
+      <p>Setting up AI Media Renamer...</p>
+      <div class="spinner" aria-hidden="true"></div>
+    </main>
+  </body>
+</html>

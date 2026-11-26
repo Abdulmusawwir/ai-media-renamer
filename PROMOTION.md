@@ -15,7 +15,7 @@ My downloads folder was a graveyard. `IMG_5821.jpg`. `final_v3_really.mp4`. `voi
 So I made a free desktop app that does it for me. You drop in a folder of videos, photos, docs, and audio. It runs a local AI model (llama.cpp, so nothing is uploaded anywhere), looks at each file, and renames it something you'd actually search for. `IMG_5821.jpg` becomes `quran_carving_ornate_detail.jpg`. It also writes real metadata tags into the file itself, so Resolve and Premiere can search it.
 
 - Runs fully offline
-- Free, open source, Windows EXE — no install, no account
+- Free, open source, Windows desktop app (per-user installer, no admin) — no account
 - You review every change in a table before anything is touched; one-click undo
 - Also catches duplicate photos/videos/audio before they clutter your drive
 
@@ -93,7 +93,7 @@ What it does:
 - Writes searchable metadata into the file itself
 - Runs locally — no cloud, no uploads, no subscription
 
-Free, open source, Windows EXE. Your downloads folder will thank you.
+Free, open source, Windows desktop app. Your downloads folder will thank you.
 
 https://github.com/Abdulmusawwir/ai-media-renamer
 

@@ -29,7 +29,7 @@ def _safe_session_path(session_id: str) -> Path:
     return candidate
 
 
-@router.get("/sessions")
+@router.get("/sessions", dependencies=[Depends(deps.require_auth)])
 def list_sessions() -> dict:
     """List saved session files (newest first)."""
     sessions = engine.list_sessions()
@@ -50,7 +50,7 @@ def create_session(req: SessionCreateRequest) -> dict:
     return {"saved": True, "path": str(path)}
 
 
-@router.get("/sessions/{session_id}")
+@router.get("/sessions/{session_id}", dependencies=[Depends(deps.require_auth)])
 def load_session_by_id(session_id: str) -> dict:
     """Load a session by its filename (e.g. ``session_2026-01-01_120000.json``)."""
     candidate = _safe_session_path(session_id)

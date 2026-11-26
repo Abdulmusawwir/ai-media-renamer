@@ -12,7 +12,7 @@ import threading
 from fastapi import HTTPException, Request
 
 import engine
-from server import auth
+from server import auth, desktop
 
 # In-memory staging set for the active session. Holds the same dict schema the
 # engine/CLI use, with ``original_path`` coerced to ``str`` for JSON safety.
@@ -22,6 +22,39 @@ ACTIVE_STAGING: list[dict] = []
 # a one-job-at-a-time local tool; a future revision can key this per connection.
 _analysis_cancel: threading.Event | None = None
 _analysis_lock = threading.Lock()
+
+# Authoritative busy flags surfaced by ``GET /api/desktop/status``. These are
+# the single source of truth for the desktop shell and SPA; never infer busy
+# state from client-side component state.
+_analysis_running = False
+_commit_running = False
+_running_lock = threading.Lock()
+
+
+def set_analysis_running(value: bool) -> None:
+    """Update the authoritative analysis busy flag."""
+    global _analysis_running
+    with _running_lock:
+        _analysis_running = bool(value)
+
+
+def analysis_running() -> bool:
+    """Return True while an analysis run is in progress."""
+    with _running_lock:
+        return _analysis_running
+
+
+def set_commit_running(value: bool) -> None:
+    """Update the authoritative commit busy flag."""
+    global _commit_running
+    with _running_lock:
+        _commit_running = bool(value)
+
+
+def commit_running() -> bool:
+    """Return True while a commit is in progress."""
+    with _running_lock:
+        return _commit_running
 
 
 def get_cancel_event() -> threading.Event:
@@ -92,7 +125,9 @@ async def require_auth(request: Request) -> None:
     missing or invalid tokens. When auth is disabled it is a no-op, preserving
     the unauthenticated local dev flow.
     """
-    if not auth.AUTH_ENABLED:
+    # Desktop mode owns auth through its bearer-token middleware; the optional
+    # LAN JWT path must never stack a second check on top of it.
+    if desktop.desktop_mode() or not auth.AUTH_ENABLED:
         return
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):

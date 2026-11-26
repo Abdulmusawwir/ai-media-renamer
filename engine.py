@@ -23,7 +23,7 @@ import openai
 import requests
 from pydantic import BaseModel, ValidationError
 
-VERSION = "2.1.0"
+VERSION = "2.2.1"
 
 
 class AssetAnalysisResponse(BaseModel):
@@ -63,14 +63,109 @@ def _resolve_workers(cfg_value: int | float | None) -> int:
     return os.cpu_count() or 4
 
 # -----------------------------------------------------------------------------
+# 0b. PATHS, DATA ROOT & CONFIG SEEDING
+# -----------------------------------------------------------------------------
+
+def is_frozen() -> bool:
+    """Return True when running from a PyInstaller-frozen executable."""
+    return bool(getattr(sys, "frozen", False))
+
+
+BASE_DIR = Path(sys._MEIPASS) if is_frozen() else Path(__file__).parent
+BUNDLE_DIR = Path(sys._MEIPASS) if is_frozen() else BASE_DIR
+
+
+def _has_data_dir_override() -> bool:
+    """Return True when ``AMR_DATA_DIR`` explicitly redirects the data root."""
+    return bool(os.environ.get("AMR_DATA_DIR"))
+
+
+def resolve_data_dir() -> Path:
+    """Return the writable application data root for the current mode."""
+    override = os.environ.get("AMR_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+    roaming = os.environ.get("APPDATA")
+    if roaming:
+        return Path(roaming) / "ai-media-renamer"
+    return Path.home() / "AppData" / "Roaming" / "ai-media-renamer"
+
+
+APP_DATA_DIR = resolve_data_dir()
+USER_DATA_DIR = APP_DATA_DIR
+
+
+def resolve_config_path() -> Path:
+    """Return the active config path: data root when frozen/overridden, else repo."""
+    if is_frozen() or _has_data_dir_override():
+        return APP_DATA_DIR / "config.json"
+    return BASE_DIR / "config.json"
+
+
+CONFIG_PATH = resolve_config_path()
+
+
+def _resolve_log_dir(cfg: dict[str, Any]) -> Path:
+    """Resolve ``logging.directory`` against the mode's writable root."""
+    raw = Path(cfg.get('logging', {}).get('directory', 'logs'))
+    if raw.is_absolute():
+        return raw
+    if is_frozen() or _has_data_dir_override():
+        return APP_DATA_DIR / raw
+    return BASE_DIR / raw
+
+
+def _copy_json_if_valid(src: Path, dst: Path) -> bool:
+    """Copy ``src`` to ``dst`` only when ``src`` exists, differs, and parses as JSON."""
+    try:
+        if src == dst or not src.exists():
+            return False
+        json.loads(src.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    try:
+        shutil.copy2(src, dst)
+    except OSError:
+        return False
+    return True
+
+
+def _seed_config_if_missing() -> None:
+    """Create ``CONFIG_PATH`` on first frozen/override run.
+
+    A legacy portable config next to the executable or ``engine.py`` wins so
+    existing users keep their settings; otherwise the bundled default is used.
+    """
+    if not (is_frozen() or _has_data_dir_override()):
+        return
+    if CONFIG_PATH.exists():
+        return
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    legacy_candidates = [
+        Path(sys.executable).parent / "config.json",
+        BASE_DIR / "config.json",
+    ]
+    for legacy in legacy_candidates:
+        if _copy_json_if_valid(legacy, CONFIG_PATH):
+            return
+    _copy_json_if_valid(BUNDLE_DIR / "config.default.json", CONFIG_PATH)
+
+
+_seed_config_if_missing()
+
+# -----------------------------------------------------------------------------
 # 1. CONFIGURATION & LOGGING
 # -----------------------------------------------------------------------------
 
-def load_config(config_path: str = "config.json", quiet: bool = False) -> dict[str, Any]:
+def load_config(config_path: str | Path | None = None, quiet: bool = False) -> dict[str, Any]:
     """Load configuration from JSON file with auto-recovery from default.
 
     Args:
-        config_path: Relative path to the config file from the script directory.
+        config_path: Absolute path, path relative to ``BASE_DIR``, or None to
+            use the mode-resolved ``CONFIG_PATH``.
         quiet: When True, suppress recovery/unrecoverable prints (used at import
             time so importing engine never prints to stdout).
 
@@ -82,9 +177,16 @@ def load_config(config_path: str = "config.json", quiet: bool = False) -> dict[s
             ``config.default.json`` can be loaded. Replaces the old
             ``sys.exit`` so callers can defer handling.
     """
-    script_dir = Path(__file__).parent
-    full_path = script_dir / config_path
+    if config_path is None:
+        full_path = CONFIG_PATH
+    else:
+        candidate = Path(config_path)
+        full_path = candidate if candidate.is_absolute() else BASE_DIR / candidate
     default_path = full_path.parent / "config.default.json"
+    if config_path is None and not default_path.exists():
+        bundled_default = BUNDLE_DIR / "config.default.json"
+        if bundled_default.exists():
+            default_path = bundled_default
     try:
         with open(full_path, encoding='utf-8') as f:
             cfg = json.load(f)
@@ -121,14 +223,12 @@ def load_config(config_path: str = "config.json", quiet: bool = False) -> dict[s
 
 
 def restore_default_config() -> bool:
-    """Overwrite config.json with config.default.json. Returns True on success."""
-    import shutil
-    script_dir = Path(__file__).parent
-    default_path = script_dir / "config.default.json"
-    target_path = script_dir / "config.json"
+    """Overwrite the active config with the bundled default. Returns True on success."""
+    default_path = BUNDLE_DIR / "config.default.json"
     if not default_path.exists():
         return False
-    shutil.copy2(default_path, target_path)
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(default_path, CONFIG_PATH)
     return True
 
 
@@ -283,9 +383,9 @@ NAMED_TEMPLATES = config.get('naming_templates', {
 })
 DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}")
 
-LOG_DIR = Path(config['logging']['directory'])
+LOG_DIR = _resolve_log_dir(config)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 MAX_UPLOAD_SIZE = int(config['logging'].get('max_upload_size', 10737418240))
-CONFIG_PATH = Path(__file__).parent / "config.json"
 PROVIDER_REGISTRY = {}
 
 
@@ -297,6 +397,7 @@ def save_config() -> None:
     config that breaks the next import.
     """
     global config
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = CONFIG_PATH.with_suffix(".json.tmp")
     try:
         with open(tmp_path, 'w', encoding='utf-8') as f:
@@ -324,6 +425,7 @@ def reload_config() -> None:
     global DEFAULT_SORT_FOLDERS
     global NAMED_TEMPLATES, DEFAULT_TEMPLATE_STRING, PROMPT_PROFILES, CURRENT_PROVIDER
     global IMAGE_PREVIEW_MAX_EDGE, VIDEO_GRID_SCALE, DOCUMENT_EXTENSIONS, CONFIG_LOAD_ERROR
+    global LOG_DIR
     try:
         config = load_config(quiet=True)
         CONFIG_LOAD_ERROR = None
@@ -355,13 +457,14 @@ def reload_config() -> None:
     })
     DEFAULT_TEMPLATE_STRING = NAMED_TEMPLATES.get("default", "{topic}_{description}")
     PROMPT_PROFILES = get_profile_labels()
+    LOG_DIR = _resolve_log_dir(config)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 CURRENT_PROVIDER = config.get('model', {}).get('last_provider', 'llamacpp')
 
 # -----------------------------------------------------------------------------
 # 1b. SETUP / ONBOARDING (use-case → one-time dependency matrix)
 # -----------------------------------------------------------------------------
 
-USER_DATA_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "ai-media-renamer"
 
 # Use-case keys map to the external tools + model kinds they require. Kept in
 # engine.py so both bootstrap.py (setup wizard) and the server (env checks) share
@@ -1277,8 +1380,92 @@ def extract_text_pptx(path: Path) -> str | None:
         return None
 
 
+_RTF_SKIP_GROUPS = frozenset({
+    "fonttbl", "colortbl", "stylesheet", "info", "pict", "object",
+    "header", "footer", "generator", "listtable", "listoverridetable",
+    "rsidtbl", "xmlnstbl", "themedata", "datastore",
+})
+
+
+def _strip_rtf_control_words(text: str) -> str:
+    """Convert a minimal RTF document to readable plain text.
+
+    Handles the pieces real exports actually use: destination groups (font,
+    colour and style tables) are dropped, ``\\par``/``\\line`` become newlines,
+    ``\\tab`` becomes a tab, ``\\'hh`` hex bytes are decoded as Windows-1252 and
+    ``\\uN?`` Unicode escapes become characters. Unrecognised control words are
+    skipped rather than leaking into AI prompts.
+    """
+    out: list[str] = []
+    stack: list[bool] = []
+    skipping = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "{":
+            stack.append(skipping)
+            i += 1
+            continue
+        if ch == "}":
+            skipping = stack.pop() if stack else False
+            i += 1
+            continue
+        if ch != "\\":
+            if not skipping:
+                out.append(ch)
+            i += 1
+            continue
+
+        if i + 1 < n and text[i + 1] in "\\{}":
+            if not skipping:
+                out.append(text[i + 1])
+            i += 2
+            continue
+        if i + 3 < n and text[i + 1] == "'":
+            pair = text[i + 2:i + 4]
+            if re.fullmatch(r"[0-9a-fA-F]{2}", pair):
+                if not skipping:
+                    out.append(bytes([int(pair, 16)]).decode("cp1252", errors="replace"))
+                i += 4
+                continue
+        match = re.match(r"\\u(-?\d+)\??", text[i:])
+        if match:
+            if not skipping:
+                out.append(chr(int(match.group(1)) & 0xFFFF))
+            i += match.end()
+            continue
+        match = re.match(r"\\([a-zA-Z]+)(-?\d+)? ?", text[i:])
+        if match:
+            word = match.group(1)
+            if word in _RTF_SKIP_GROUPS:
+                skipping = True
+            elif not skipping:
+                out.append("\n" if word in {"par", "line"} else "\t" if word == "tab" else "")
+            i += match.end()
+            continue
+        i += 1
+    return "".join(out).replace("\r\n", "\n")
+
+
+def _decode_text_bytes(raw: bytes) -> str:
+    """Decode a plain-text file, preferring UTF-8 but accepting legacy bytes."""
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        try:
+            return raw.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        pass
+    # cp1252 keeps typographic punctuation (e.g. 0x97 = em dash) that a strict
+    # UTF-8 read would replace with U+FFFD.
+    return raw.decode("cp1252", errors="replace")
+
+
 def extract_text_plain(path: Path) -> str | None:
-    """Extract text from a plain text file (TXT, MD, RTF).
+    """Extract text from TXT, MD and RTF files.
 
     Args:
         path: Path to the text file.
@@ -1287,8 +1474,10 @@ def extract_text_plain(path: Path) -> str | None:
         File content as text, or None on failure.
     """
     try:
-        content = path.read_text(encoding='utf-8', errors='replace')
-        return content.strip() or None
+        text = _decode_text_bytes(path.read_bytes()).replace("\r\n", "\n").replace("\r", "\n")
+        if path.suffix.lower() == ".rtf":
+            text = _strip_rtf_control_words(text)
+        return text.strip() or None
     except Exception:
         return None
 
@@ -1793,7 +1982,16 @@ class OpenAIProvider(AIProvider):
             return result
         try:
             client = self._make_client()
-            model_name = self.text_model or self._model or "gpt-4o"
+            # Resolve the text model against what the server actually has loaded:
+            # llama-server identifies models by GGUF path, not Ollama names, so an
+            # Ollama-style name (e.g. "qwen2.5:3b") must fall back to the loaded
+            # GGUF. Only validate when the server actually answered (non-empty
+            # listing); otherwise trust the configured name (offline / mocked).
+            text_model = self.text_model or ""
+            available = self.available_models()
+            if text_model and available and text_model not in available:
+                text_model = ""
+            model_name = text_model or self._model or "gpt-4o"
             response = self._request_completion(
                 client,
                 model_name,
@@ -1837,10 +2035,16 @@ def _llamacpp_base_url() -> str:
     """
     env_url = os.environ.get("LLAMACPP_BASE_URL", "").strip()
     if env_url:
-        return env_url.rstrip("/") + "/v1"
+        url = env_url.rstrip("/")
+        if not url.endswith("/v1"):
+            url = url + "/v1"
+        return url
     cfg_url = config.get("model", {}).get("llamacpp", {}).get("base_url", "")
     if cfg_url:
-        return cfg_url.rstrip("/") + "/v1"
+        url = cfg_url.rstrip("/")
+        if not url.endswith("/v1"):
+            url = url + "/v1"
+        return url
     return LLAMACPP_DEFAULT_URL + "/v1"
 
 
@@ -1941,7 +2145,18 @@ class LlamaCppProvider(OpenAIProvider):
         """Point an OpenAI-compatible client at the local llama-server."""
         super().__init__(base_url=_llamacpp_base_url())
         self._api_key = "local"
-        self._model = MODEL_NAME
+        # llama-server identifies the loaded model by its GGUF path (not the
+        # Ollama-style name stored in config['model']['name']), so resolve the
+        # model id from the configured gguf_path or the server's own listing.
+        gguf = config.get("model", {}).get("llamacpp", {}).get("gguf_path", "")
+        if gguf:
+            self._model = gguf
+        else:
+            try:
+                models = self.available_models()
+                self._model = models[0] if models else ""
+            except Exception:
+                self._model = ""
 
     def available_models(self) -> list[str]:
         """List models advertised by the running llama-server.
@@ -2452,7 +2667,7 @@ def _exiftool_output_has_error(output: str) -> bool:
 # 5b. SESSION PERSISTENCE
 # -----------------------------------------------------------------------------
 
-SESSION_DIR = Path(os.environ.get('APPDATA', Path.home())) / "ai-media-renamer" / "sessions"
+SESSION_DIR = USER_DATA_DIR / "sessions"
 
 
 def save_session(
@@ -2582,7 +2797,7 @@ def load_session(session_path: str | Path) -> dict[str, Any]:
 # 5c. UNDO / ROLLBACK
 # -----------------------------------------------------------------------------
 
-UNDO_DIR = Path(os.environ.get("APPDATA", Path.home())) / "ai-media-renamer"
+UNDO_DIR = USER_DATA_DIR
 UNDO_LOG_FILE = UNDO_DIR / "undo_log.jsonl"
 
 
@@ -2942,21 +3157,35 @@ def _chromaprint_similarity(fp_a: str, fp_b: str) -> float:
 
 
 def _resolve_binary_path(name: str) -> str | None:
-    """Resolve the filesystem path of a binary, checking PyInstaller bundle first.
+    """Resolve the filesystem path of a binary.
+
+    Search order:
+      1. ``USER_DATA_DIR/bin/<name>`` then ``<name>.exe``
+      2. PyInstaller ``_MEIPASS/bin/<name>`` then ``<name>.exe``
+      3. ``PATH`` (``shutil.which``)
 
     Args:
-        name: Binary name (e.g. 'ffmpeg', 'exiftool').
+        name: Binary name (e.g. 'ffmpeg', 'exiftool', 'llama-server.exe').
 
     Returns:
         Absolute path to the binary, or None if not found.
     """
-    meipass = getattr(sys, '_MEIPASS', None)
+    names = [name]
+    if not name.lower().endswith(".exe"):
+        names.append(name + ".exe")
+
+    search_dirs = [Path(USER_DATA_DIR) / "bin"]
+    meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        candidate = os.path.join(meipass, 'bin', name)
-        if os.path.isfile(candidate):
-            return candidate
-    resolved = shutil.which(name)
-    return resolved
+        search_dirs.append(Path(meipass) / "bin")
+
+    for directory in search_dirs:
+        for candidate_name in names:
+            candidate = directory / candidate_name
+            if candidate.is_file():
+                return str(candidate)
+
+    return shutil.which(name)
 
 
 def _llamacpp_server_running() -> bool:
@@ -3162,6 +3391,8 @@ def download_file(url: str, dest: Path,
 
 # GGUF files are stored under the user data dir so they survive app re-installs.
 LLAMACPP_MODELS_DIR = USER_DATA_DIR / "models"
+# Older builds downloaded models into the per-user cache; migrate them once.
+LEGACY_MODELS_DIR = Path.home() / ".cache" / "ai-media-renamer" / "models"
 LLAMACPP_SERVER_EXE = "llama-server.exe"
 
 LLAMACPP_GGUF_FILENAMES: dict[str, tuple[str, str]] = {
@@ -3184,20 +3415,189 @@ def _llamacpp_gguf_paths(model_name: str) -> tuple[Path, Path]:
     gguf_file, mmproj_file = LLAMACPP_GGUF_FILENAMES.get(
         model_name, (model_name.replace(":", "-") + ".gguf", "")
     )
-    mmproj = LLAMACPP_MODELS_DIR / mmproj_file if mmproj_file else Path("")
-    return LLAMACPP_MODELS_DIR / gguf_file, mmproj
+    model_dir = _llamacpp_model_dir()
+    mmproj = model_dir / mmproj_file if mmproj_file else Path("")
+    return model_dir / gguf_file, mmproj
 
 
 def _llamacpp_model_dir() -> Path:
     """Return the directory GGUF models are downloaded into.
 
     Reads ``model.llamacpp.model_dir`` from config when present, otherwise
-    defaults to ``~/.cache/ai-media-renamer/models``.
+    defaults to ``LLAMACPP_MODELS_DIR`` (``USER_DATA_DIR/models``).
     """
     configured = config.get("model", {}).get("llamacpp", {}).get("model_dir")
     if configured:
         return Path(configured).expanduser()
-    return Path(os.path.expanduser("~/.cache/ai-media-renamer/models"))
+    return LLAMACPP_MODELS_DIR
+
+
+def _migration_enabled() -> bool:
+    """Return True when model migration should run (frozen or ``AMR_DATA_DIR``)."""
+    return is_frozen() or _has_data_dir_override()
+
+
+def _move_model_file(src: Path, dst: Path) -> Path:
+    """Move ``src`` to ``dst`` atomically without overwriting ``dst``.
+
+    Same-volume moves use :func:`os.replace`. Cross-volume moves (any
+    ``OSError`` from ``os.replace``) copy to ``<dst>.part``, flush and fsync
+    it, atomically replace the destination, then delete the source. On
+    failure the source is left intact and the partial file is removed.
+    """
+    if dst.exists():
+        raise FileExistsError(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.replace(src, dst)
+        return dst
+    except OSError:
+        pass
+
+    part = dst.with_name(dst.name + ".part")
+    try:
+        with open(src, "rb") as fsrc, open(part, "wb") as fdst:
+            shutil.copyfileobj(fsrc, fdst)
+            fdst.flush()
+            os.fsync(fdst.fileno())
+        os.replace(part, dst)
+    except Exception:
+        try:
+            part.unlink()
+        except OSError:
+            pass
+        raise
+    try:
+        src.unlink()
+    except OSError:
+        logging.getLogger("video_renamer").warning(
+            "model migration: copied %s but could not delete the source", src
+        )
+    return dst
+
+
+def _is_model_file(name: str) -> bool:
+    """Return True for GGUF files, mmproj files, and ``mmproj*`` names."""
+    lowered = name.lower()
+    return lowered.endswith((".gguf", ".mmproj")) or "mmproj" in lowered
+
+
+def migrate_llamacpp_models() -> list[Path]:
+    """Move legacy GGUF/mmproj files into the active model directory.
+
+    No-op unless running frozen or with ``AMR_DATA_DIR`` set. Existing
+    destinations are never overwritten. Returns the destination paths moved.
+    """
+    if not _migration_enabled():
+        return []
+    source = LEGACY_MODELS_DIR
+    dest = _llamacpp_model_dir()
+    if not source.is_dir():
+        return []
+    try:
+        if source.resolve() == dest.resolve():
+            return []
+    except OSError:
+        if source == dest:
+            return []
+
+    log = logging.getLogger("video_renamer")
+    moved: list[Path] = []
+    for src in sorted(source.iterdir()):
+        if not src.is_file() or not _is_model_file(src.name):
+            continue
+        dst = dest / src.name
+        if dst.exists():
+            log.info("model migration: skipped %s (destination exists)", dst)
+            continue
+        try:
+            moved.append(_move_model_file(src, dst))
+        except OSError as exc:
+            log.warning("model migration: failed to move %s: %s", src, exc)
+            continue
+        log.info("model migration: moved %s -> %s", src, dst)
+    return moved
+
+
+def migrate_llamacpp_paths() -> bool:
+    """Point config at a catalog GGUF found in ``LLAMACPP_MODELS_DIR``.
+
+    Only repairs an onboarded install whose ``gguf_path`` is empty. Returns
+    True when config was updated and saved.
+    """
+    if not _migration_enabled():
+        return False
+    if not load_setup_profile().get("onboarded"):
+        return False
+    llamacpp = config.get("model", {}).get("llamacpp", {})
+    if llamacpp.get("gguf_path"):
+        return False
+    for gguf_name, mmproj_name in LLAMACPP_GGUF_FILENAMES.values():
+        gguf = LLAMACPP_MODELS_DIR / gguf_name
+        if not gguf.exists():
+            continue
+        mmproj = LLAMACPP_MODELS_DIR / mmproj_name if mmproj_name else None
+        target = config.setdefault("model", {}).setdefault("llamacpp", {})
+        target["gguf_path"] = str(gguf)
+        target["mmproj_path"] = str(mmproj) if mmproj and mmproj.exists() else ""
+        save_config()
+        return True
+    return False
+
+
+_MODEL_MIGRATION_LOCK = threading.Lock()
+_MODEL_MIGRATION_THREAD: threading.Thread | None = None
+_MODEL_MIGRATION_RUNNING = False
+_MODEL_MIGRATION_STARTED = False
+
+
+def is_model_migration_running() -> bool:
+    """Return True while the background model migration thread is active."""
+    return _MODEL_MIGRATION_RUNNING
+
+
+def wait_for_model_migration(timeout: float = 300) -> bool:
+    """Wait for the background migration to finish.
+
+    Returns False when it is still running after ``timeout`` seconds.
+    """
+    deadline = time.monotonic() + max(0.0, timeout)
+    while is_model_migration_running():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def _run_model_migration() -> None:
+    """Run both migration passes, always clearing the running flag."""
+    global _MODEL_MIGRATION_RUNNING
+    try:
+        migrate_llamacpp_models()
+        migrate_llamacpp_paths()
+    except Exception:
+        logging.getLogger("video_renamer").exception("model migration failed")
+    finally:
+        _MODEL_MIGRATION_RUNNING = False
+
+
+def start_model_migration() -> None:
+    """Start the one-time legacy model migration in a daemon thread."""
+    global _MODEL_MIGRATION_RUNNING, _MODEL_MIGRATION_THREAD, _MODEL_MIGRATION_STARTED
+    if not _migration_enabled():
+        return
+    with _MODEL_MIGRATION_LOCK:
+        if _MODEL_MIGRATION_STARTED:
+            return
+        _MODEL_MIGRATION_STARTED = True
+        _MODEL_MIGRATION_RUNNING = True
+        thread = threading.Thread(
+            target=_run_model_migration,
+            name="amr-model-migration",
+            daemon=True,
+        )
+        _MODEL_MIGRATION_THREAD = thread
+        thread.start()
 
 
 def _maybe_mirror_url(url: str) -> str:
@@ -3232,6 +3632,8 @@ def download_llamacpp_model(name: str,
     Raises:
         ValueError: If ``name`` is not present in the catalog.
     """
+    if not wait_for_model_migration():
+        raise RuntimeError("models are still being migrated")
     entry = next((m for m in LLAMACPP_GGUF_CATALOG if m["name"] == name), None)
     if entry is None:
         available = ", ".join(m["name"] for m in LLAMACPP_GGUF_CATALOG)
@@ -3297,75 +3699,182 @@ def _llamacpp_host_port() -> tuple[str, int]:
     return host, port
 
 
+_LLAMACPP_LOCK = threading.Lock()
+_llamacpp_proc: subprocess.Popen | None = None
+_llamacpp_proc_healthy = False
+_llamacpp_proc_pending = False
+
+
+def _wait_for_llamacpp_server(timeout: int) -> bool:
+    """Poll the llama.cpp API until it answers or ``timeout`` seconds pass."""
+    deadline = time.time() + max(0, timeout)
+    while time.time() < deadline:
+        if _llamacpp_server_running():
+            return True
+        time.sleep(1)
+    return False
+
+
+def _stop_owned_process_locked() -> bool:
+    """Terminate the owned server. Caller must hold ``_LLAMACPP_LOCK``.
+
+    Ownership is cleared only after the process is gone. If termination raises
+    (a Windows handle race or access error), the handle is restored so a later
+    :func:`stop_llamacpp_server` can retry instead of leaking the process.
+
+    Returns:
+        True when an owned process was stopped, False otherwise.
+    """
+    global _llamacpp_proc, _llamacpp_proc_healthy, _llamacpp_proc_pending
+    proc = _llamacpp_proc
+    if proc is None:
+        return False
+    if proc.poll() is not None:
+        _llamacpp_proc = None
+        _llamacpp_proc_healthy = False
+        _llamacpp_proc_pending = False
+        return False
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+            proc.wait(timeout=5)
+    except Exception:
+        _llamacpp_proc = proc
+        return False
+    _llamacpp_proc = None
+    _llamacpp_proc_healthy = False
+    _llamacpp_proc_pending = False
+    return True
+
+
 def ensure_llamacpp_server(timeout: int = 40) -> bool:
     """Start the configured llama.cpp server if it is not already running.
 
     Uses the model paths recorded by ``configure_llamacpp_install``. Returns
     True when a server answers on the API port (either already running or
-    freshly started).
+    freshly started). A single lock guards the spawn so startup and the first
+    analysis cannot launch two servers; the spawned ``Popen`` is retained in
+    ``_llamacpp_proc`` so :func:`stop_llamacpp_server` only stops a process this
+    app started.
+
+    A spawn whose startup wait fails is stopped and forgotten, so a live but
+    unresponsive owned server cannot suppress respawn on later calls.
 
     Args:
         timeout: Maximum seconds to wait for the server to come up.
     """
-    if _llamacpp_server_running():
-        return True
-    exe = _resolve_binary_path(LLAMACPP_SERVER_EXE)
-    if not exe:
-        bundled = USER_DATA_DIR / "bin" / LLAMACPP_SERVER_EXE
-        if bundled.exists():
-            exe = str(bundled)
-    if not exe:
-        return False
-    llamacpp = config.get("model", {}).get("llamacpp", {})
-    gguf = llamacpp.get("gguf_path", "")
-    if not gguf or not Path(gguf).exists():
-        return False
-    host, port = _llamacpp_host_port()
-    args = [exe, "-m", gguf, "--host", host, "--port", str(port),
-            "-c", str(MODEL_NUM_CTX)]
-    alias = llamacpp.get("gguf_name", "")
-    if alias:
-        args += ["--alias", alias]
-    mmproj = llamacpp.get("mmproj_path", "")
-    if mmproj and Path(mmproj).exists():
-        args += ["--mmproj", mmproj]
-    try:
-        log_dir = Path(LOG_DIR)
-        try:
-            log_dir.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
-        server_log = log_dir / "llamacpp_server.log"
-        try:
-            log_fh = open(server_log, "w", encoding="utf-8", errors="replace")
-        except OSError:
-            log_fh = None
-        # CREATE_NO_WINDOW alone (never DETACHED_PROCESS): for a console
-        # subsystem binary spawned from a windowed/console-less parent,
-        # CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS,
-        # so Windows may refuse to open the exe ("Error when opening the
-        # exe"). Redirect stdin too — a console child with no console and an
-        # inherited invalid stdin handle fails with [Error 6] handle
-        # invalid. stderr goes to a log file so a real server crash is
-        # diagnosable instead of a silent dead-end.
-        subprocess.Popen(
-            args,
-            creationflags=_NO_WINDOW,
-            stdin=subprocess.DEVNULL,
-            stdout=log_fh if log_fh else subprocess.DEVNULL,
-            stderr=log_fh if log_fh else subprocess.DEVNULL,
-        )
-        if log_fh is not None:
-            log_fh.close()
-        import time as _time
-        deadline = _time.time() + timeout
-        while _time.time() < deadline:
-            if _llamacpp_server_running():
-                return True
-            _time.sleep(1)
-    except Exception:
-        return False
-    return False
+    global _llamacpp_proc, _llamacpp_proc_healthy, _llamacpp_proc_pending
+    spawned_proc = None
+    with _LLAMACPP_LOCK:
+        # Drop handles left behind by servers that already exited (crash or
+        # manual stop) so a fresh spawn is allowed instead of being blocked.
+        if _llamacpp_proc is not None and _llamacpp_proc.poll() is not None:
+            _llamacpp_proc = None
+            _llamacpp_proc_healthy = False
+            _llamacpp_proc_pending = False
+        if not wait_for_model_migration():
+            logging.getLogger("video_renamer").warning("models are still being migrated")
+            return False
+        if _llamacpp_server_running():
+            if _llamacpp_proc is not None:
+                _llamacpp_proc_healthy = True
+                _llamacpp_proc_pending = False
+            return True
+        # A live process that never answered (bad model, hung load, failed
+        # bind) must not block respawn: replace it. Skip while another caller is
+        # still waiting on this same spawn.
+        if (_llamacpp_proc is not None
+                and not _llamacpp_proc_pending
+                and not _llamacpp_proc_healthy):
+            _stop_owned_process_locked()
+            if _llamacpp_proc is not None:
+                return False
+        if _llamacpp_proc is None:
+            exe = _resolve_binary_path(LLAMACPP_SERVER_EXE)
+            if not exe:
+                bundled = USER_DATA_DIR / "bin" / LLAMACPP_SERVER_EXE
+                if bundled.exists():
+                    exe = str(bundled)
+            if not exe:
+                return False
+            llamacpp = config.get("model", {}).get("llamacpp", {})
+            gguf = llamacpp.get("gguf_path", "")
+            if not gguf or not Path(gguf).exists():
+                return False
+            host, port = _llamacpp_host_port()
+            args = [exe, "-m", gguf, "--host", host, "--port", str(port),
+                    "-c", str(MODEL_NUM_CTX)]
+            alias = llamacpp.get("gguf_name", "")
+            if alias:
+                args += ["--alias", alias]
+            mmproj = llamacpp.get("mmproj_path", "")
+            if mmproj and Path(mmproj).exists():
+                args += ["--mmproj", mmproj]
+            log_dir = Path(LOG_DIR)
+            try:
+                log_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+            server_log = log_dir / "llamacpp_server.log"
+            try:
+                log_fh = open(server_log, "w", encoding="utf-8", errors="replace")
+            except OSError:
+                log_fh = None
+            # CREATE_NO_WINDOW alone (never DETACHED_PROCESS): for a console
+            # subsystem binary spawned from a windowed/console-less parent,
+            # CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS,
+            # so Windows may refuse to open the exe ("Error when opening the
+            # exe"). Redirect stdin too — a console child with no console and an
+            # inherited invalid stdin handle fails with [Error 6] handle
+            # invalid. stderr goes to a log file so a real server crash is
+            # diagnosable instead of a silent dead-end.
+            try:
+                spawned_proc = subprocess.Popen(
+                    args,
+                    creationflags=_NO_WINDOW,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log_fh if log_fh else subprocess.DEVNULL,
+                    stderr=log_fh if log_fh else subprocess.DEVNULL,
+                )
+            except Exception:
+                return False
+            finally:
+                # Close only after the spawn attempt; the child holds its own
+                # duplicated handles.
+                if log_fh is not None:
+                    log_fh.close()
+            _llamacpp_proc = spawned_proc
+            _llamacpp_proc_healthy = False
+            _llamacpp_proc_pending = True
+    healthy = _wait_for_llamacpp_server(timeout)
+    if spawned_proc is not None:
+        with _LLAMACPP_LOCK:
+            if _llamacpp_proc is spawned_proc:
+                if healthy:
+                    _llamacpp_proc_healthy = True
+                    _llamacpp_proc_pending = False
+                else:
+                    # Failed startup: stop the owned server so the next call can
+                    # spawn a fresh one instead of burning the timeout again.
+                    _stop_owned_process_locked()
+    return healthy
+
+
+def stop_llamacpp_server() -> bool:
+    """Stop the llama-server process this app started, if any.
+
+    Only the process retained in ``_llamacpp_proc`` is touched; a server that
+    was already running (or one started outside the app) is never terminated.
+
+    Returns:
+        True when an owned process was stopped, False when there was nothing
+        to stop (or the stop failed and ownership was retained for a retry).
+    """
+    with _LLAMACPP_LOCK:
+        return _stop_owned_process_locked()
 
 
 def wait_for_llamacpp_service(timeout: int = 120) -> bool:

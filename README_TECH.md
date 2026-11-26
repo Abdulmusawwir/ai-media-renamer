@@ -6,20 +6,23 @@ Automatically organize, rename, and tag video, image, document, and audio assets
 >
 > For the plain-language pitch, screenshots, and quick start, see [README.md](README.md).
 
-### Download the EXE
+### Download the desktop app
 
-Pre-built binaries are available on the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest). The EXE is self-contained — on first run it checks for FFmpeg, ExifTool, and the llama.cpp runtime and downloads any missing components automatically (including the ~18 MB llama.cpp runtime and a GGUF vision model).
+Pre-built installers are available on the [Releases page](https://github.com/Abdulmusawwir/ai-media-renamer/releases/latest). v2.2.0 ships as a signed, per-user NSIS installer (`AI Media Renamer_*_x64-setup.exe`) on a Tauri v2 shell; it bundles the Python backend and serves the built SPA locally. On first run the setup wizard checks FFmpeg, ExifTool and the llama.cpp runtime and downloads missing components (including `llama-server.exe` and a GGUF vision model). The browser and CLI modes remain available from source.
 
 ### Building from Source
 
-Node.js 18+ is required to build the SPA; `build_v2.spec` bundles `frontend/dist`.
+Node.js 18+ is required for the SPA and Rust + Tauri v2 for the installer. The full script is `scripts/build-desktop.ps1`.
 
 ```bash
+# Browser mode (FastAPI + React SPA)
 pip install -r requirements.txt
-pip install pyinstaller
+python launch.py
+
+# Desktop release (Python backend bundle + NSIS installer)
 cd frontend && npm ci && npm run build && cd ..
-pyinstaller build_v2.spec --noconfirm
-# Output: dist/AIMediaRenamer.exe
+pyinstaller build_desktop.spec --noconfirm   # -> dist/AIMediaRenamerBackend/
+npm run tauri build                          # -> src-tauri/target/release/bundle/nsis/
 ```
 
 ---
@@ -30,6 +33,10 @@ pyinstaller build_v2.spec --noconfirm
 pip install -r requirements.txt
 python launch.py
 ```
+
+To run the full local stack (llama-server, backend and Vite) with one command, use `pwsh scripts/dev-all.ps1`; Ctrl+C stops only the processes it started.
+
+> On a local MinGW Rust toolchain, `tauri build` prints a GNU ld warning about "multiple non-default manifests". It is cosmetic: the NSIS installer is produced and runs correctly, and CI's MSVC toolchain does not emit it.
 
 ### Prerequisites
 - **A local AI runtime** — **llama.cpp** (the only supported runtime) — `llama-server` + a GGUF vision model (7B Qwen2-VL, or lighter 2B on CPU), auto-downloaded by the setup wizard; documents/audio route to a compact text model (Qwen2.5-3B)
@@ -88,7 +95,7 @@ There is **no telemetry**. The app never collects or transmits usage data — no
 - **Checksum-verified downloads** — every binary the setup wizard fetches (FFmpeg, ExifTool, llama.cpp runtime, GGUF models) is verified against its published SHA-256 digest before use; plain-HTTP URLs are rejected.
 - **Secret redaction** — sensitive values are masked in exception messages, JSONL logs, and the Configuration-tab JSON view.
 - **No secrets stored** — the app is entirely local (llama.cpp) and stores no API keys; the OS-keychain layer was removed in v1.7.0 along with all cloud providers.
-- **Loopback-only by default** — `launch.py` binds both `127.0.0.1` and `::1` and picks a free port in 8000–8010. Set `config.server.lan_expose` (or `AMR_AUTH_ENABLED=1`) for LAN use; mutating routes then require a bearer token issued at `/api/auth/token`, and the analysis WebSocket takes it as `?token=`.
+- **Loopback-only by default** — `launch.py` binds both `127.0.0.1` and `::1` and picks a free port in 8000–8010. Set `config.server.lan_expose` (or `AMR_AUTH_ENABLED=1`) for LAN use; all `/api/*` routes then require a bearer token issued at `/api/auth/token` (including reads such as config, browse, sessions and staging), and the analysis WebSocket takes it as `?token=`. `/health` and the token issuer stay public. The desktop shell adds its own per-process token boundary on top.
 - **CORS and rate limiting** — `server.cors_origins` overrides the default allow-list; `AMR_RATE_LIMIT` (requests/minute, per IP) enables the optional limiter in `server/security.py`.
 - **Input validation** — CSV import/export neutralizes spreadsheet formula injection; session restore schema-validates and rejects symlinks; staged filenames can never traverse directories on commit.
 - **Log path privacy** — absolute paths are redacted from JSONL logs by default (`config.logging.redact_paths`).
@@ -98,7 +105,7 @@ There is **no telemetry**. The app never collects or transmits usage data — no
 - **Atomic config writes** — `save_config()` writes to a temp file and `os.replace`s it, so a crash mid-save can never leave a truncated `config.json`.
 - **Import-safe startup** — config load/validation is deferred and non-fatal; a broken config degrades gracefully (`CONFIG_LOAD_ERROR` + a minimal fallback) instead of crashing the process at import time.
 - **Single-job analysis** — the server streams one `analyze_asset_with_ai()` result per asset over the WebSocket, with one shared cancellation `threading.Event` (`server/deps.py`). Re-analysis restarts the same loop for selected files only.
-- **Fail-fast** — if the llama.cpp server is not answering, `run_analysis()` emits an `error` event and completes with `count=0` instead of staging an empty batch.
+- **AI server warm-up and watchdog** — the backend starts a local llama.cpp server in the background when a GGUF is configured and the base URL is loopback; it only stops a process it spawned. If that server dies mid-session, a 15 s watchdog restarts it. If it still is not answering, `run_analysis()` emits an `error` event and completes with `count=0` instead of staging an empty batch.
 - **Server startup** — `launch.py` picks the first free port in 8000–8010, binds `127.0.0.1` and `::1`, and opens the browser.
 - **ExifTool lifecycle** — each commit opens one `ExifToolSession` and closes it in a `finally`; the batch path sends one `-execute` per file with a bounded read timeout.
 - **CLI validation** — mutually-exclusive argument groups (`--export-csv`/`--import-csv`, `--rollback`/`--reset-config`, `--sort-folders`/`--no-sort-folders`) and a config-synced default case style.
@@ -159,7 +166,7 @@ Interactive mode per-asset options: `[A]ccept`, `[S]kip`, `[R]e-analyze`, `[E]di
 
 ## Web App Features
 
-- **Upload & Analyze** — Drag-and-drop upload with extension/file-size validation, parallel FFmpeg frame extraction (single midpoint frame per video, hardware-accelerated), sequential per-asset AI analysis with progress bars
+- **Add media & analyze** — in the desktop app, drag-and-drop or the native file/folder picker; in a browser, use the server-side folder picker (browser drag-and-drop cannot expose real paths). Then parallel FFmpeg frame extraction (single midpoint frame per video, hardware-accelerated) and sequential per-asset AI analysis with progress bars
 - **Audio Transcription** — Local Whisper transcription for audio files and video audio tracks, fed into AI analysis context
 - **Document Analysis** — Text extraction from PDF, DOCX, XLSX, CSV, PPTX, TXT, MD, RTF for AI analysis
 - **Editable Staging Matrix** — columns: select checkbox, original filename, type (media/doc/audio), editable proposed filename, category dropdown (with custom entry), comma-separated tags, read-only summary. Search/filter above the table. Native click-to-sort column headers.
@@ -235,7 +242,7 @@ Compatible with **DaVinci Resolve** and **Adobe Premiere Pro**.
 - **`naming`** — `case_style` (`title_case`), `max_filename_chars` (0 = unlimited), `sort_folders` (`true`)
 - **`naming_templates`** — `default`/`short` = `{topic}_{description}`, `editorial` = `{date}_{topic}`; supports `{category}`, `{topic}`, `{description}`, `{date}`
 - **`video_extensions`** / `image_extensions` / `document_extensions` / `audio_extensions` — Configurable file type lists (10 / 10 / 9 / 12)
-- **`server`** — `lan_expose` (default `false`); optional `cors_origins` (list) overrides the default CORS allow-list. Setting `AMR_AUTH_ENABLED=1` requires a bearer token from `/api/auth/token` on mutating routes, and `AMR_RATE_LIMIT` enables per-IP rate limiting.
+- **`server`** — `lan_expose` (default `false`); optional `cors_origins` (list) overrides the default CORS allow-list. Setting `AMR_AUTH_ENABLED=1` requires a bearer token from `/api/auth/token` on all `/api/*` routes (reads and writes), and `AMR_RATE_LIMIT` enables per-IP rate limiting.
 - **`logging`** — Log directory, file rotation (5 MB × 3 backups), max upload size (10 GB), `redact_paths` (default `true`)
 
 ---

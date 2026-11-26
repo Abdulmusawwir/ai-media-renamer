@@ -49,8 +49,43 @@ def test_mutating_routes_require_token_when_auth_on(auth_on):
     )
     assert client.delete("/api/assets/foo.jpg").status_code == 401
 
-    # Read-only GET endpoints stay open.
-    assert client.get("/api/staging").status_code == 200
+
+READ_ROUTES = [
+    "/api/assets",
+    "/api/browse",
+    "/api/config",
+    "/api/desktop/status",
+    "/api/environment",
+    "/api/models",
+    "/api/sessions",
+    "/api/staging",
+    "/api/staging/export",
+]
+
+
+def test_read_routes_require_token_when_auth_on(auth_on):
+    """Anything that reads config, history or the filesystem is gated."""
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {_token()}"}
+    for path in READ_ROUTES:
+        assert client.get(path).status_code == 401, path
+        assert client.get(path, headers=headers).status_code != 401, path
+
+    # Health and the token issuer must stay public.
+    assert client.get("/health").status_code == 200
+    assert client.post("/api/auth/token").status_code == 200
+
+
+def test_browse_requires_token_when_auth_on(auth_on):
+    """The folder browser can list any readable directory, so it is gated."""
+    client = TestClient(app)
+    assert client.get("/api/browse").status_code == 401
+
+    headers = {"Authorization": f"Bearer {_token()}"}
+    assert client.get("/api/browse", headers=headers).status_code != 401
+
+    bad = {"Authorization": "Bearer not-a-real-token"}
+    assert client.get("/api/browse", headers=bad).status_code == 401
 
 
 def test_mutating_routes_accept_valid_token(auth_on):

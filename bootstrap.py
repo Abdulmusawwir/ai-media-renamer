@@ -18,6 +18,7 @@ if getattr(sys, "frozen", False) and sys.stderr is None:
 
 import requests
 
+import engine
 from engine import (
     LLAMACPP_GGUF_CATALOG,
     SETUP_DEPENDENCIES,
@@ -52,10 +53,10 @@ if getattr(sys, "frozen", False):
 else:
     BASE_DIR = Path(__file__).parent
 
-CACHE_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "ai-media-renamer"
-BIN_DIR = CACHE_DIR / "bin"
-INSTALLER_CACHE = CACHE_DIR / "cache"
-LLAMACPP_ZIP_CACHE = CACHE_DIR / "cache" / "llamacpp.zip"
+CACHE_DIR = engine.USER_DATA_DIR / "cache"
+BIN_DIR = engine.USER_DATA_DIR / "bin"
+INSTALLER_CACHE = CACHE_DIR
+LLAMACPP_ZIP_CACHE = CACHE_DIR / "llamacpp.zip"
 LLAMACPP_EXE = BIN_DIR / "llama-server.exe"
 
 # ---------- theme colors (modern dark) ----------
@@ -541,6 +542,49 @@ def _install_ffmpeg(win) -> None:
         time.sleep(5)
 
 
+_LLAMACPP_REQUIRED_RUNTIME_FILES = (
+    "llama-server.exe",
+    "llama-server-impl.dll",
+    "llama.dll",
+    "ggml*.dll",
+    "mtmd.dll",
+    "libomp*.dll",
+)
+
+
+def _copy_llamacpp_runtime_tree(src_dir: Path, bin_dir: Path) -> list[Path]:
+    """Copy every file under ``src_dir`` into ``bin_dir``, preserving structure.
+
+    The llama.cpp release archive ships the server launcher next to the shared
+    libraries it needs (``llama-server-impl.dll``, ``llama.dll``, ``ggml*.dll``,
+    ``mtmd.dll``, ``libomp*.dll``). Copying only the launcher leaves a runtime
+    that cannot start, so the whole directory is copied recursively.
+
+    Returns:
+        Destination paths of the copied files.
+    """
+    src_dir = Path(src_dir)
+    bin_dir = Path(bin_dir)
+    copied: list[Path] = []
+    for src in sorted(src_dir.rglob("*")):
+        if not src.is_file():
+            continue
+        dst = bin_dir / src.relative_to(src_dir)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied.append(dst)
+    return copied
+
+
+def _missing_llamacpp_runtime_files(bin_dir: Path) -> list[str]:
+    """Return required runtime patterns that are absent under ``bin_dir``."""
+    bin_dir = Path(bin_dir)
+    return [
+        pattern for pattern in _LLAMACPP_REQUIRED_RUNTIME_FILES
+        if not any(bin_dir.glob(pattern))
+    ]
+
+
 def _install_llamacpp_runtime(win, step: int) -> None:
     """Download and install the llama.cpp ``llama-server`` binary (Windows CPU).
 
@@ -576,10 +620,14 @@ def _install_llamacpp_runtime(win, step: int) -> None:
             if exe_src is None:
                 raise RuntimeError("llama-server.exe not found inside archive")
             BIN_DIR.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(exe_src, LLAMACPP_EXE)
+            _copy_llamacpp_runtime_tree(exe_src.parent, BIN_DIR)
+            missing = _missing_llamacpp_runtime_files(BIN_DIR)
+            if missing:
+                raise RuntimeError(
+                    "llama.cpp runtime is incomplete; missing: "
+                    + ", ".join(missing))
             shutil.rmtree(extract_dir, ignore_errors=True)
             LLAMACPP_ZIP_CACHE.unlink(missing_ok=True)
-            _add_to_user_path(BIN_DIR)
             win.set_step(step, "\u2713 Checking llama.cpp... ready")
             win.set_progress(100)
             win.set_info("")
@@ -1184,26 +1232,45 @@ class ModelRecommendationDialog:
         self.top.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
 
 
-def main():
-    _log(f"main() argv={sys.argv} frozen={getattr(sys, 'frozen', False)}")
+def _finish_setup(win, no_launch: bool, success: bool = True) -> int:
+    """Close the wizard and, unless suppressed, start the app.
 
-    if "--no-gui" in sys.argv:
+    Returns 1 for a failed setup (e.g. the llama.cpp runtime/server did not
+    start) even in ``--no-launch`` mode, so the desktop shell can distinguish a
+    completed setup from a broken one.
+    """
+    if not success:
+        win.close()
+        return 1
+    if no_launch:
+        win.close()
+        return 0
+    _launch_app(win)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    _log(f"main() argv={args} frozen={getattr(sys, 'frozen', False)}")
+
+    no_launch = "--no-launch" in args
+    no_update_check = "--no-update-check" in args
+
+    if "--no-gui" in args:
         class _StubWin:
             def set_step(self, *a): pass
             def set_progress(self, *a): pass
             def set_info(self, *a): pass
             def update(self): pass
             def close(self): pass
-        _launch_app(_StubWin())
-        return
+        return _finish_setup(_StubWin(), no_launch)
 
     win = SetupWindow()
 
     if not win.root:
-        _headless_run()
-        return
+        return _headless_run(no_update_check=no_update_check)
 
-    force_setup = "--setup" in sys.argv
+    force_setup = "--setup" in args
 
     try:
         # ---- Onboarding questionnaire (first run, or explicit --setup) ----
@@ -1227,8 +1294,7 @@ def main():
         # Skipped onboarding (empty profile): don't force any downloads —
         # launch the app; env checks + in-app download buttons cover the rest.
         if not do_installs:
-            _launch_app(win)
-            return
+            return _finish_setup(win, no_launch)
 
         # Confirm the one-time download plan when onboarding / re-running setup
         if do_installs and (not onboarded or force_setup):
@@ -1236,8 +1302,7 @@ def main():
             _show_modal(win, dlg)
             if not dlg.result:
                 save_setup_profile(profile=profile, onboarded=True)
-                _launch_app(win)
-                return
+                return _finish_setup(win, no_launch)
 
         step = 1
 
@@ -1254,9 +1319,8 @@ def main():
             win.set_step(step, "\u26a0 llama.cpp server did not start")
             win.set_progress(100)
             win.set_info("Please start llama-server manually and restart this app.")
-            win.wait_for_user()
-            win.close()
-            return
+            win.update()
+            return _finish_setup(win, no_launch, success=False)
         win.update()
         step += 1
 
@@ -1268,7 +1332,6 @@ def main():
                 win.set_info("")
             else:
                 _install_exiftool(win)
-                _add_to_user_path(BIN_DIR)
             win.update()
             step += 1
 
@@ -1280,7 +1343,6 @@ def main():
                 win.set_info("")
             else:
                 _install_ffmpeg(win)
-                _add_to_user_path(BIN_DIR)
             win.update()
             step += 1
 
@@ -1312,22 +1374,23 @@ def main():
             save_setup_profile(profile=profile, onboarded=True, runtime=runtime)
 
         # ---- Step: Update check ----
-        update_info = check_for_updates()
-        if update_info.get("ok") and update_info.get("update_available"):
-            win.set_step(step, "\u26a0 Update available")
-            win.set_progress(100)
-            win.set_info("")
-            win.show_update(update_info)
-            win.update()
-            win.wait_for_user()
-        else:
-            win.set_step(step, "\u2713 Checking for updates... up to date")
-            win.set_progress(100)
-            win.set_info("")
+        if not no_update_check:
+            update_info = check_for_updates()
+            if update_info.get("ok") and update_info.get("update_available"):
+                win.set_step(step, "\u26a0 Update available")
+                win.set_progress(100)
+                win.set_info("")
+                win.show_update(update_info)
+                win.update()
+                win.wait_for_user()
+            else:
+                win.set_step(step, "\u2713 Checking for updates... up to date")
+                win.set_progress(100)
+                win.set_info("")
         win.update()
 
-        # ---- Step: Launch ----
-        _launch_app(win)
+        # ---- Finish: launch the app unless setup-only mode ----
+        return _finish_setup(win, no_launch)
 
     except Exception as exc:
         if win.root:
@@ -1340,133 +1403,58 @@ def main():
         else:
             print(f"Setup failed: {exc}")
         win.close()
-        sys.exit(1)
+        return 1
 
 
-def _kill_stale_server():
-    """Kill any process still listening on port 8501 from a previous session."""
+def _launch_app(win) -> None:
+    """Start ``launch.py`` for source users and close the wizard.
+
+    The child owns the server/browser lifecycle; this process must not
+    terminate it. The Tauri shell is responsible for backend shutdown.
+    """
     try:
-        result = subprocess.run(
-            ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        for line in result.stdout.splitlines():
-            if ":8501" in line and "LISTENING" in line:
-                parts = line.split()
-                pid = int(parts[-1])
-                _log(f"killing stale server PID={pid}")
-                subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                               capture_output=True, timeout=5,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
-    except Exception as e:
-        _log(f"_kill_stale_server: {e}")
-
-
-def _launch_app(win):
-    win.set_step(6, "\u2713 Starting app...")
-    win.set_progress(100)
-    win.set_info("Starting AI Media Renamer server...")
-    win.update()
-
-    _kill_stale_server()
-
-    _log(f"launch_app: spawning subprocess {sys.executable} -m uvicorn server.main:app")
-    log_path = CACHE_DIR / "server.log"
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    log_fh = open(log_path, "w", encoding="utf-8")
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "server.main:app",
-         "--host", "127.0.0.1", "--port", "8000"],
-        creationflags=subprocess.CREATE_NO_WINDOW,
-        stdout=log_fh,
-        stderr=log_fh,
-    )
-    _log(f"launch_app: child PID={proc.pid}")
-
-    # Wait for the API server to be ready
-    import time
-    health_url = "http://localhost:8000/health"
-    deadline = time.time() + 30
-    ready = False
-    while time.time() < deadline:
-        try:
-            r = requests.get(health_url, timeout=2)
-            if r.status_code == 200:
-                ready = True
-                _log("health check: OK (200)")
-                break
-        except Exception as e:
-            _log(f"health check: {e}")
-        time.sleep(0.5)
-
-    if not ready:
-        _log("health check: FAILED after 30s")
-        # Dump child process stderr
-        log_fh.close()
-        try:
-            with open(log_path, encoding="utf-8", errors="replace") as f:
-                _log(f"child stdout/stderr:\n{f.read()}")
-        except Exception:
-            pass
-        win.set_info("App taking longer than expected — opening browser...")
+        win.set_step(6, "\u2713 Starting app...")
+        win.set_progress(100)
+        win.set_info("Starting AI Media Renamer...")
         win.update()
-    else:
-        win.set_info("Opening app window...")
-        win.update()
-
-    # Also dump server log for success case
-    log_fh.close()
-    try:
-        with open(log_path, encoding="utf-8", errors="replace") as f:
-            server_out = f.read().strip()
-            if server_out:
-                _log(f"child server output:\n{server_out}")
     except Exception:
         pass
 
+    script = BASE_DIR / "launch.py"
+    _log(f"launch_app: spawning subprocess {sys.executable} {script}")
+    try:
+        subprocess.Popen(
+            [sys.executable, str(script)],
+            cwd=str(BASE_DIR),
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:
+        _log(f"launch_app: spawn failed: {exc}")
     win.close()
 
-    # Try pywebview native window; fall back to browser
-    try:
-        import webview
-        _icon = str(BASE_DIR / "icon.ico")
-        webview.create_window("AI Media Renamer", "http://localhost:8000",
-                              width=1280, height=800, resizable=True)
-        webview.start(private_mode=True, gui="edgechromium", icon=_icon)
-    except Exception:
-        webbrowser.open("http://localhost:8000")
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
-        sys.exit(0)
 
-    # Clean shutdown on window close
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except Exception:
-        proc.kill()
-    sys.exit(0)
-
-
-def _headless_run():
+def _headless_run(no_update_check: bool = False) -> int:
     print("AI Media Renamer — Setup (headless mode)")
     print(f"Version: {VERSION}")
-    for step, check in enumerate([
+    checks = [
         ("ExifTool", _resolve_binary_path("exiftool")),
         ("FFmpeg", _resolve_binary_path("ffmpeg")),
         ("llama.cpp server", _llamacpp_server_running()),
-    ]):
-        status = "\u2713 found" if check else "missing"
-        print(f"  [{step+1}/5] {check[0]}: {status}")
-    info = check_for_updates()
-    if info.get("update_available"):
-        print(f"  Update available: {info['current']} -> {info['latest']}")
-        print(f"  Download: {info['download_url']}")
+    ]
+    for step, (label, found) in enumerate(checks, start=1):
+        status = "\u2713 found" if found else "missing"
+        print(f"  [{step}/{len(checks)}] {label}: {status}")
+    if not no_update_check:
+        info = check_for_updates()
+        if info.get("update_available"):
+            print(f"  Update available: {info['current']} -> {info['latest']}")
+            print(f"  Download: {info['download_url']}")
     print("Run 'python launch.py' to start the app manually.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

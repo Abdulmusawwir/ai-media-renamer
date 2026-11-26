@@ -44,6 +44,7 @@ interface AppState {
   config: Json | null;
   categories: string[];
   staged: StagedAsset[];
+  incomingPaths: string[];
   analysisSettings: AnalysisSettings;
   toasts: ToastItem[];
   wsProgress: WsProgress;
@@ -52,6 +53,10 @@ interface AppState {
   setConfig: (c: Json | null) => void;
   setCategories: (cats: string[]) => void;
   setStaged: (s: StagedAsset[]) => void;
+  pushIncomingPaths: (paths: string[]) => void;
+  clearIncomingPaths: () => void;
+  pendingUpdateCheck: boolean;
+  setPendingUpdateCheck: (v: boolean) => void;
   setAnalysisSettings: (s: Partial<AnalysisSettings>) => void;
   pushToast: (kind: ToastKind, message: string) => void;
   dismissToast: (id: number) => void;
@@ -65,6 +70,8 @@ export const useStore = create<AppState>((set) => ({
   config: null,
   categories: [],
   staged: [],
+  incomingPaths: [],
+  pendingUpdateCheck: false,
   analysisSettings: { ...DEFAULT_ANALYSIS_SETTINGS },
   toasts: [],
   wsProgress: { running: false, processed: 0, total: 0, log: [], status: "" },
@@ -79,6 +86,12 @@ export const useStore = create<AppState>((set) => ({
     }),
   setCategories: (categories) => set({ categories }),
   setStaged: (staged) => set({ staged }),
+  pushIncomingPaths: (paths) =>
+    set((state) => ({
+      incomingPaths: Array.from(new Set([...state.incomingPaths, ...paths])),
+    })),
+  clearIncomingPaths: () => set({ incomingPaths: [] }),
+  setPendingUpdateCheck: (pendingUpdateCheck) => set({ pendingUpdateCheck }),
   setAnalysisSettings: (s) =>
     set((state) => ({ analysisSettings: { ...state.analysisSettings, ...s } })),
   pushToast: (kind, message) =>

@@ -1,7 +1,7 @@
 # Implementation Plan — AI Media Renamer
 
 > **Status:** v1.x (Streamlit era) complete — Layers 1–20 shipped through v1.7.0.
-> **v2.0.0** (Streamlit → React + FastAPI, llama.cpp-only) and **v2.1.0** (per-asset profile auto-routing, release build compiles the SPA) are shipped.
+> **v2.0.0** (Streamlit → React + FastAPI, llama.cpp-only), **v2.1.0** (per-asset profile auto-routing, release build compiles the SPA) and **v2.2.0** (Tauri v2 desktop shell, NSIS installer) are shipped.
 > **Current state:** the v2 backend/frontend, not this plan, is authoritative. Use `AGENTS.md` + `README_TECH.md` for the live architecture; the checkboxes below are a historical record of v1/v2 work.
 
 ---
