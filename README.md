@@ -110,6 +110,7 @@ By default the server binds to loopback (`127.0.0.1`) and runs **unauthenticated
 
 ## Roadmap — we're just getting started
 
+- [x] **v2.2.5 — Rollback fix** — undo works without ExifTool when no tags were injected; removed the old one-shot setup script.
 - [x] **v2.2.4 — Build and test gates** — automatic checks on GitHub, one safe desktop build command, frontend tests, and a smoother AI-ready indicator at startup.
 - [x] **v2.2.3 — Update error handling** — failed update checks show a real error; install no longer re-checks; close-to-tray no longer fires during startup.
 - [x] **v2.2.2 / v2.2.1 — Desktop fixes** — silent close-to-tray, signed updater artifacts and verified 2.2.0 → 2.2.1 update.

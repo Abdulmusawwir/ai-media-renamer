@@ -33,7 +33,7 @@ jobs:
         run: python -m pytest -q
 
       - name: Version consistency
-        run: python scripts/check_versions.py --tag v2.2.4
+        run: python scripts/check_versions.py --tag v2.2.5
 
       - uses: actions/setup-node@v4
         with:
