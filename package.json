@@ -1,7 +1,7 @@
 {
   "name": "ai-media-renamer",
   "private": true,
-  "version": "2.2.5",
+  "version": "2.2.6",
   "description": "Tauri desktop shell for AI Media Renamer",
   "scripts": {
     "tauri": "tauri",

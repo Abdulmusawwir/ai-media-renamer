@@ -5,4 +5,4 @@ so a future React frontend can drive the app over HTTP. The server must never
 duplicate engine business logic; it only orchestrates engine functions.
 """
 
-__version__ = "2.2.5"
+__version__ = "2.2.6"

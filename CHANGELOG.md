@@ -12,6 +12,11 @@
 - **Fix: `/health` was mistaken for full readiness.** The sidebar now reports tools, AI server and model separately, and startup writes a single `startup summary:` log line.
 - **Changed:** route pages are lazy-loaded (main bundle ~34 kB), and `scripts/dev-all.ps1` starts the full local stack in one command. A regression test covers config/session/undo survival across an in-place upgrade.
 
+## [v2.2.6] — 2026-11-26
+
+### Changed
+- Modernised the interface with shared design tokens, consistent buttons, accessible tooltips, standard empty/error states, reduced-motion support and responsive table polish.
+
 ## [v2.2.5] — 2026-11-26
 
 ### Fixed
