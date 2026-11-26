@@ -11,6 +11,11 @@
 - **Fix: `/health` was mistaken for full readiness.** The sidebar now reports tools, AI server and model separately, and startup writes a single `startup summary:` log line.
 - **Changed:** route pages are lazy-loaded (main bundle ~34 kB), and `scripts/dev-all.ps1` starts the full local stack in one command. A regression test covers config/session/undo survival across an in-place upgrade.
 
+## [v2.2.2] — 2026-11-26
+
+### Fixed
+- Close-to-tray now applies only to the main window. The splash is closed normally by `desktop_ready`, so the "still running in the system tray" notification can no longer fire during startup or setup restarts.
+
 ## [v2.2.1] — 2026-11-22
 
 ### Fixed
