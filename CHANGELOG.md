@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Reliability
+- **Fix: updater failures were reported as "up to date".** `desktop.checkForUpdate()` now propagates errors (including a bad signature or offline endpoint), the Settings page shows them in the error state, and install no longer performs a second check that could change the approved version. Added signature-tamper and error-formatting tests.
 - **Fix: web commits landed in the server's working directory.** `POST /api/commit` defaulted `target_dir` to `"."` and the UI never sent one, so staged files were moved to whatever directory the backend was started from. With no `target_dir` the route now commits each asset in place next to its original file, matching the CLI; an explicit `target_dir` still moves everything into that folder.
 - **Fix: web commits could not be rolled back.** The server route never wrote an undo batch, so "Rollback last batch" reverted an older CLI batch (or nothing). Successful server commits are now logged with per-asset original/new paths and injected metadata keys.
 - **Fix: batch commit results could be misaligned.** `execute_commit_batch()` now returns one result per input asset in input order, even when some assets fail.

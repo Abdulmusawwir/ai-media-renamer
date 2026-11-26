@@ -1,5 +1,7 @@
 // Desktop (Tauri) bridge. Dynamically imports Tauri APIs only when running
 // inside the desktop shell, so browser builds never require Tauri modules.
+import type { Update } from "@tauri-apps/plugin-updater";
+
 export interface DesktopUpdate {
   version: string;
   notes?: string;
@@ -36,6 +38,9 @@ export const isDesktop: boolean = Boolean(w.__AMR_DESKTOP__);
 let _token: string | null = w.__AMR_DESKTOP_TOKEN__ ?? null;
 let _port: number | null = w.__AMR_DESKTOP_PORT__ ?? null;
 let _version: string | null = w.__AMR_DESKTOP_VERSION__ ?? null;
+
+// The checked Tauri Update object is kept here so install never re-checks.
+let _pendingUpdate: Update | null = null;
 
 export function setDesktopToken(token: string | null): void {
   _token = token;
@@ -91,21 +96,24 @@ export const desktop: Desktop = {
   },
   async checkForUpdate(): Promise<DesktopUpdate | null> {
     if (!isDesktop) return null;
-    try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const update = await check();
-      if (!update) return null;
-      return { version: update.version, notes: update.body ?? undefined, date: update.date ?? undefined };
-    } catch {
+    // Errors must propagate: a failed check (including a bad signature) is not
+    // the same as "no update available".
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const update = await check();
+    if (!update) {
+      _pendingUpdate = null;
       return null;
     }
+    _pendingUpdate = update;
+    return { version: update.version, notes: update.body ?? undefined, date: update.date ?? undefined };
   },
   async downloadAndInstall(update: DesktopUpdate, onProgress?: (event: unknown) => void): Promise<void> {
     if (!isDesktop) return;
-    const { check } = await import("@tauri-apps/plugin-updater");
-    const u = await check();
-    if (!u) return;
-    await u.downloadAndInstall((e) => onProgress?.(e));
+    const checked = _pendingUpdate;
+    if (!checked || checked.version !== update.version) {
+      throw new Error("The checked update is no longer available. Check again.");
+    }
+    await checked.downloadAndInstall((e) => onProgress?.(e));
   },
   async relaunch(): Promise<void> {
     if (!isDesktop) return;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Save, RefreshCw, Cpu, Sparkles, FolderOpen, FileText, Download, ExternalLink } from "lucide-react";
 import { useConfig, usePutConfig } from "../hooks/api";
@@ -6,6 +6,7 @@ import { useStore, useToast } from "../store";
 import { Skeleton } from "../components/Skeleton";
 import type { Json } from "../api/client";
 import { desktop, isDesktop } from "../desktop";
+import { formatUpdateError } from "../desktop/updateErrors";
 
 export default function Settings() {
   const toast = useToast();
@@ -26,6 +27,8 @@ export default function Settings() {
   const [updateInfo, setUpdateInfo] = useState<{ version: string; notes?: string; date?: string } | null>(null);
   const [updateProgress, setUpdateProgress] = useState<number>(0);
   const [updateError, setUpdateError] = useState<string>("");
+  // Guards against a tray event and the Settings button finishing out of order.
+  const checkSeq = useRef(0);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -35,12 +38,14 @@ export default function Settings() {
       .catch(() => undefined);
   }, []);
 
-  const checkForUpdate = async () => {
+  const runUpdateCheck = async () => {
     if (!isDesktop) return;
+    const seq = ++checkSeq.current;
     setUpdateState("checking");
     setUpdateError("");
     try {
       const u = await desktop.checkForUpdate();
+      if (seq !== checkSeq.current) return;
       if (!u) {
         setUpdateInfo(null);
         setUpdateState("up-to-date");
@@ -49,7 +54,8 @@ export default function Settings() {
         setUpdateState("available");
       }
     } catch (err) {
-      setUpdateError(String(err));
+      if (seq !== checkSeq.current) return;
+      setUpdateError(formatUpdateError(err));
       setUpdateState("error");
     }
   };
@@ -58,7 +64,7 @@ export default function Settings() {
     if (!isDesktop) return;
     if (!pendingUpdateCheck) return;
     setPendingUpdateCheck(false);
-    checkForUpdate();
+    runUpdateCheck();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingUpdateCheck]);
 
@@ -68,7 +74,7 @@ export default function Settings() {
     let unlisten: (() => void) | undefined;
     desktop
       .listen("desktop://check-updates", () => {
-        checkForUpdate();
+        runUpdateCheck();
       })
       .then((u) => {
         unlisten = u;
@@ -82,6 +88,7 @@ export default function Settings() {
 
   const installUpdate = async () => {
     if (!updateInfo) return;
+    if (updateState === "downloading" || updateState === "installing") return;
     // Guard: check backend busy state first.
     try {
       const status = await desktop.invoke<{
@@ -120,7 +127,7 @@ export default function Settings() {
       setUpdateState("installing");
       await desktop.relaunch();
     } catch (err) {
-      setUpdateError(String(err));
+      setUpdateError(formatUpdateError(err));
       setUpdateState("error");
     }
   };
@@ -269,7 +276,7 @@ export default function Settings() {
               <button
                 type="button"
                 className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-sm hover:bg-bg disabled:opacity-50"
-                onClick={checkForUpdate}
+                onClick={runUpdateCheck}
                 disabled={updateState === "checking" || updateState === "downloading" || updateState === "installing"}
               >
                 <RefreshCw size={14} /> Check for updates
@@ -308,7 +315,7 @@ export default function Settings() {
                 <button
                   type="button"
                   className="rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-xs hover:bg-bg"
-                  onClick={checkForUpdate}
+                  onClick={runUpdateCheck}
                 >
                   Retry
                 </button>
