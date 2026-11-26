@@ -12,6 +12,11 @@
 - **Fix: `/health` was mistaken for full readiness.** The sidebar now reports tools, AI server and model separately, and startup writes a single `startup summary:` log line.
 - **Changed:** route pages are lazy-loaded (main bundle ~34 kB), and `scripts/dev-all.ps1` starts the full local stack in one command. A regression test covers config/session/undo survival across an in-place upgrade.
 
+## [v2.2.4] — 2026-11-26
+
+### Changed
+- Added automatic checks for proposed changes and pushes to `main`, made the desktop build script the single safe entry point, added frontend tests, and fixed the brief "AI server not ready" flash at startup.
+
 ## [v2.2.3] — 2026-11-26
 
 ### Fixed

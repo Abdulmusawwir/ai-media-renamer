@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ai-media-renamer"
-version = "2.2.3"
+version = "2.2.4"
 dependencies = [
  "dunce",
  "serde",
