@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Tooltip } from "./Tooltip";
 
 describe("Tooltip", () => {
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
   });
 
@@ -35,6 +36,22 @@ describe("Tooltip", () => {
     const tip = await screen.findByRole("tooltip");
     expect(tip.textContent).toContain("Close panel");
     expect(trigger.getAttribute("aria-describedby")).toBe(tip.id);
+  });
+
+  it("hides on blur and preserves the child's own handler", async () => {
+    const onFocus = vi.fn();
+    render(
+      <Tooltip label="Settings tip">
+        <button type="button" onFocus={onFocus}>settings</button>
+      </Tooltip>
+    );
+    const trigger = screen.getByRole("button", { name: "settings" });
+    fireEvent.focus(trigger);
+    expect(onFocus).toHaveBeenCalledTimes(1);
+    const tip = await screen.findByRole("tooltip");
+    expect(tip.textContent).toContain("Settings tip");
+    fireEvent.blur(trigger);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("clears pending timers on unmount", () => {
