@@ -4,8 +4,8 @@ This file records state on disk, not conversation history. Read it before making
 
 ## Current work
 
-- Active branch: `pipeline/2026-11-26`, pushed to `origin/pipeline/2026-11-26` after user approval. Not merged into `main`.
-- Base: `main` at `00d53c5` (v2.2.5 release plus earlier cleanup).
+- Active branch for this doc update: `docs/handover-v226`. `main` is at `34778dd` (v2.2.6).
+- The `pipeline/2026-11-26` branch was pushed, merged into `main` via PR #14, and deleted.
 - Task in this pipeline: thorough UI analysis and modernisation — modern, elegant, user friendly, actionable, with tooltips.
 
 ## Completed on this branch
@@ -26,7 +26,7 @@ This file records state on disk, not conversation history. Read it before making
 |---|---|---|
 | Python lint | `ruff check .` | passed, 0 errors |
 | Python tests | `python -m pytest -q` | 447 passed, 1 skipped |
-| Version validator | `python scripts/check_versions.py --tag v2.2.5 --latest-json dist/latest.json` | all versions match |
+| Version validator | `python scripts/check_versions.py --tag v2.2.6 --latest-json dist/latest.json` | all versions match |
 | TypeScript | `npx tsc --noEmit -p tsconfig.json` | exit 0 |
 | Frontend tests | `npm test` | 3 files, 11 tests passed |
 | Frontend build | `npm run build` | passed |
@@ -45,11 +45,11 @@ No E2E test suite exists in this repository; the browser checks above were manua
 
 - Tray menu clicks: Show, Quit, Setup & Dependencies.
 - Clean-machine first-run wizard with an empty `%APPDATA%\ai-media-renamer`.
-- Explicit approval before a release build or deployment. Push of this branch was approved and completed; merging into `main` is still pending.
+- Explicit approval before deployment. Push, merge into `main` and the v2.2.6 release were approved and completed.
 
 ## Warnings and hard stops
 
-- The published **v2.2.5** GitHub release and installer do **not** include this branch's UI changes. A new build/release is required to ship them.
+- The published **v2.2.6** GitHub release and installer include the UI changes: https://github.com/Abdulmusawwir/ai-media-renamer/releases/tag/v2.2.6. The remote installer hash was verified against the local build.
 - No database, SQL migrations, cron schedules or live database exist in this project.
 - CI needs `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets for signed updater artifacts.
 - `main` is protected by the GitHub ruleset **Protect main**: pull request required, `tests` check required. Direct pushes are rejected.
