@@ -36,7 +36,7 @@ export default function Sessions() {
         <div className="flex items-center gap-2">
           <SkeletonRows rows={1} className="!space-y-0" />
         </div>
-        <div className="overflow-x-auto rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev p-4">
           <SkeletonRows rows={5} />
         </div>
       </div>
@@ -85,14 +85,14 @@ export default function Sessions() {
 
       <div className="flex items-center gap-2">
         <button
-          className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-2"
+          className="ui-btn ui-btn-primary"
           onClick={onSave}
           disabled={save.isPending}
         >
           <Save size={16} /> Save current session
         </button>
         <button
-          className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-sm hover:bg-bg"
+          className="ui-btn ui-btn-secondary"
           onClick={() => query.refetch()}
         >
           <RefreshCw size={14} /> Refresh
@@ -105,7 +105,7 @@ export default function Sessions() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-bg-elev">
+      <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border">
@@ -164,9 +164,8 @@ export default function Sessions() {
               <tr>
                 <td
                   colSpan={3}
-                  className="px-3 py-6 text-center text-text-dim"
                 >
-                  No saved sessions.
+                  <div className="ui-empty">No saved sessions.</div>
                 </td>
               </tr>
             )}

@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import { useStore } from "../store";
+import { Tooltip } from "./Tooltip";
 
 const ICONS = {
   success: CheckCircle2,
@@ -35,13 +36,15 @@ export default function Toaster() {
             >
               <Icon size={16} className="mt-0.5 shrink-0" />
               <span className="flex-1 break-words">{t.message}</span>
-              <button
-                onClick={() => dismiss(t.id)}
-                className="shrink-0 opacity-70 hover:opacity-100"
-                aria-label="Dismiss"
-              >
-                <X size={14} />
-              </button>
+              <Tooltip label="Dismiss notification">
+                <button
+                  onClick={() => dismiss(t.id)}
+                  className="ui-btn-icon shrink-0 opacity-70 hover:opacity-100"
+                  aria-label="Dismiss"
+                >
+                  <X size={14} />
+                </button>
+              </Tooltip>
             </motion.div>
           );
         })}

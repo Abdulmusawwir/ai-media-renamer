@@ -34,7 +34,7 @@ export default function Models() {
           <Skeleton className="h-16" />
           <Skeleton className="h-16" />
         </div>
-        <div className="overflow-x-auto rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev p-4">
           <SkeletonRows rows={4} />
         </div>
       </div>
@@ -68,7 +68,7 @@ export default function Models() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-bg-elev">
+      <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border">
@@ -110,9 +110,8 @@ export default function Models() {
               <tr>
                 <td
                   colSpan={3}
-                  className="px-3 py-6 text-center text-text-dim"
                 >
-                  No models in catalog.
+                  <div className="ui-empty">No models in catalog.</div>
                 </td>
               </tr>
             )}

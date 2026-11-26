@@ -450,7 +450,7 @@ export default function Staging() {
           </p>
         </div>
         <button
-          className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-2"
+          className="ui-btn ui-btn-primary"
           onClick={() => navigate("/commit")}
         >
           Go to Commit <ArrowRight size={16} />
@@ -458,7 +458,7 @@ export default function Staging() {
       </div>
 
       {query.isError && (
-        <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+        <div className="ui-inline-error">
           Failed to load staging: {String(query.error)}
         </div>
       )}
@@ -478,7 +478,7 @@ export default function Staging() {
           ))}
         </select>
         <button
-          className="flex items-center gap-1.5 rounded-md border border-border bg-bg-elev-2 px-3 py-1.5 text-sm hover:bg-bg"
+          className="ui-btn ui-btn-secondary"
           onClick={applyBulk}
           disabled={bulk.isPending}
         >
@@ -497,14 +497,14 @@ export default function Staging() {
             className="w-56 rounded-md border border-border bg-bg px-3 py-1.5 text-sm placeholder:text-text-dim"
           />
           <button
-            className="flex items-center gap-1.5 rounded-md border border-border bg-bg-elev-2 px-3 py-1.5 text-sm hover:bg-bg"
+            className="ui-btn ui-btn-secondary"
             onClick={onSave}
             disabled={save.isPending}
           >
             <Save size={14} /> Save
           </button>
           <button
-            className="flex items-center gap-1.5 rounded-md border border-border bg-bg-elev-2 px-3 py-1.5 text-sm hover:bg-bg"
+            className="ui-btn ui-btn-secondary"
             onClick={downloadStagingCsv}
           >
             <Download size={14} /> Export CSV
@@ -525,7 +525,7 @@ export default function Staging() {
         {/* Table */}
         <div
           ref={parentRef}
-          className="max-h-[600px] overflow-auto rounded-lg border border-border bg-bg-elev lg:col-span-3"
+          className="ui-scroll max-h-[600px] max-w-full rounded-lg border border-border bg-bg-elev lg:col-span-3"
         >
           <table className="w-full border-collapse text-sm">
             <thead>
@@ -598,11 +598,8 @@ export default function Staging() {
               )}
               {visibleRows.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={columns.length}
-                    className="px-3 py-6 text-center text-text-dim"
-                  >
-                    No staged assets. Run an analysis first.
+                  <td colSpan={columns.length}>
+                    <div className="ui-empty">No staged assets. Run an analysis first.</div>
                   </td>
                 </tr>
               )}
@@ -617,7 +614,7 @@ export default function Staging() {
           </div>
           {chartData.length === 0 ? (
             <div className="py-10 text-center text-xs text-text-dim">
-              No data
+              <div className="ui-empty">No data</div>
             </div>
           ) : (
             <div className="h-48">

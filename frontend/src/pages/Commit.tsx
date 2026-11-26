@@ -57,7 +57,7 @@ export default function Commit() {
           </p>
         </div>
         <button
-          className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-1.5 text-sm hover:bg-bg"
+          className="ui-btn ui-btn-secondary"
           onClick={() => navigate("/staging")}
         >
           <ArrowLeft size={14} /> Back to Staging
@@ -67,7 +67,7 @@ export default function Commit() {
       <div className="rounded-lg border border-border bg-bg-elev p-4">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <button
-            className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-2 disabled:opacity-50"
+            className="ui-btn ui-btn-primary"
             onClick={doCommit}
             disabled={commitMut.isPending || rows.length === 0}
           >
@@ -75,14 +75,14 @@ export default function Commit() {
             {commitMut.isPending ? "Working…" : "Commit"}
           </button>
           <button
-            className="flex items-center gap-2 rounded-md bg-danger px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            className="ui-btn ui-btn-danger"
             onClick={doRollback}
             disabled={rollbackMut.isPending}
           >
             <Undo2 size={16} /> Rollback last batch
           </button>
           <button
-            className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-sm hover:bg-bg disabled:opacity-50"
+            className="ui-btn ui-btn-secondary"
             onClick={downloadStagingCsv}
             disabled={rows.length === 0}
           >
@@ -96,7 +96,7 @@ export default function Commit() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-bg-elev">
+      <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border">
@@ -137,11 +137,8 @@ export default function Commit() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td
-                  colSpan={4}
-                  className="px-3 py-6 text-center text-text-dim"
-                >
-                  Nothing staged.
+                <td colSpan={4}>
+                  <div className="ui-empty">Nothing staged.</div>
                 </td>
               </tr>
             )}

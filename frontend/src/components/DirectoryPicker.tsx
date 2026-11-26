@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { ChevronRight, File, Folder, FolderOpen, Plus, Clock } from "lucide-react";
 import { authHeaders, browseFolder, type BrowseEntry, type BrowseResponse } from "../api/client";
 import { useToast } from "../store";
+import { Tooltip } from "./Tooltip";
 
 const RECENTS_KEY = "amr:recent-dirs";
 const MAX_RECENTS = 8;
@@ -109,15 +110,15 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
             <Clock size={12} /> Recent
           </span>
           {recents.map((dir) => (
-            <button
-              key={dir}
-              type="button"
-              title={dir}
-              onClick={() => doBrowse(dir)}
-              className="max-w-[200px] truncate rounded-full border border-border bg-bg px-2.5 py-1 text-xs text-text-dim hover:border-accent hover:text-text"
-            >
-              {dir.split(/[\\/]/).filter(Boolean).slice(-1)[0] || dir}
-            </button>
+            <Tooltip key={dir} label={dir} side="bottom">
+              <button
+                type="button"
+                onClick={() => doBrowse(dir)}
+                className="max-w-[200px] truncate rounded-full border border-border bg-bg px-2.5 py-1 text-xs text-text-dim hover:border-accent hover:text-text"
+              >
+                {dir.split(/[\\/]/).filter(Boolean).slice(-1)[0] || dir}
+              </button>
+            </Tooltip>
           ))}
         </div>
       )}
@@ -138,19 +139,19 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
             Drives
           </span>
           {browse.drives.map((drive) => (
-            <button
-              key={drive}
-              type="button"
-              onClick={() => doBrowse(drive)}
-              className={`rounded-full border px-2.5 py-1 text-xs hover:border-accent hover:text-accent ${
-                browse.path.toLowerCase().startsWith(drive.toLowerCase())
-                  ? "border-accent text-accent"
-                  : "border-border bg-bg text-text-dim"
-              }`}
-              title={`Browse ${drive}`}
-            >
-              {drive}
-            </button>
+            <Tooltip key={drive} label={`Browse ${drive}`} side="bottom">
+              <button
+                type="button"
+                onClick={() => doBrowse(drive)}
+                className={`rounded-full border px-2.5 py-1 text-xs hover:border-accent hover:text-accent ${
+                  browse.path.toLowerCase().startsWith(drive.toLowerCase())
+                    ? "border-accent text-accent"
+                    : "border-border bg-bg text-text-dim"
+                }`}
+              >
+                {drive}
+              </button>
+            </Tooltip>
           ))}
         </div>
       )}
@@ -201,18 +202,17 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
                     {f.kind}
                   </span>
                   {f.is_media && (
-                    <span
-                      className="flex items-center gap-1 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent"
-                      title="Add to analysis"
-                    >
-                      <Plus size={11} /> add
-                    </span>
+                    <Tooltip label="Add to analysis">
+                      <span className="flex items-center gap-1 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent">
+                        <Plus size={11} /> add
+                      </span>
+                    </Tooltip>
                   )}
                 </div>
               </li>
             ))}
             {browse.folders.length === 0 && browse.files.length === 0 && (
-              <li className="p-3 text-xs text-text-dim">Empty folder.</li>
+              <li><div className="ui-empty">Empty folder.</div></li>
             )}
           </ul>
         )}
