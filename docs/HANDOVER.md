@@ -4,7 +4,7 @@ This file records state on disk, not conversation history. Read it before making
 
 ## Current work
 
-- Active branch: `pipeline/2026-11-26` (local only, **not pushed**).
+- Active branch: `pipeline/2026-11-26`, pushed to `origin/pipeline/2026-11-26` after user approval. Not merged into `main`.
 - Base: `main` at `00d53c5` (v2.2.5 release plus earlier cleanup).
 - Task in this pipeline: thorough UI analysis and modernisation — modern, elegant, user friendly, actionable, with tooltips.
 
@@ -45,7 +45,7 @@ No E2E test suite exists in this repository; the browser checks above were manua
 
 - Tray menu clicks: Show, Quit, Setup & Dependencies.
 - Clean-machine first-run wizard with an empty `%APPDATA%\ai-media-renamer`.
-- Explicit approval before push, release build, or deployment. Gate B "proceed" authorised handover only.
+- Explicit approval before a release build or deployment. Push of this branch was approved and completed; merging into `main` is still pending.
 
 ## Warnings and hard stops
 
