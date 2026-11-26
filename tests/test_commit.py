@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import engine as engine_mod
 from engine import (
     UNDO_LOG_FILE,
     ExifToolSession,
@@ -417,6 +418,26 @@ class TestUndoRollback:
         result = rollback_last_batch()
         assert result["ok"] is True
         assert result["restored"] == 1
+        assert orig.exists()
+        assert not dest.exists()
+
+    def test_rollback_without_exiftool_when_no_tags(self, tmp_path: Path, monkeypatch) -> None:
+        def _no_exiftool():
+            raise RuntimeError("ExifTool not found")
+
+        monkeypatch.setattr(engine_mod, "ExifToolSession", _no_exiftool)
+        orig = tmp_path / "source" / "clip.mp4"
+        orig.parent.mkdir(parents=True)
+        orig.write_bytes(b"\x00" * 64)
+        dest = tmp_path / "dest" / "renamed.mp4"
+        dest.parent.mkdir(parents=True)
+        shutil.copy2(str(orig), str(dest))
+        orig.unlink()
+        log_commit_batch("no-exif", str(tmp_path / "dest"), [
+            {"original_path": str(orig), "new_path": str(dest), "category": "test", "tags": []}
+        ])
+        result = rollback_last_batch()
+        assert result["ok"] is True
         assert orig.exists()
         assert not dest.exists()
 

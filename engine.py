@@ -2864,11 +2864,15 @@ def rollback_last_batch() -> dict[str, Any]:
     failed = 0
     errors: list[str] = []
 
-    try:
-        exif = ExifToolSession()
-    except RuntimeError as exc:
-        return {"ok": False, "restored": 0, "failed": len(records),
-                "errors": [str(exc)], "batch_id": batch_id}
+    # Only need ExifTool when there is metadata to strip. A commit made with
+    # skip_metadata must be reversible even on a machine without ExifTool.
+    exif = None
+    if any(rec.get("injected_tags") for rec in records):
+        try:
+            exif = ExifToolSession()
+        except RuntimeError as exc:
+            return {"ok": False, "restored": 0, "failed": len(records),
+                    "errors": [str(exc)], "batch_id": batch_id}
 
     for rec in records:
         orig = Path(rec["original_path"])
@@ -2887,7 +2891,8 @@ def rollback_last_batch() -> dict[str, Any]:
                         tag_args.append(f"-{t}=")
                     tag_args.append(str(orig))
                     try:
-                        exif.execute(tag_args)
+                        if exif is not None:
+                            exif.execute(tag_args)
                     except Exception:
                         pass
 
@@ -2899,10 +2904,11 @@ def rollback_last_batch() -> dict[str, Any]:
             failed += 1
             errors.append(f"{orig.name}: {e}")
 
-    try:
-        exif.close()
-    except Exception:
-        pass
+    if exif is not None:
+        try:
+            exif.close()
+        except Exception:
+            pass
 
     if failed == 0:
         # Full success: drop the batch from the undo log so it cannot be rolled back twice.
