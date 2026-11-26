@@ -220,7 +220,7 @@ export default function App() {
               Best viewed at 1024px or wider.
             </span>
             <button
-              className="shrink-0 rounded p-1 hover:bg-warn/20"
+              className="ui-btn-icon shrink-0 rounded p-1 hover:bg-warn/20"
               onClick={() => setShowNarrow(false)}
               aria-label="Dismiss"
             >

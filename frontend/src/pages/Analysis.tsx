@@ -483,7 +483,7 @@ export default function Analysis() {
                   <FolderOpen size={13} className="shrink-0 text-text-dim" />
                   <span className="flex-1 truncate">{f}</span>
                   <button
-                    className="shrink-0 text-text-dim hover:text-danger"
+                    className="ui-btn-icon shrink-0 text-text-dim hover:text-danger"
                     onClick={() => removeFile(f)}
                     aria-label="Remove"
                   >
@@ -617,7 +617,7 @@ export default function Analysis() {
       {/* Run */}
       <div className="flex items-center gap-3">
         <button
-          className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-2 disabled:opacity-50"
+          className="ui-btn ui-btn-primary"
           onClick={runAnalysis}
           disabled={progress.running}
         >
@@ -626,7 +626,7 @@ export default function Analysis() {
         </button>
         {progress.running && (
           <button
-            className="flex items-center gap-2 rounded-md bg-danger px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+            className="ui-btn ui-btn-danger"
             onClick={cancel}
           >
             <Square size={16} />

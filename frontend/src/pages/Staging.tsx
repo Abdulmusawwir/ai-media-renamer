@@ -450,7 +450,7 @@ export default function Staging() {
           </p>
         </div>
         <button
-          className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-2"
+          className="ui-btn ui-btn-primary"
           onClick={() => navigate("/commit")}
         >
           Go to Commit <ArrowRight size={16} />
@@ -478,7 +478,7 @@ export default function Staging() {
           ))}
         </select>
         <button
-          className="flex items-center gap-1.5 rounded-md border border-border bg-bg-elev-2 px-3 py-1.5 text-sm hover:bg-bg"
+          className="ui-btn ui-btn-secondary"
           onClick={applyBulk}
           disabled={bulk.isPending}
         >
@@ -497,14 +497,14 @@ export default function Staging() {
             className="w-56 rounded-md border border-border bg-bg px-3 py-1.5 text-sm placeholder:text-text-dim"
           />
           <button
-            className="flex items-center gap-1.5 rounded-md border border-border bg-bg-elev-2 px-3 py-1.5 text-sm hover:bg-bg"
+            className="ui-btn ui-btn-secondary"
             onClick={onSave}
             disabled={save.isPending}
           >
             <Save size={14} /> Save
           </button>
           <button
-            className="flex items-center gap-1.5 rounded-md border border-border bg-bg-elev-2 px-3 py-1.5 text-sm hover:bg-bg"
+            className="ui-btn ui-btn-secondary"
             onClick={downloadStagingCsv}
           >
             <Download size={14} /> Export CSV

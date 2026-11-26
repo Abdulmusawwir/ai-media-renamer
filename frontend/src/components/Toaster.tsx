@@ -37,7 +37,7 @@ export default function Toaster() {
               <span className="flex-1 break-words">{t.message}</span>
               <button
                 onClick={() => dismiss(t.id)}
-                className="shrink-0 opacity-70 hover:opacity-100"
+                className="ui-btn-icon shrink-0 opacity-70 hover:opacity-100"
                 aria-label="Dismiss"
               >
                 <X size={14} />

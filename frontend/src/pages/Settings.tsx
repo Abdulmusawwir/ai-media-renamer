@@ -240,14 +240,14 @@ export default function Settings() {
           <div className="mt-3 flex gap-2">
             <button
               type="button"
-              className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-sm hover:bg-bg"
+              className="ui-btn ui-btn-secondary"
               onClick={() => desktop.invoke("open_logs").catch((e) => toast.error(String(e)))}
             >
               <FileText size={14} /> Open logs
             </button>
             <button
               type="button"
-              className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-sm hover:bg-bg"
+              className="ui-btn ui-btn-secondary"
               onClick={() => desktop.invoke("open_data_folder").catch((e) => toast.error(String(e)))}
             >
               <FolderOpen size={14} /> Open data folder
@@ -275,7 +275,7 @@ export default function Settings() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-sm hover:bg-bg disabled:opacity-50"
+                className="ui-btn ui-btn-secondary"
                 onClick={runUpdateCheck}
                 disabled={updateState === "checking" || updateState === "downloading" || updateState === "installing"}
               >
@@ -294,7 +294,7 @@ export default function Settings() {
                 )}
                 <button
                   type="button"
-                  className="mt-3 flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-2"
+                  className="ui-btn ui-btn-primary mt-3"
                   onClick={installUpdate}
                 >
                   <Download size={14} /> Install update
@@ -339,14 +339,14 @@ export default function Settings() {
         />
         <div className="mt-3 flex items-center gap-2">
           <button
-            className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-2 disabled:opacity-50"
+            className="ui-btn ui-btn-primary"
             onClick={save}
             disabled={put.isPending || !dirty}
           >
             <Save size={16} /> Save config
           </button>
           <button
-            className="flex items-center gap-2 rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-sm hover:bg-bg"
+            className="ui-btn ui-btn-secondary"
             onClick={reload}
           >
             <RefreshCw size={14} /> Reload
