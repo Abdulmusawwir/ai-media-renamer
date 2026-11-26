@@ -388,14 +388,6 @@ tbody tr:hover {
 }
 
 /* Shared UI primitives. Pages opt in; existing markup is unaffected. */
-.ui-card {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4);
-  box-shadow: var(--shadow-card);
-}
-
 .ui-btn {
   display: inline-flex;
   align-items: center;
@@ -446,8 +438,7 @@ tbody tr:hover {
   color: var(--text);
 }
 
-.ui-empty,
-.ui-error {
+.ui-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -460,11 +451,6 @@ tbody tr:hover {
   color: var(--text-dim);
   text-align: center;
 }
-.ui-error {
-  border-color: rgba(239, 68, 68, 0.4);
-  color: var(--danger);
-}
-
 .ui-inline-error {
   border: 1px solid rgba(239, 68, 68, 0.4);
   border-radius: var(--radius-md);
@@ -472,17 +458,6 @@ tbody tr:hover {
   padding: 8px 12px;
   color: var(--danger);
   font-size: 13px;
-}
-
-.ui-badge {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 2px 9px;
-  font-size: 11px;
-  font-weight: 600;
-  background: var(--accent-soft);
-  color: var(--accent);
 }
 
 .ui-spinner {
