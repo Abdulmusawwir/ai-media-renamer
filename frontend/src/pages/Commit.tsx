@@ -96,7 +96,7 @@ export default function Commit() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-bg-elev">
+      <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border">

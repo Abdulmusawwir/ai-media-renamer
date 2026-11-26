@@ -525,7 +525,7 @@ export default function Staging() {
         {/* Table */}
         <div
           ref={parentRef}
-          className="max-h-[600px] overflow-auto rounded-lg border border-border bg-bg-elev lg:col-span-3"
+          className="ui-scroll max-h-[600px] max-w-full rounded-lg border border-border bg-bg-elev lg:col-span-3"
         >
           <table className="w-full border-collapse text-sm">
             <thead>

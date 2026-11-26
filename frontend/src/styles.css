@@ -37,6 +37,31 @@
   box-sizing: border-box;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #333a48;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #445068;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ui-scroll {
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 :focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);

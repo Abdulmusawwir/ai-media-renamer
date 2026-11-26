@@ -36,7 +36,7 @@ export default function Sessions() {
         <div className="flex items-center gap-2">
           <SkeletonRows rows={1} className="!space-y-0" />
         </div>
-        <div className="overflow-x-auto rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev p-4">
           <SkeletonRows rows={5} />
         </div>
       </div>
@@ -105,7 +105,7 @@ export default function Sessions() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-bg-elev">
+      <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border">

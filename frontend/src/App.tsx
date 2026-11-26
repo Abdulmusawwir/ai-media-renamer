@@ -246,7 +246,7 @@ export default function App() {
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2 }}
-            className="mx-auto max-w-5xl"
+            className="mx-auto w-full max-w-[1400px]"
           >
             {/* Per-page boundary: a crash on one route shows a fallback without
                 tearing down the app shell (sidebar / header stay alive). The
