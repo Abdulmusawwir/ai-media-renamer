@@ -311,7 +311,7 @@ export default function Settings() {
             )}
             {updateState === "error" && (
               <div className="space-y-2">
-                <div className="text-sm text-err">{updateError || "Update failed."}</div>
+                <div className="ui-inline-error">{updateError || "Update failed."}</div>
                 <button
                   type="button"
                   className="rounded-md border border-border bg-bg-elev-2 px-3 py-2 text-xs hover:bg-bg"

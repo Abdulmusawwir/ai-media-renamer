@@ -110,9 +110,8 @@ export default function Models() {
               <tr>
                 <td
                   colSpan={3}
-                  className="px-3 py-6 text-center text-text-dim"
                 >
-                  No models in catalog.
+                  <div className="ui-empty">No models in catalog.</div>
                 </td>
               </tr>
             )}

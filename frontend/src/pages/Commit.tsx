@@ -137,11 +137,8 @@ export default function Commit() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td
-                  colSpan={4}
-                  className="px-3 py-6 text-center text-text-dim"
-                >
-                  Nothing staged.
+                <td colSpan={4}>
+                  <div className="ui-empty">Nothing staged.</div>
                 </td>
               </tr>
             )}

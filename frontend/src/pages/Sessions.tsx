@@ -164,9 +164,8 @@ export default function Sessions() {
               <tr>
                 <td
                   colSpan={3}
-                  className="px-3 py-6 text-center text-text-dim"
                 >
-                  No saved sessions.
+                  <div className="ui-empty">No saved sessions.</div>
                 </td>
               </tr>
             )}

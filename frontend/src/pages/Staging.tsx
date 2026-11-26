@@ -458,7 +458,7 @@ export default function Staging() {
       </div>
 
       {query.isError && (
-        <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+        <div className="ui-inline-error">
           Failed to load staging: {String(query.error)}
         </div>
       )}
@@ -598,11 +598,8 @@ export default function Staging() {
               )}
               {visibleRows.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={columns.length}
-                    className="px-3 py-6 text-center text-text-dim"
-                  >
-                    No staged assets. Run an analysis first.
+                  <td colSpan={columns.length}>
+                    <div className="ui-empty">No staged assets. Run an analysis first.</div>
                   </td>
                 </tr>
               )}

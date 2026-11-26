@@ -440,6 +440,15 @@ tbody tr:hover {
   color: var(--danger);
 }
 
+.ui-inline-error {
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: var(--radius-md);
+  background: rgba(239, 68, 68, 0.1);
+  padding: 8px 12px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
 .ui-badge {
   display: inline-flex;
   align-items: center;
