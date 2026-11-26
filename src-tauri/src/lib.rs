@@ -53,6 +53,12 @@ pub fn run() {
             commands::quit_app
         ])
         .on_window_event(|window, event| {
+            // Only the main window honours close-to-tray. The splash is closed
+            // by `desktop_ready` during every startup; intercepting that close
+            // kept the splash alive and looked like a random tray notification.
+            if window.label() != "main" {
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle();
                 let state = app.state::<ShellState>();
