@@ -7,11 +7,11 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg: #0b1020;
-        --panel: #141b2d;
-        --accent: #6d8dff;
-        --text: #eef2ff;
-        --muted: #9aa7c7;
+        --bg: #070b16;
+        --card: rgba(17, 24, 42, 0.92);
+        --accent: #7c9cff;
+        --text: #f4f7ff;
+        --muted: #9aa8c9;
       }
 
       * {
@@ -20,64 +20,92 @@
 
       html,
       body {
+        width: 100%;
         height: 100%;
         margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: var(--bg);
       }
 
       body {
+        position: relative;
         display: grid;
         place-items: center;
-        background:
-          radial-gradient(circle at 20% 15%, rgba(109, 141, 255, 0.28), transparent 45%),
-          radial-gradient(circle at 85% 90%, rgba(109, 141, 255, 0.16), transparent 40%),
-          var(--bg);
         color: var(--text);
         font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
         user-select: none;
       }
 
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(1100px 620px at 12% -10%, rgba(92, 124, 255, 0.22), transparent 60%),
+          radial-gradient(900px 600px at 100% 110%, rgba(126, 92, 255, 0.16), transparent 62%),
+          linear-gradient(160deg, #0b1122 0%, #070b16 100%);
+      }
+
       main {
+        position: relative;
+        width: 350px;
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 10px;
-        padding: 28px 34px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 18px;
-        background: rgba(20, 27, 45, 0.82);
-        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+        gap: 12px;
+        padding: 30px 32px 28px;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 22px;
+        background: var(--card);
+        box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(14px);
+      }
+
+      main::before {
+        content: "";
+        position: absolute;
+        top: -1px;
+        left: 32px;
+        right: 32px;
+        height: 2px;
+        border-radius: 2px;
+        background: linear-gradient(90deg, transparent, var(--accent), transparent);
+        opacity: 0.85;
       }
 
       .mark {
         display: grid;
         place-items: center;
-        width: 56px;
-        height: 56px;
-        border-radius: 16px;
-        background: linear-gradient(145deg, #7d9aff, #4d6cf0);
+        width: 58px;
+        height: 58px;
+        border-radius: 18px;
+        background: linear-gradient(145deg, #8fa8ff, #5271e8);
+        box-shadow: 0 10px 24px rgba(82, 113, 232, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
         color: #fff;
-        font-size: 20px;
+        font-size: 21px;
         font-weight: 700;
         letter-spacing: 0.5px;
       }
 
       h1 {
-        margin: 4px 0 0;
+        margin: 2px 0 0;
         font-size: 19px;
         font-weight: 600;
+        letter-spacing: 0.1px;
       }
 
       p {
         margin: 0;
         color: var(--muted);
-        font-size: 13px;
+        font-size: 12.5px;
       }
 
       .spinner {
-        margin-top: 10px;
-        width: 26px;
-        height: 26px;
-        border: 3px solid rgba(255, 255, 255, 0.12);
+        margin-top: 8px;
+        width: 28px;
+        height: 28px;
+        border: 3px solid rgba(255, 255, 255, 0.1);
         border-top-color: var(--accent);
         border-radius: 50%;
         animation: spin 0.9s linear infinite;
@@ -100,7 +128,7 @@
     <main>
       <div class="mark">AI</div>
       <h1>AI Media Renamer</h1>
-      <p>Setting up AI Media Renamer...</p>
+      <p>Setting up your workspace…</p>
       <div class="spinner" aria-hidden="true"></div>
     </main>
   </body>

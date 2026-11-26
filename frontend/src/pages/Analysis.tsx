@@ -98,13 +98,33 @@ export default function Analysis() {
   const wsRef = useRef<AnalysisWSController | null>(null);
 
   const [files, setFiles] = useState<string[]>([]);
+  const filesRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
+  const addFiles = useCallback(
+    (paths: string[]) => {
+      const clean = paths.filter(Boolean);
+      if (!clean.length) return;
+      const unique = Array.from(new Set([...filesRef.current, ...clean]));
+      const added = unique.length - filesRef.current.length;
+      filesRef.current = unique;
+      setFiles(unique);
+      if (added > 0) {
+        toast.success(`${added} file${added === 1 ? "" : "s"} added`);
+      }
+    },
+    [toast]
+  );
 
   // Consume paths pushed by the desktop shell (drag/drop, second instance).
   useEffect(() => {
     if (!incomingPaths.length) return;
-    setFiles((prev) => Array.from(new Set([...prev, ...incomingPaths])));
+    addFiles(incomingPaths);
     clearIncomingPaths();
-  }, [incomingPaths, clearIncomingPaths]);
+  }, [incomingPaths, clearIncomingPaths, addFiles]);
   const [profile, setProfile] = useState<string>("");
   const [showSettings, setShowSettings] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
@@ -137,9 +157,9 @@ export default function Analysis() {
         }
         return;
       }
-      setFiles((prev) => Array.from(new Set([...prev, ...paths])));
+      addFiles(paths);
     },
-    [isDesktop, toast]
+    [addFiles, isDesktop, toast]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -149,7 +169,7 @@ export default function Analysis() {
 
   const addFromBrowse = (entry: BrowseEntry) => {
     if (!entry.is_media) return;
-    setFiles((prev) => Array.from(new Set([...prev, entry.path])));
+    addFiles([entry.path]);
   };
 
   const removeFile = (f: string) =>
@@ -397,6 +417,14 @@ export default function Analysis() {
         </div>
         <div
           {...getRootProps()}
+        onClick={async () => {
+          // In the desktop shell the hidden browser input cannot expose real
+          // paths, so route clicks to the native picker instead.
+          if (isDesktop && !isDragActive) {
+            const picked = await desktop.pickFiles();
+            if (picked.length) addFiles(picked);
+          }
+        }}
           className={`cursor-pointer rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
             isDragActive
               ? "border-accent bg-accent/10"
@@ -425,9 +453,7 @@ export default function Analysis() {
               onClick={async () => {
                 const picked = await desktop.pickFiles();
                 if (picked.length) {
-                  setFiles((prev) =>
-                    Array.from(new Set([...prev, ...picked]))
-                  );
+                  addFiles(picked);
                 }
               }}
             >
