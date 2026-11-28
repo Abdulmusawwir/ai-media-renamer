@@ -61,6 +61,7 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
         const res = await browseFolder(target);
         setBrowse(res);
         setPath(res.path);
+        setFilter("");
         // Record user-initiated navigations (skip the initial empty load).
         if (target) pushRecent(res.path);
       } catch (err) {
@@ -109,9 +110,19 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
   const breadcrumbs = (() => {
     const raw = (browse?.path ?? "").replace(/\//g, "\\");
     if (!raw) return [] as { label: string; path: string }[];
+    const parts: { label: string; path: string }[] = [];
+    if (raw.startsWith("\\\\")) {
+      const segments = raw.split("\\").filter(Boolean);
+      let current = "\\\\";
+      for (const segment of segments) {
+        current = `${current}\\${segment}`;
+        parts.push({ label: segment, path: current });
+      }
+      return parts;
+    }
     const drive = raw.match(/^[A-Za-z]:\\?/)?.[0] ?? "";
     const rest = drive ? raw.slice(drive.length).split("\\").filter(Boolean) : raw.split("\\").filter(Boolean);
-    const parts = drive ? [{ label: drive.replace(/\\$/, ""), path: drive }] : [];
+    if (drive) parts.push({ label: drive.replace(/\\$/, ""), path: drive });
     let current = drive;
     for (const segment of rest) {
       current = current ? `${current.replace(/\\$/, "")}\\${segment}` : segment;

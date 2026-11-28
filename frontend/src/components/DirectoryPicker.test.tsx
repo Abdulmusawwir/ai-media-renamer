@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../api/client", () => ({
@@ -47,6 +47,15 @@ describe("DirectoryPicker filter and breadcrumbs", () => {
 
     fireEvent.change(filter, { target: { value: "zzz" } });
     expect(screen.getByText("No matching files here.")).toBeTruthy();
+  });
+
+  it("clears the filter when navigating folders", async () => {
+    render(<DirectoryPicker onAddFile={vi.fn()} />);
+    const filter = (await screen.findByPlaceholderText("Filter this folder by name")) as HTMLInputElement;
+    fireEvent.change(filter, { target: { value: "keep" } });
+    const drive = await screen.findByRole("button", { name: "C:\\" });
+    await fireEvent.click(drive);
+    await waitFor(() => expect(filter.value).toBe(""));
   });
 
   it("renders clickable path segments", async () => {

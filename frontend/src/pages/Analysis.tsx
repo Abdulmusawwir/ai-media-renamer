@@ -72,10 +72,13 @@ const ANALYSIS_STEPS = [
   { label: "Add media", statuses: [""] },
   { label: "Extract", statuses: ["starting", "extracting"] },
   { label: "Analyze", statuses: ["analyzing"] },
-  { label: "Review & commit", statuses: ["complete", "cancelled", "error"] },
+  { label: "Review & commit", statuses: ["complete"] },
 ];
 
 function stepIndexFor(status: string): number {
+  // A failed or cancelled run has no truthful "current" step: the error came
+  // from an unknown phase, so leave the strip neutral and let the log explain.
+  if (status === "error" || status === "cancelled") return -1;
   const found = ANALYSIS_STEPS.findIndex((step) => step.statuses.includes(status));
   return found < 0 ? 0 : found;
 }
