@@ -15,12 +15,17 @@ Current architectural and UI rules. These are facts for the next session, not su
 - Reduced-motion preferences must be respected. `.ui-spinner` keeps a 2.4s rotation so progress is still visible.
 - Empty and error states use `.ui-empty` and `.ui-inline-error` rather than page-specific text alone.
 - Table containers use `.ui-scroll` for contained, styled scrolling.
+- The Analysis page owns one primary action (Run). Source modes and advanced controls live behind small disclosures; results appear as cards, not only a log.
+- Session "Restore" loads staged assets only. The server returns `{loaded, asset_count}`; settings restoration is deliberately deferred and must not be claimed.
+- Per-file status is keyed by basename because the `asset_error` event carries only `path.name`.
+- `frontend/src/utils/relativeTime.ts` and `analysisResults.ts` hold the shared time and result/status helpers.
+- The Tailwind theme uses `ok` for success; `success` is not a defined colour token.
 
 ## Repository and release
 
 - `main` is protected by the GitHub ruleset **Protect main**: changes arrive by pull request and the `tests` check must pass.
 - Local checkpoint commits on `pipeline/<date>` are permitted only after Gate A approval; pushing and deploying are never implied.
-- Release v2.2.6 exists on GitHub and includes the UI changes from the merged `pipeline/2026-11-26` branch.
+- Release v2.2.6 exists on GitHub; its installer and `.sig` were replaced on 2026-11-28 with the build from this branch, at the user's explicit instruction not to bump the version. Check the release assets for the current file.
 - No database, migrations or cron schedules exist in this project.
 
 ## Why these choices
