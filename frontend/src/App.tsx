@@ -233,13 +233,30 @@ export default function App() {
           </div>
         )}
         <header className="flex h-14 items-center justify-between border-b border-border bg-bg-elev px-5">
-          <h1 className="text-[15px] font-semibold">AI Media Renamer</h1>
-          {Boolean(healthVersion || (config && config.version)) && (
-            <div className="flex items-center gap-2 text-xs text-text-dim">
-              <Cpu size={14} />
-              v{healthVersion ?? String(config?.version)}
-            </div>
-          )}
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-text-dim">Workspace</span>
+            <span className="text-text-dim/60">/</span>
+            <span className="font-medium">
+              {NAV_ITEMS.find((item) => item.to === location.pathname)?.label ?? "AI Media Renamer"}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <Tooltip label={engineStatus.title} side="bottom">
+              <span className="ui-status-pill">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${engineStatus.ok ? "bg-ok" : "bg-warn"}`}
+                  aria-hidden="true"
+                />
+                {engineStatus.label}
+              </span>
+            </Tooltip>
+            {Boolean(healthVersion || (config && config.version)) && (
+              <div className="flex items-center gap-2 text-xs text-text-dim">
+                <Cpu size={14} />
+                v{healthVersion ?? String(config?.version)}
+              </div>
+            )}
+          </div>
         </header>
         <main className="flex-1 overflow-auto p-5">
           <motion.div

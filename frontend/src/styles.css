@@ -83,6 +83,18 @@ body {
     var(--bg);
 }
 
+.ui-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 .ui-page-icon {
   display: grid;
   place-items: center;
