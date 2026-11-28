@@ -17,7 +17,7 @@ Current architectural and UI rules. These are facts for the next session, not su
 - Table containers use `.ui-scroll` for contained, styled scrolling.
 - The Analysis page owns one primary action (Run). Source modes and advanced controls live behind small disclosures; results appear as cards, not only a log.
 - Session "Restore" loads staged assets only. The server returns `{loaded, asset_count}`; settings restoration is deliberately deferred and must not be claimed.
-- Per-file status is keyed by basename because the `asset_error` event carries only `path.name`.
+- Per-file status is keyed by the full original path; `asset_error` now carries `path` as well as the basename `name`.
 - `frontend/src/utils/relativeTime.ts` and `analysisResults.ts` hold the shared time and result/status helpers.
 - The Tailwind theme uses `ok` for success; `success` is not a defined colour token.
 

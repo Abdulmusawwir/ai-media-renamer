@@ -123,7 +123,10 @@ export interface ModelsResponse {
 export interface SessionInfo {
   name?: string;
   path?: string;
+  /** The API reports the save timestamp here, not as `modified`. */
+  created?: string;
   modified?: string;
+  asset_count?: number;
   size?: number;
   [key: string]: unknown;
 }

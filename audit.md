@@ -100,6 +100,6 @@
 
 - **Guided Analysis flow** added: source switcher, recents with relative time, live result cards, per-file status, More options disclosure and auto-routing chip. No new dependencies, routes, database or backend changes.
 - **No unresolved bug introduced.** Two issues found during the post-implementation audit and fixed before acceptance: a test file that had overwritten three existing picker tests (restored), and an undefined `success` Tailwind token (replaced with `ok`).
-- **Known limitations, intentional:** session restore returns staged assets and an asset count only, never settings; per-file status matches on basename because `asset_error` carries only `path.name`. Both are documented in `docs/DECISIONS.md`.
+- **Known limitation, intentional:** session restore returns staged assets and an asset count only, never settings. The installed-build test found and fixed two session bugs: `created` (not `modified`) carries the timestamp and the restore id must be the session filename, not its full path. Per-file status was also changed to use the full path from `asset_error`, so same-named files no longer share a badge.
 - **Release note:** at the user's explicit instruction, the v2.2.6 release assets were replaced with this build instead of a version bump.
 

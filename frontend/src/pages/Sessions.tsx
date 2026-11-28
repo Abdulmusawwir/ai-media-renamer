@@ -136,7 +136,8 @@ export default function Sessions() {
                     </span>
                   </td>
                   <td className="px-3 py-1.5 text-text-dim">
-                    {relativeFromIso(String(s.modified ?? "")) || String(s.modified ?? "")}
+                    {relativeFromIso(String(s.created ?? s.modified ?? "")) ||
+                      String(s.created ?? s.modified ?? "")}
                   </td>
                   <td className="px-3 py-1.5">
                     <div className="flex justify-end gap-2">

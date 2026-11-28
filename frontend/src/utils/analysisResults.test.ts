@@ -18,10 +18,10 @@ describe("basename", () => {
 });
 
 describe("initialFileStatus", () => {
-  it("marks every file queued by basename", () => {
+  it("marks every file queued by full path", () => {
     expect(initialFileStatus(["C:\\a\\one.mp4", "/b/two.wav"])).toEqual({
-      "one.mp4": "queued",
-      "two.wav": "queued",
+      "C:\\a\\one.mp4": "queued",
+      "/b/two.wav": "queued",
     });
   });
 
@@ -82,12 +82,22 @@ describe("mergeLiveResult", () => {
 });
 
 describe("file status transitions", () => {
+  it("keeps same-named files apart by full path", () => {
+    let status = initialFileStatus(["C:\\A\\clip.mp4", "C:\\B\\clip.mp4"]);
+    expect(status["C:\\A\\clip.mp4"]).toBe("queued");
+    status = markFileStatus(status, "C:\\A\\clip.mp4", "failed");
+    expect(status).toEqual({
+      "C:\\A\\clip.mp4": "failed",
+      "C:\\B\\clip.mp4": "queued",
+    });
+  });
+
   it("moves a file from queued to done and failed", () => {
     let status = initialFileStatus(["C:\\a\\one.mp4"]);
-    status = markFileStatus(status, "one.mp4", "done");
-    expect(status["one.mp4"]).toBe("done");
-    status = markFileStatus(status, "one.mp4", "failed");
-    expect(status["one.mp4"]).toBe("failed");
+    status = markFileStatus(status, "C:\\a\\one.mp4", "done");
+    expect(status["C:\\a\\one.mp4"]).toBe("done");
+    status = markFileStatus(status, "C:\\a\\one.mp4", "failed");
+    expect(status["C:\\a\\one.mp4"]).toBe("failed");
   });
 
   it("forgets a removed file and keeps the rest", () => {
@@ -103,9 +113,9 @@ describe("file status transitions", () => {
 });
 
 describe("sessionKey", () => {
-  it("prefers the name, then the path", () => {
+  it("prefers the name, then the filename from the path", () => {
     expect(sessionKey({ name: "session-1", path: "C:\\s\\session-1.json" })).toBe("session-1");
-    expect(sessionKey({ path: "C:\\s\\session-2.json" })).toBe("C:\\s\\session-2.json");
+    expect(sessionKey({ path: "C:\\s\\session-2.json" })).toBe("session-2.json");
     expect(sessionKey({})).toBe("");
   });
 });
