@@ -13,6 +13,7 @@ import {
   Clock,
 } from "lucide-react";
 import { authHeaders, browseFolder, type BrowseEntry, type BrowseResponse } from "../api/client";
+import { relativeTime } from "../utils/relativeTime";
 import { useToast } from "../store";
 import { Tooltip } from "./Tooltip";
 
@@ -49,15 +50,6 @@ export function readRecentDirs(): RecentDir[] {
   } catch {
     return [];
   }
-}
-
-export function relativeTime(at: number): string {
-  if (!at) return "";
-  const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000));
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
 }
 
 interface DirectoryPickerProps {

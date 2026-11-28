@@ -19,17 +19,19 @@ import {
   connectAnalysisWS,
   getAnalysisToken,
   getStaging,
+  loadSession,
   type AnalysisWSController,
   type AnalysisParams,
   type BrowseEntry,
 } from "../api/client";
+import { useSessions } from "../hooks/api";
 import { useStore, useToast, type AnalysisSettings } from "../store";
 import { desktop, isDesktop } from "../desktop";
 import DirectoryPicker, {
   readRecentDirs,
-  relativeTime,
   type RecentDir,
 } from "../components/DirectoryPicker";
+import { relativeTime, relativeFromIso } from "../utils/relativeTime";
 import { Tooltip } from "../components/Tooltip";
 import { Spinner } from "../components/Skeleton";
 
@@ -127,6 +129,31 @@ export default function Analysis() {
   const analysisSettings = useStore((s) => s.analysisSettings);
   const setAnalysisSettings = useStore((s) => s.setAnalysisSettings);
   const staged = useStore((s) => s.staged);
+  const sessionsQuery = useSessions();
+  const latestSession = (() => {
+    const list = [...(sessionsQuery.data?.sessions ?? [])];
+    list.sort((a, b) => {
+      const ta = Date.parse(String(a.modified ?? ""));
+      const tb = Date.parse(String(b.modified ?? ""));
+      return (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
+    });
+    return list[0];
+  })();
+
+  const restoreLatestSession = async () => {
+    if (!latestSession) return;
+    const id = String(latestSession.name ?? latestSession.path ?? "");
+    if (!id) return;
+    try {
+      const res = await loadSession(id);
+      toast.success(`Session restored: ${res.asset_count} assets.`);
+      navigate("/staging");
+    } catch (err) {
+      toast.error(
+        `Could not restore that session. Open Sessions from the sidebar to retry. (${String(err)})`
+      );
+    }
+  };
 
   const wsRef = useRef<AnalysisWSController | null>(null);
 
@@ -526,7 +553,7 @@ export default function Analysis() {
         description="Add media, choose an AI profile and settings, then run the pipeline."
       />
 
-      {staged.length > 0 && (
+      {staged.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2.5 text-xs">
           <span className="text-text-dim">
             Last run:{" "}
@@ -543,7 +570,24 @@ export default function Analysis() {
             Review &amp; commit
           </button>
         </div>
-      )}
+      ) : latestSession ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2.5 text-xs">
+          <span className="text-text-dim">
+            Last saved session:{" "}
+            <span className="font-semibold text-text">
+              {relativeFromIso(String(latestSession.modified ?? "")) ||
+                String(latestSession.name ?? latestSession.path ?? "saved session")}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="ui-btn ui-btn-secondary"
+            onClick={restoreLatestSession}
+          >
+            Restore
+          </button>
+        </div>
+      ) : null}
 
       {/* Step 1: sources */}
       <div className="ui-surface">
