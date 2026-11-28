@@ -20,10 +20,9 @@ export default function Models() {
   const normalise = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
   const isOnServer = (name: string) => {
     const wanted = normalise(name);
-    return serverModels.some((model) => {
-      const found = normalise(model);
-      return found.includes(wanted) || wanted.includes(found);
-    });
+    // Exact match only. A partial match would claim "On server" for a similar
+    // but different model (for example 7b-chat when the catalog lists 7b).
+    return serverModels.some((model) => normalise(model) === wanted);
   };
 
   const onDownload = async (name: string) => {
