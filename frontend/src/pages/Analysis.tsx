@@ -687,8 +687,15 @@ export default function Analysis() {
                 ))}
               </ul>
             ) : (
-              <p className="p-2 text-xs text-text-dim">
-                No recent folders yet. Browse a folder first.
+              <p className="flex flex-wrap items-center gap-2 p-2 text-xs text-text-dim">
+                No recent folders yet.
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-secondary"
+                  onClick={() => setSource("folder")}
+                >
+                  Open folder browser
+                </button>
               </p>
             )}
           </div>
@@ -714,7 +721,7 @@ export default function Analysis() {
                     <span
                       className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
                         status === "done"
-                          ? "bg-success/15 text-success"
+                          ? "bg-ok/15 text-ok"
                           : status === "failed"
                             ? "bg-danger/15 text-danger"
                             : "bg-bg-elev-2 text-text-dim"
@@ -991,7 +998,7 @@ export default function Analysis() {
             {progress.log.join("\n")}
           </div>
           {progress.status === "complete" && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-ok/30 bg-ok/10 px-3 py-2 text-xs">
               <span>
                 <span className="font-semibold">{completedCount}</span> asset
                 {completedCount === 1 ? "" : "s"} analysed and staged.
