@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { useMemo, useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -25,6 +26,7 @@ import {
   Save,
   Tag,
   ArrowRight,
+  Layers,
 } from "lucide-react";
 import { type StagedAsset } from "../api/client";
 import {
@@ -442,20 +444,16 @@ export default function Staging() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Staging</h2>
-          <p className="text-sm text-text-dim">
-            Review and edit AI suggestions before committing to disk.
-          </p>
-        </div>
-        <button
-          className="ui-btn ui-btn-primary"
-          onClick={() => navigate("/commit")}
-        >
-          Go to Commit <ArrowRight size={16} />
-        </button>
-      </div>
+      <PageHeader
+        icon={Layers}
+        title="Staging"
+        description="Review and edit AI suggestions before committing to disk."
+        action={
+          <button className="ui-btn ui-btn-primary" onClick={() => navigate("/commit")}>
+            Go to Commit <ArrowRight size={16} />
+          </button>
+        }
+      />
 
       {query.isError && (
         <div className="ui-inline-error">

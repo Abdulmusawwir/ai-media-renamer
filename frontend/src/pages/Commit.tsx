@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -48,21 +49,16 @@ export default function Commit() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Commit &amp; Export</h2>
-          <p className="text-sm text-text-dim">
-            Persist staged assets to disk (rename + metadata) or roll back the
-            last batch.
-          </p>
-        </div>
-        <button
-          className="ui-btn ui-btn-secondary"
-          onClick={() => navigate("/staging")}
-        >
-          <ArrowLeft size={14} /> Back to Staging
-        </button>
-      </div>
+      <PageHeader
+        icon={GitCommit}
+        title="Commit & Export"
+        description="Persist staged assets to disk (rename + metadata) or roll back the last batch."
+        action={
+          <button className="ui-btn ui-btn-secondary" onClick={() => navigate("/staging")}>
+            <ArrowLeft size={14} /> Back to Staging
+          </button>
+        }
+      />
 
       <div className="ui-surface">
         <div className="mb-3 flex flex-wrap items-center gap-2">

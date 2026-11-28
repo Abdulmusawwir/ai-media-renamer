@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { motion } from "framer-motion";
 import { Download, Cpu, Boxes } from "lucide-react";
 import { useModels, useDownloadModel } from "../hooks/api";
@@ -23,13 +24,11 @@ export default function Models() {
   if (query.isLoading) {
     return (
       <div className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold">Models</h2>
-          <p className="text-sm text-text-dim">
-            Available providers and models. Downloads are handled by the backend
-            setup tooling.
-          </p>
-        </div>
+        <PageHeader
+          icon={Boxes}
+          title="Models"
+          description="Available providers and models. Downloads are handled by the backend setup tooling."
+        />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Skeleton className="h-16" />
           <Skeleton className="h-16" />

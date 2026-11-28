@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDropzone } from "react-dropzone";
@@ -403,12 +404,11 @@ export default function Analysis() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Analysis Wizard</h2>
-        <p className="text-sm text-text-dim">
-          Add media, choose an AI profile and settings, then run the pipeline.
-        </p>
-      </div>
+      <PageHeader
+        icon={UploadCloud}
+        title="Analysis Wizard"
+        description="Add media, choose an AI profile and settings, then run the pipeline."
+      />
 
       {/* Step 1: sources */}
       <div className="ui-surface">

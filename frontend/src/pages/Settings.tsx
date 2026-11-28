@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Save, RefreshCw, Cpu, Sparkles, FolderOpen, FileText, Download, ExternalLink } from "lucide-react";
@@ -162,13 +163,11 @@ export default function Settings() {
   if (query.isLoading) {
     return (
       <div className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold">Settings</h2>
-          <p className="text-sm text-text-dim">
-            View and edit the engine configuration (saved to config.json on the
-            backend).
-          </p>
-        </div>
+        <PageHeader
+          icon={Cpu}
+          title="Settings"
+          description="View and edit the engine configuration (saved to config.json on the backend)."
+        />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Skeleton className="h-20" />
           <Skeleton className="h-20" />

@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Save, Trash2, FolderOpen, RefreshCw } from "lucide-react";
@@ -76,28 +77,21 @@ export default function Sessions() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Sessions</h2>
-        <p className="text-sm text-text-dim">
-          Save, restore, and delete staging sessions.
-        </p>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <button
-          className="ui-btn ui-btn-primary"
-          onClick={onSave}
-          disabled={save.isPending}
-        >
-          <Save size={16} /> Save current session
-        </button>
-        <button
-          className="ui-btn ui-btn-secondary"
-          onClick={() => query.refetch()}
-        >
-          <RefreshCw size={14} /> Refresh
-        </button>
-      </div>
+      <PageHeader
+        icon={FolderOpen}
+        title="Sessions"
+        description="Save, restore, and delete staging sessions."
+        action={
+          <>
+            <button className="ui-btn ui-btn-primary" onClick={onSave} disabled={save.isPending}>
+              <Save size={16} /> Save current session
+            </button>
+            <button className="ui-btn ui-btn-secondary" onClick={() => query.refetch()}>
+              <RefreshCw size={14} /> Refresh
+            </button>
+          </>
+        }
+      />
 
       {notice && (
         <div className="rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-accent">
