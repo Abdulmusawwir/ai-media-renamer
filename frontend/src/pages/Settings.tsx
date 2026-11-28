@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Save, RefreshCw, Cpu, Sparkles, FolderOpen, FileText, Download, ExternalLink } from "lucide-react";
@@ -7,6 +8,7 @@ import { Skeleton } from "../components/Skeleton";
 import type { Json } from "../api/client";
 import { desktop, isDesktop } from "../desktop";
 import { formatUpdateError } from "../desktop/updateErrors";
+import { Tooltip } from "../components/Tooltip";
 
 export default function Settings() {
   const toast = useToast();
@@ -162,13 +164,11 @@ export default function Settings() {
   if (query.isLoading) {
     return (
       <div className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold">Settings</h2>
-          <p className="text-sm text-text-dim">
-            View and edit the engine configuration (saved to config.json on the
-            backend).
-          </p>
-        </div>
+        <PageHeader
+          icon={Cpu}
+          title="Settings"
+          description="View and edit the engine configuration (saved to config.json on the backend)."
+        />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Skeleton className="h-20" />
           <Skeleton className="h-20" />
@@ -199,13 +199,13 @@ export default function Settings() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
           <div className="mb-1 flex items-center gap-2 text-xs font-medium text-text-dim">
             <Cpu size={14} /> Provider
           </div>
           <div className="text-sm">{String(provider)}</div>
         </div>
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
           <div className="mb-1 flex items-center gap-2 text-xs font-medium text-text-dim">
             <Sparkles size={14} /> Prompt profiles
           </div>
@@ -216,7 +216,7 @@ export default function Settings() {
       </div>
 
       {isDesktop && (
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
           <div className="mb-3 text-xs font-medium text-text-dim">
             Desktop shell
           </div>
@@ -256,7 +256,7 @@ export default function Settings() {
         </div>
       )}
 
-      <div className="rounded-lg border border-border bg-bg-elev p-4">
+      <div className="ui-surface">
         <div className="mb-3 text-xs font-medium text-text-dim">Updates</div>
         {!isDesktop ? (
           <p className="text-sm text-text-dim">
@@ -325,43 +325,82 @@ export default function Settings() {
         )}
       </div>
 
-      <div className="rounded-lg border border-border bg-bg-elev p-4">
-        <label className="mb-2 block text-xs font-medium text-text-dim">
-          Raw config (JSON)
-        </label>
-        <textarea
-          className="h-80 w-full rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs"
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            setDirty(true);
-          }}
-        />
-        <div className="mt-3 flex items-center gap-2">
-          <button
-            className="ui-btn ui-btn-primary"
-            onClick={save}
-            disabled={put.isPending || !dirty}
-          >
-            <Save size={16} /> Save config
-          </button>
-          <button
-            className="ui-btn ui-btn-secondary"
-            onClick={reload}
-          >
-            <RefreshCw size={14} /> Reload
-          </button>
-          {dirty && (
-            <motion.span
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="text-xs text-warn"
-            >
-              Unsaved changes
-            </motion.span>
-          )}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="ui-surface">
+          <Tooltip label="Profile used for video and image assets" side="bottom">
+            <span className="mb-1 block text-xs text-text-dim">AI profile</span>
+          </Tooltip>
+          <div className="text-sm font-medium">
+            {String((config?.prompt_profiles as Json | undefined)?.active ?? "—")}
+          </div>
+        </div>
+        <div className="ui-surface">
+          <Tooltip label="Default filename style and length limit" side="bottom">
+            <span className="mb-1 block text-xs text-text-dim">Naming</span>
+          </Tooltip>
+          <div className="text-sm font-medium">
+            {String((config?.naming as Json | undefined)?.case_style ?? "—")}
+          </div>
+          <div className="mt-1 text-[11px] text-text-dim">
+            Max chars: {String((config?.naming as Json | undefined)?.max_filename_chars ?? 0)}
+          </div>
+        </div>
+        <div className="ui-surface">
+          <Tooltip label="Taxonomy entries available in staging" side="bottom">
+            <span className="mb-1 block text-xs text-text-dim">Categories</span>
+          </Tooltip>
+          <div className="text-sm font-medium">
+            {Array.isArray(config?.allowed_categories) ? config.allowed_categories.length : "—"}
+          </div>
+        </div>
+        <div className="ui-surface">
+          <Tooltip label="GGUF alias currently configured for llama.cpp" side="bottom">
+            <span className="mb-1 block text-xs text-text-dim">Local model</span>
+          </Tooltip>
+          <div className="truncate text-sm font-medium">
+            {String(
+              ((config?.model as Json | undefined)?.llamacpp as Json | undefined)?.gguf_name ?? "—"
+            )}
+          </div>
         </div>
       </div>
+
+      <details className="ui-surface">
+        <summary className="cursor-pointer text-xs font-medium text-text-dim">
+          Advanced: raw config (JSON)
+        </summary>
+        <div className="mt-3">
+          <textarea
+            className="h-80 w-full rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs"
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              setDirty(true);
+            }}
+          />
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              className="ui-btn ui-btn-primary"
+              onClick={save}
+              disabled={put.isPending || !dirty}
+            >
+              <Save size={16} /> Save config
+            </button>
+            <button className="ui-btn ui-btn-secondary" onClick={reload}>
+              <RefreshCw size={14} /> Reload
+            </button>
+            {dirty && (
+              <motion.span
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-xs text-warn"
+              >
+                Unsaved changes
+              </motion.span>
+            )}
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

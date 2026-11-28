@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Save, Trash2, FolderOpen, RefreshCw } from "lucide-react";
@@ -36,7 +37,7 @@ export default function Sessions() {
         <div className="flex items-center gap-2">
           <SkeletonRows rows={1} className="!space-y-0" />
         </div>
-        <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-scroll overflow-x-auto ui-surface">
           <SkeletonRows rows={5} />
         </div>
       </div>
@@ -76,28 +77,21 @@ export default function Sessions() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Sessions</h2>
-        <p className="text-sm text-text-dim">
-          Save, restore, and delete staging sessions.
-        </p>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <button
-          className="ui-btn ui-btn-primary"
-          onClick={onSave}
-          disabled={save.isPending}
-        >
-          <Save size={16} /> Save current session
-        </button>
-        <button
-          className="ui-btn ui-btn-secondary"
-          onClick={() => query.refetch()}
-        >
-          <RefreshCw size={14} /> Refresh
-        </button>
-      </div>
+      <PageHeader
+        icon={FolderOpen}
+        title="Sessions"
+        description="Save, restore, and delete staging sessions."
+        action={
+          <>
+            <button className="ui-btn ui-btn-primary" onClick={onSave} disabled={save.isPending}>
+              <Save size={16} /> Save current session
+            </button>
+            <button className="ui-btn ui-btn-secondary" onClick={() => query.refetch()}>
+              <RefreshCw size={14} /> Refresh
+            </button>
+          </>
+        }
+      />
 
       {notice && (
         <div className="rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-accent">
@@ -106,7 +100,7 @@ export default function Sessions() {
       )}
 
       <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev">
-        <table className="w-full border-collapse text-sm">
+        <table className="ui-table w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border">
               <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-text-dim">
@@ -165,7 +159,13 @@ export default function Sessions() {
                 <td
                   colSpan={3}
                 >
-                  <div className="ui-empty">No saved sessions.</div>
+                  <div className="ui-empty">
+                    <span className="ui-empty-icon"><FolderOpen size={18} /></span>
+                    <span>No saved sessions yet. Save the current staging set to keep it.</span>
+                    <button className="ui-btn ui-btn-primary ui-empty-action" onClick={onSave} disabled={save.isPending}>
+                      <Save size={15} /> Save current session
+                    </button>
+                  </div>
                 </td>
               </tr>
             )}

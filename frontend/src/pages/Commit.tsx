@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -48,23 +49,18 @@ export default function Commit() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Commit &amp; Export</h2>
-          <p className="text-sm text-text-dim">
-            Persist staged assets to disk (rename + metadata) or roll back the
-            last batch.
-          </p>
-        </div>
-        <button
-          className="ui-btn ui-btn-secondary"
-          onClick={() => navigate("/staging")}
-        >
-          <ArrowLeft size={14} /> Back to Staging
-        </button>
-      </div>
+      <PageHeader
+        icon={GitCommit}
+        title="Commit & Export"
+        description="Persist staged assets to disk (rename + metadata) or roll back the last batch."
+        action={
+          <button className="ui-btn ui-btn-secondary" onClick={() => navigate("/staging")}>
+            <ArrowLeft size={14} /> Back to Staging
+          </button>
+        }
+      />
 
-      <div className="rounded-lg border border-border bg-bg-elev p-4">
+      <div className="ui-surface">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <button
             className="ui-btn ui-btn-primary"
@@ -97,7 +93,7 @@ export default function Commit() {
       </div>
 
       <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev">
-        <table className="w-full border-collapse text-sm">
+        <table className="ui-table w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border">
               <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-text-dim">
@@ -138,7 +134,13 @@ export default function Commit() {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={4}>
-                  <div className="ui-empty">Nothing staged.</div>
+                  <div className="ui-empty">
+                    <span className="ui-empty-icon"><GitCommit size={18} /></span>
+                    <span>Nothing is staged for commit yet.</span>
+                    <button className="ui-btn ui-btn-secondary ui-empty-action" onClick={() => navigate("/staging")}>
+                      Back to Staging
+                    </button>
+                  </div>
                 </td>
               </tr>
             )}
@@ -150,7 +152,7 @@ export default function Commit() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="rounded-lg border border-border bg-bg-elev p-4"
+          className="ui-surface"
         >
           <label className="mb-2 block text-xs font-medium text-text-dim">
             Commit results

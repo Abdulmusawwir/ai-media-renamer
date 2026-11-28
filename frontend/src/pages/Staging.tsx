@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 import { useMemo, useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -25,6 +26,7 @@ import {
   Save,
   Tag,
   ArrowRight,
+  Layers,
 } from "lucide-react";
 import { type StagedAsset } from "../api/client";
 import {
@@ -429,10 +431,10 @@ export default function Staging() {
           <Spinner size={16} label="Loading staged assets…" />
         </div>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-          <div className="rounded-lg border border-border bg-bg-elev p-4 lg:col-span-3">
+          <div className="ui-surface lg:col-span-3">
             <SkeletonRows rows={6} />
           </div>
-          <div className="rounded-lg border border-border bg-bg-elev p-4">
+          <div className="ui-surface">
             <Skeleton className="h-48" />
           </div>
         </div>
@@ -442,20 +444,16 @@ export default function Staging() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Staging</h2>
-          <p className="text-sm text-text-dim">
-            Review and edit AI suggestions before committing to disk.
-          </p>
-        </div>
-        <button
-          className="ui-btn ui-btn-primary"
-          onClick={() => navigate("/commit")}
-        >
-          Go to Commit <ArrowRight size={16} />
-        </button>
-      </div>
+      <PageHeader
+        icon={Layers}
+        title="Staging"
+        description="Review and edit AI suggestions before committing to disk."
+        action={
+          <button className="ui-btn ui-btn-primary" onClick={() => navigate("/commit")}>
+            Go to Commit <ArrowRight size={16} />
+          </button>
+        }
+      />
 
       {query.isError && (
         <div className="ui-inline-error">
@@ -527,7 +525,7 @@ export default function Staging() {
           ref={parentRef}
           className="ui-scroll max-h-[600px] max-w-full rounded-lg border border-border bg-bg-elev lg:col-span-3"
         >
-          <table className="w-full border-collapse text-sm">
+          <table className="ui-table w-full border-collapse text-sm">
             <thead>
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id} className="border-b border-border">
@@ -599,7 +597,13 @@ export default function Staging() {
               {visibleRows.length === 0 && (
                 <tr>
                   <td colSpan={columns.length}>
-                    <div className="ui-empty">No staged assets. Run an analysis first.</div>
+                    <div className="ui-empty">
+                      <span className="ui-empty-icon"><Upload size={18} /></span>
+                      <span>No staged assets yet. Run an analysis to fill this table.</span>
+                      <button className="ui-btn ui-btn-primary ui-empty-action" onClick={() => navigate("/analysis")}>
+                        Run AI Analysis
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )}
@@ -608,7 +612,7 @@ export default function Staging() {
         </div>
 
         {/* Analytics */}
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface ui-chart-card">
           <div className="mb-2 text-sm font-medium text-text-dim">
             Category distribution
           </div>

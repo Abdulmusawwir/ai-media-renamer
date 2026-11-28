@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronRight, File, Folder, FolderOpen, Plus, Clock } from "lucide-react";
+import {
+  ChevronRight,
+  File,
+  FileAudio,
+  FileImage,
+  FileText,
+  FileVideo,
+  Folder,
+  FolderOpen,
+  Plus,
+  Clock,
+} from "lucide-react";
 import { authHeaders, browseFolder, type BrowseEntry, type BrowseResponse } from "../api/client";
 import { useToast } from "../store";
 import { Tooltip } from "./Tooltip";
@@ -27,6 +38,7 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
   const [path, setPath] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [recents, setRecents] = useState<string[]>(() => loadRecents());
+  const [filter, setFilter] = useState("");
   const toast = useToast();
 
   const pushRecent = useCallback((dir: string) => {
@@ -49,6 +61,7 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
         const res = await browseFolder(target);
         setBrowse(res);
         setPath(res.path);
+        setFilter("");
         // Record user-initiated navigations (skip the initial empty load).
         if (target) pushRecent(res.path);
       } catch (err) {
@@ -85,6 +98,38 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
     },
     [toast, pushRecent]
   );
+
+  const needle = filter.trim().toLowerCase();
+  const visibleFolders = needle
+    ? (browse?.folders ?? []).filter((f) => f.name.toLowerCase().includes(needle))
+    : (browse?.folders ?? []);
+  const visibleFiles = needle
+    ? (browse?.files ?? []).filter((f) => f.name.toLowerCase().includes(needle))
+    : (browse?.files ?? []);
+
+  const breadcrumbs = (() => {
+    const raw = (browse?.path ?? "").replace(/\//g, "\\");
+    if (!raw) return [] as { label: string; path: string }[];
+    const parts: { label: string; path: string }[] = [];
+    if (raw.startsWith("\\\\")) {
+      const segments = raw.split("\\").filter(Boolean);
+      let current = "\\\\";
+      for (const segment of segments) {
+        current = `${current}\\${segment}`;
+        parts.push({ label: segment, path: current });
+      }
+      return parts;
+    }
+    const drive = raw.match(/^[A-Za-z]:\\?/)?.[0] ?? "";
+    const rest = drive ? raw.slice(drive.length).split("\\").filter(Boolean) : raw.split("\\").filter(Boolean);
+    if (drive) parts.push({ label: drive.replace(/\\$/, ""), path: drive });
+    let current = drive;
+    for (const segment of rest) {
+      current = current ? `${current.replace(/\\$/, "")}\\${segment}` : segment;
+      parts.push({ label: segment, path: current });
+    }
+    return parts;
+  })();
 
   // Run the initial listing exactly once on mount. Guarding with a ref (rather
   // than depending on `doBrowse`) prevents an infinite re-render loop: the toast
@@ -131,7 +176,25 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
         >
           .. (up)
         </button>
-        <span className="break-all">{browse?.path ?? "—"}</span>
+        <span className="flex flex-wrap items-center gap-0.5 break-all">
+          {breadcrumbs.length ? (
+            breadcrumbs.map((part, index) => (
+              <span key={part.path} className="flex items-center gap-0.5">
+                {index > 0 && <span className="text-text-dim/50">/</span>}
+                <button
+                  type="button"
+                  className="rounded px-1 py-0.5 text-accent hover:bg-bg-elev-2"
+                  onClick={() => doBrowse(part.path)}
+                  title={part.path}
+                >
+                  {part.label}
+                </button>
+              </span>
+            ))
+          ) : (
+            "—"
+          )}
+        </span>
       </div>
       {browse?.drives && browse.drives.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-1">
@@ -160,6 +223,15 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
         <input
           type="text"
           className="flex-1 rounded-md border border-border bg-bg px-2 py-1.5 text-xs"
+          placeholder="Filter this folder by name"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+      </div>
+      <div className="mb-3 flex gap-2">
+        <input
+          type="text"
+          className="flex-1 rounded-md border border-border bg-bg px-2 py-1.5 text-xs"
           placeholder="Paste a folder path and press Enter"
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -174,7 +246,7 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
         {busy && <div className="p-3 text-xs text-text-dim">Loading…</div>}
         {!busy && browse && (
           <ul>
-            {browse.folders.map((f) => (
+            {visibleFolders.map((f) => (
               <li key={f.path}>
                 <button
                   className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-accent hover:bg-bg-elev-2"
@@ -186,7 +258,7 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
                 </button>
               </li>
             ))}
-            {browse.files.map((f) => (
+            {visibleFiles.map((f) => (
               <li key={f.path}>
                 <div
                   className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm ${
@@ -196,7 +268,19 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
                   }`}
                   onClick={() => f.is_media && onAddFile(f)}
                 >
-                  <File size={15} />
+                  {(() => {
+                    const Icon =
+                      f.kind === "video"
+                        ? FileVideo
+                        : f.kind === "image"
+                        ? FileImage
+                        : f.kind === "audio"
+                        ? FileAudio
+                        : f.kind === "document"
+                        ? FileText
+                        : File;
+                    return <Icon size={15} className="shrink-0 text-text-dim" />;
+                  })()}
                   <span className="flex-1 truncate">{f.name}</span>
                   <span className="text-[10px] uppercase text-text-dim">
                     {f.kind}
@@ -211,8 +295,12 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
                 </div>
               </li>
             ))}
-            {browse.folders.length === 0 && browse.files.length === 0 && (
-              <li><div className="ui-empty">Empty folder.</div></li>
+            {visibleFolders.length === 0 && visibleFiles.length === 0 && (
+              <li>
+                <div className="ui-empty">
+                  {needle ? "No matching files here." : "Empty folder."}
+                </div>
+              </li>
             )}
           </ul>
         )}

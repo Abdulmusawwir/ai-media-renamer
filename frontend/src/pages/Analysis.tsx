@@ -1,8 +1,10 @@
+import { PageHeader } from "../components/PageHeader";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
 import {
+  Check,
   FolderOpen,
   Play,
   Square,
@@ -65,6 +67,21 @@ const INITIAL_PROGRESS: ProgressState = {
   log: [],
   status: "",
 };
+
+const ANALYSIS_STEPS = [
+  { label: "Add media", statuses: [""] },
+  { label: "Extract", statuses: ["starting", "extracting"] },
+  { label: "Analyze", statuses: ["analyzing"] },
+  { label: "Review & commit", statuses: ["complete"] },
+];
+
+function stepIndexFor(status: string): number {
+  // A failed or cancelled run has no truthful "current" step: the error came
+  // from an unknown phase, so leave the strip neutral and let the log explain.
+  if (status === "error" || status === "cancelled") return -1;
+  const found = ANALYSIS_STEPS.findIndex((step) => step.statuses.includes(status));
+  return found < 0 ? 0 : found;
+}
 
 function profileOptions(config: Record<string, unknown> | null): {
   value: string;
@@ -403,15 +420,14 @@ export default function Analysis() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Analysis Wizard</h2>
-        <p className="text-sm text-text-dim">
-          Add media, choose an AI profile and settings, then run the pipeline.
-        </p>
-      </div>
+      <PageHeader
+        icon={UploadCloud}
+        title="Analysis Wizard"
+        description="Add media, choose an AI profile and settings, then run the pipeline."
+      />
 
       {/* Step 1: sources */}
-      <div className="rounded-lg border border-border bg-bg-elev p-4">
+      <div className="ui-surface">
         <div className="mb-3 flex items-center gap-2 text-sm font-medium">
           <UploadCloud size={16} className="text-accent" />
           1 · Add media
@@ -426,24 +442,29 @@ export default function Analysis() {
             if (picked.length) addFiles(picked);
           }
         }}
-          className={`cursor-pointer rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
-            isDragActive
-              ? "border-accent bg-accent/10"
-              : "border-border bg-bg hover:border-accent/60"
+          className={`ui-dropzone cursor-pointer text-center transition-colors ${
+            isDragActive ? "ui-dropzone-active" : ""
           }`}
         >
           <input {...getInputProps()} />
-          <UploadCloud size={28} className="mx-auto mb-2 text-text-dim" />
-          <p className="text-sm text-text-dim">
+          <span className="ui-dropzone-icon">
+            <UploadCloud size={26} />
+          </span>
+          <p className="mt-3 text-sm font-medium text-text">
             {isDragActive
-              ? "Drop files here…"
+              ? "Drop files here"
               : isDesktop
               ? "Drag & drop files here, or click to browse"
-              : "Drag & drop is desktop-only — use the folder browser below"}
+              : "Drag & drop is desktop-only - use the folder browser below"}
           </p>
-          <p className="mt-1 text-[11px] text-text-dim">
+          <p className="mt-1 text-xs text-text-dim">
             For server-host files, use the folder picker below.
           </p>
+          {files.length > 0 && (
+            <span className="mt-3 inline-flex items-center rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent">
+              {files.length} file{files.length === 1 ? "" : "s"} ready
+            </span>
+          )}
         </div>
 
         {isDesktop && (
@@ -500,7 +521,7 @@ export default function Analysis() {
       </div>
 
       {/* Step 2: profile + settings */}
-      <div className="rounded-lg border border-border bg-bg-elev p-4">
+      <div className="ui-surface">
         <div className="mb-3 flex items-center gap-2 text-sm font-medium">
           <Sparkles size={16} className="text-accent" />
           2 · Profile & settings
@@ -648,7 +669,21 @@ export default function Analysis() {
 
       {/* Progress */}
       {(progress.running || progress.log.length > 0) && (
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
+          <div className="ui-steps" aria-label="Analysis progress">
+            {ANALYSIS_STEPS.map((step, index) => {
+              const current = stepIndexFor(progress.status);
+              const state = index < current ? "done" : index === current ? "current" : "todo";
+              return (
+                <div key={step.label} className={`ui-step ui-step-${state}`}>
+                  <span className="ui-step-dot">
+                    {state === "done" ? <Check size={12} /> : index + 1}
+                  </span>
+                  <span>{step.label}</span>
+                </div>
+              );
+            })}
+          </div>
           <div className="mb-2 flex items-center justify-between text-sm">
             <span className="font-medium">
               Progress — {progress.processed}/{progress.total}

@@ -176,13 +176,16 @@ export default function App() {
   return (
     <>
       <DesktopBridge />
-      <div className="flex min-h-screen bg-bg text-text">
+      <div className="app-shell flex min-h-screen text-text">
       <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-bg-elev p-3">
-        <div className="mb-4 flex items-center gap-2 px-2 py-1">
+        <div className="mb-5 flex items-center gap-2 px-2 py-1">
           <span className="rounded-md bg-accent px-2 py-1 text-xs font-bold text-white">
             AMR
           </span>
           <span className="text-[13px] font-semibold">AI Media Renamer</span>
+        </div>
+        <div className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-text-dim/70">
+          Workspace
         </div>
         <nav className="flex flex-col gap-1">
           {NAV_ITEMS.map((item) => {
@@ -192,11 +195,7 @@ export default function App() {
                 <NavLink
                   to={item.to}
                   className={({ isActive }) =>
-                    `flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                      isActive
-                        ? "bg-accent text-white"
-                        : "text-text-dim hover:bg-bg-elev-2 hover:text-text"
-                    }`
+                    `ui-nav-link ${isActive ? "ui-nav-active" : ""}`
                   }
                 >
                   <Icon size={16} />
@@ -233,13 +232,30 @@ export default function App() {
           </div>
         )}
         <header className="flex h-14 items-center justify-between border-b border-border bg-bg-elev px-5">
-          <h1 className="text-[15px] font-semibold">AI Media Renamer</h1>
-          {Boolean(healthVersion || (config && config.version)) && (
-            <div className="flex items-center gap-2 text-xs text-text-dim">
-              <Cpu size={14} />
-              v{healthVersion ?? String(config?.version)}
-            </div>
-          )}
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-text-dim">Workspace</span>
+            <span className="text-text-dim/60">/</span>
+            <span className="font-medium">
+              {NAV_ITEMS.find((item) => item.to === location.pathname)?.label ?? "AI Media Renamer"}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <Tooltip label={engineStatus.title} side="left">
+              <span className="ui-status-pill">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${engineStatus.ok ? "bg-ok" : "bg-warn"}`}
+                  aria-hidden="true"
+                />
+                {engineStatus.label}
+              </span>
+            </Tooltip>
+            {Boolean(healthVersion || (config && config.version)) && (
+              <div className="flex items-center gap-2 text-xs text-text-dim">
+                <Cpu size={14} />
+                v{healthVersion ?? String(config?.version)}
+              </div>
+            )}
+          </div>
         </header>
         <main className="flex-1 overflow-auto p-5">
           <motion.div
