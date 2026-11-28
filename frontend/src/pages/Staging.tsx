@@ -429,10 +429,10 @@ export default function Staging() {
           <Spinner size={16} label="Loading staged assets…" />
         </div>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-          <div className="rounded-lg border border-border bg-bg-elev p-4 lg:col-span-3">
+          <div className="ui-surface lg:col-span-3">
             <SkeletonRows rows={6} />
           </div>
-          <div className="rounded-lg border border-border bg-bg-elev p-4">
+          <div className="ui-surface">
             <Skeleton className="h-48" />
           </div>
         </div>
@@ -608,7 +608,7 @@ export default function Staging() {
         </div>
 
         {/* Analytics */}
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
           <div className="mb-2 text-sm font-medium text-text-dim">
             Category distribution
           </div>

@@ -77,6 +77,18 @@ body {
 .app-shell {
   display: flex;
   min-height: 100vh;
+  background:
+    radial-gradient(900px 520px at 12% -10%, rgba(59, 130, 246, 0.10), transparent 62%),
+    radial-gradient(760px 520px at 100% 100%, rgba(124, 92, 255, 0.07), transparent 62%),
+    var(--bg);
+}
+
+.ui-surface {
+  background: linear-gradient(160deg, rgba(23, 26, 33, 0.96), rgba(17, 20, 28, 0.96));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .sidebar {

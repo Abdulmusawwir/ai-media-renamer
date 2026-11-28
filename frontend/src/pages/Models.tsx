@@ -34,7 +34,7 @@ export default function Models() {
           <Skeleton className="h-16" />
           <Skeleton className="h-16" />
         </div>
-        <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-scroll overflow-x-auto ui-surface">
           <SkeletonRows rows={4} />
         </div>
       </div>
@@ -52,13 +52,13 @@ export default function Models() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
           <div className="mb-1 flex items-center gap-2 text-xs font-medium text-text-dim">
             <Cpu size={14} /> Current provider
           </div>
           <div className="text-sm">{data?.current_provider || "—"}</div>
         </div>
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
           <div className="mb-1 flex items-center gap-2 text-xs font-medium text-text-dim">
             <Boxes size={14} /> Providers
           </div>
@@ -120,7 +120,7 @@ export default function Models() {
       </div>
 
       {data && (data.models ?? []).length > 0 && (
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
           <label className="mb-1 block text-xs font-medium text-text-dim">
             Available models (current provider)
           </label>

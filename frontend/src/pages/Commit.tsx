@@ -64,7 +64,7 @@ export default function Commit() {
         </button>
       </div>
 
-      <div className="rounded-lg border border-border bg-bg-elev p-4">
+      <div className="ui-surface">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <button
             className="ui-btn ui-btn-primary"
@@ -150,7 +150,7 @@ export default function Commit() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="rounded-lg border border-border bg-bg-elev p-4"
+          className="ui-surface"
         >
           <label className="mb-2 block text-xs font-medium text-text-dim">
             Commit results

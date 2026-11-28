@@ -199,13 +199,13 @@ export default function Settings() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
           <div className="mb-1 flex items-center gap-2 text-xs font-medium text-text-dim">
             <Cpu size={14} /> Provider
           </div>
           <div className="text-sm">{String(provider)}</div>
         </div>
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
           <div className="mb-1 flex items-center gap-2 text-xs font-medium text-text-dim">
             <Sparkles size={14} /> Prompt profiles
           </div>
@@ -216,7 +216,7 @@ export default function Settings() {
       </div>
 
       {isDesktop && (
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
           <div className="mb-3 text-xs font-medium text-text-dim">
             Desktop shell
           </div>
@@ -256,7 +256,7 @@ export default function Settings() {
         </div>
       )}
 
-      <div className="rounded-lg border border-border bg-bg-elev p-4">
+      <div className="ui-surface">
         <div className="mb-3 text-xs font-medium text-text-dim">Updates</div>
         {!isDesktop ? (
           <p className="text-sm text-text-dim">
@@ -325,7 +325,7 @@ export default function Settings() {
         )}
       </div>
 
-      <div className="rounded-lg border border-border bg-bg-elev p-4">
+      <div className="ui-surface">
         <label className="mb-2 block text-xs font-medium text-text-dim">
           Raw config (JSON)
         </label>

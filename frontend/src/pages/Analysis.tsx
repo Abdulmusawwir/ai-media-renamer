@@ -411,7 +411,7 @@ export default function Analysis() {
       </div>
 
       {/* Step 1: sources */}
-      <div className="rounded-lg border border-border bg-bg-elev p-4">
+      <div className="ui-surface">
         <div className="mb-3 flex items-center gap-2 text-sm font-medium">
           <UploadCloud size={16} className="text-accent" />
           1 · Add media
@@ -500,7 +500,7 @@ export default function Analysis() {
       </div>
 
       {/* Step 2: profile + settings */}
-      <div className="rounded-lg border border-border bg-bg-elev p-4">
+      <div className="ui-surface">
         <div className="mb-3 flex items-center gap-2 text-sm font-medium">
           <Sparkles size={16} className="text-accent" />
           2 · Profile & settings
@@ -648,7 +648,7 @@ export default function Analysis() {
 
       {/* Progress */}
       {(progress.running || progress.log.length > 0) && (
-        <div className="rounded-lg border border-border bg-bg-elev p-4">
+        <div className="ui-surface">
           <div className="mb-2 flex items-center justify-between text-sm">
             <span className="font-medium">
               Progress — {progress.processed}/{progress.total}

@@ -176,7 +176,7 @@ export default function App() {
   return (
     <>
       <DesktopBridge />
-      <div className="flex min-h-screen bg-bg text-text">
+      <div className="app-shell flex min-h-screen text-text">
       <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-bg-elev p-3">
         <div className="mb-4 flex items-center gap-2 px-2 py-1">
           <span className="rounded-md bg-accent px-2 py-1 text-xs font-bold text-white">
