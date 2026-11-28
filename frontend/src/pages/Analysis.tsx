@@ -5,6 +5,7 @@ import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
 import {
   Check,
+  Clock,
   FolderOpen,
   Play,
   Square,
@@ -14,6 +15,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import {
+  browseFolder,
   connectAnalysisWS,
   getAnalysisToken,
   getStaging,
@@ -23,7 +25,7 @@ import {
 } from "../api/client";
 import { useStore, useToast, type AnalysisSettings } from "../store";
 import { desktop, isDesktop } from "../desktop";
-import DirectoryPicker from "../components/DirectoryPicker";
+import DirectoryPicker, { readRecentDirs } from "../components/DirectoryPicker";
 import { Tooltip } from "../components/Tooltip";
 import { Spinner } from "../components/Skeleton";
 
@@ -135,6 +137,26 @@ export default function Analysis() {
       }
     },
     [toast]
+  );
+
+  const [source, setSource] = useState<"files" | "folder" | "recent">("files");
+  const [recentDirs] = useState<string[]>(() => readRecentDirs());
+
+  const addRecentFolder = useCallback(
+    async (dir: string) => {
+      try {
+        const res = await browseFolder(dir);
+        const media = res.files.filter((f) => f.is_media).map((f) => f.path);
+        if (media.length) {
+          addFiles(media);
+        } else {
+          toast.info("No media files in that folder.");
+        }
+      } catch (err) {
+        toast.error(`Could not open that folder: ${String(err)}`);
+      }
+    },
+    [addFiles, toast]
   );
 
   // Consume paths pushed by the desktop shell (drag/drop, second instance).
@@ -432,6 +454,23 @@ export default function Analysis() {
           <UploadCloud size={16} className="text-accent" />
           1 · Add media
         </div>
+        <div className="mb-3 inline-flex rounded-lg border border-border bg-bg p-1" role="group" aria-label="Media source">
+          {([
+            ["files", "Files", UploadCloud],
+            ["folder", "Folder", FolderOpen],
+            ["recent", "Recent", Clock],
+          ] as const).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={source === key}
+              onClick={() => setSource(key)}
+              className={`ui-btn ${source === key ? "ui-btn-primary" : "ui-btn-secondary"}`}
+            >
+              <Icon size={14} /> {label}
+            </button>
+          ))}
+        </div>
         <div
           {...getRootProps()}
         onClick={async () => {
@@ -487,9 +526,37 @@ export default function Analysis() {
           </div>
         )}
 
-        <div className="mt-4">
-          <DirectoryPicker onAddFile={addFromBrowse} />
-        </div>
+        {source === "folder" && (
+          <div className="mt-4">
+            <DirectoryPicker onAddFile={addFromBrowse} />
+          </div>
+        )}
+
+        {source === "recent" && (
+          <div className="mt-3 rounded-md border border-border bg-bg p-2">
+            {recentDirs.length ? (
+              <ul className="space-y-1">
+                {recentDirs.slice(0, 8).map((dir) => (
+                  <li key={dir}>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-secondary w-full justify-start text-left text-xs"
+                      onClick={() => addRecentFolder(dir)}
+                      title={dir}
+                    >
+                      <Clock size={13} />
+                      <span className="truncate">{dir}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="p-2 text-xs text-text-dim">
+                No recent folders yet. Browse a folder first.
+              </p>
+            )}
+          </div>
+        )}
 
         {files.length > 0 && (
           <div className="mt-3">

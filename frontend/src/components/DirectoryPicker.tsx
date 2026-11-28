@@ -19,7 +19,7 @@ import { Tooltip } from "./Tooltip";
 const RECENTS_KEY = "amr:recent-dirs";
 const MAX_RECENTS = 8;
 
-function loadRecents(): string[] {
+export function readRecentDirs(): string[] {
   try {
     const raw = localStorage.getItem(RECENTS_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -37,7 +37,7 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
   const [browse, setBrowse] = useState<BrowseResponse | null>(null);
   const [path, setPath] = useState<string>("");
   const [busy, setBusy] = useState(false);
-  const [recents, setRecents] = useState<string[]>(() => loadRecents());
+  const [recents, setRecents] = useState<string[]>(() => readRecentDirs());
   const [filter, setFilter] = useState("");
   const toast = useToast();
 
