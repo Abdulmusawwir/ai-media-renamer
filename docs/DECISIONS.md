@@ -5,6 +5,10 @@ Current architectural and UI rules. These are facts for the next session, not su
 ## UI system
 
 - `frontend/src/styles.css` `:root` holds the design tokens. New controls must use them rather than new hard-coded colours or spacing.
+- Every page uses `frontend/src/components/PageHeader.tsx` for its title, description and optional action.
+- Empty states must offer the next action, not just a sentence.
+- Model availability is labelled "On server" or "Catalog" from `/api/environment`; never claim "installed" or invent sizes.
+- Tooltips use max width and the side variant closest to free screen space; icon-only controls need one.
 - Shared `.ui-*` classes are the preferred styling layer. Existing Tailwind markup is kept where it works; do not replace working page logic with new React primitives.
 - `frontend/src/components/Tooltip.tsx` is the only app-level tooltip. Use it for icon-only controls and hints that need explanation. Do not rely on native `title` for new controls.
 - Recharts' own `Tooltip` in `Staging.tsx` stays; it is a chart component, not an app tooltip.

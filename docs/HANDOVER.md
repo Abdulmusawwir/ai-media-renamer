@@ -1,24 +1,29 @@
 # Handover — current repository state
 
-This file records state on disk, not conversation history. Read it before making changes.
+Facts on disk, not conversation history. Read this before making changes.
 
 ## Current work
 
-- Active branch for this doc update: `docs/handover-v226`. `main` is at `34778dd` (v2.2.6).
-- The `pipeline/2026-11-26` branch was pushed, merged into `main` via PR #14, and deleted.
-- Task in this pipeline: thorough UI analysis and modernisation — modern, elegant, user friendly, actionable, with tooltips.
+- Active branch: `pipeline/2026-11-28` (local only; **not pushed**).
+- Base: `main` at `45b1258` (v2.2.6 release).
+- Task: 1-9 UI improvements — visual depth, header/sidebar hierarchy, actionable empty states, Analysis progress experience, structured Settings, honest Models page, tooltip polish, table/chart polish and folder picker improvements.
 
 ## Completed on this branch
 
-- Design tokens and shared `.ui-*` classes in `frontend/src/styles.css`.
-- Reduced-motion support: global transitions shortened, `.ui-spinner` slowed to 2.4s.
-- Accessible `frontend/src/components/Tooltip.tsx` with hover, focus, keyboard support, `aria-describedby`, and timer cleanup; 4 unit tests.
-- Shared button classes applied across Analysis, Staging, Commit, Sessions, Settings, Models and icon-only dismiss/remove controls.
-- Standardised empty and inline-error states in Commit, Models, Sessions, Staging, Settings and DirectoryPicker.
-- Tooltips on sidebar nav items, dismiss/remove buttons, folder recents, drive buttons and the add badge.
-- Responsive polish: 1400px content ceiling, stable scrollbar gutters, styled scrollbars, `ui-scroll` on table containers.
-- Removed three unused CSS classes found in the diff audit.
-- `.gitignore` now ignores `.opencode/pipeline/`.
+- Gradient app-shell canvas and `.ui-surface` elevated cards applied across pages.
+- Shared `PageHeader` with icon chip, title, description and action slot on all six pages.
+- Top bar now shows `Workspace / current page` and a tooltipped status pill; duplicate app name removed.
+- Sidebar gained a Workspace label, softer gradient active state and tighter rhythm.
+- Actionable empty states with icon and next-step button on Staging, Commit and Sessions; Models shows icon and setup guidance.
+- Analysis step strip (Add media, Extract, Analyze, Review & commit) driven by `progress.status`; log kept.
+- Stronger dropzone with icon chip, active styling and selected-file badge; click/drop/native-picker behaviour unchanged.
+- Settings structured overview cards; raw JSON moved into an Advanced disclosure.
+- Models shows Vision and "On server"/"Catalog" badges from `/api/environment`; Download disabled when on server. No sizes or install claims invented.
+- Tooltip max width and left/right placement; status pill, model downloads and Settings cards have tooltips.
+- Staggered card entrance with reduced-motion respected.
+- Sticky table headers, denser rows and a gradient chart card.
+- DirectoryPicker filter, clickable breadcrumb segments and file-kind icons.
+- New tests: PageHeader, DirectoryPicker filter/breadcrumbs, tooltip placement.
 
 ## Verification performed
 
@@ -28,33 +33,33 @@ This file records state on disk, not conversation history. Read it before making
 | Python tests | `python -m pytest -q` | 447 passed, 1 skipped |
 | Version validator | `python scripts/check_versions.py --tag v2.2.6 --latest-json dist/latest.json` | all versions match |
 | TypeScript | `npx tsc --noEmit -p tsconfig.json` | exit 0 |
-| Frontend tests | `npm test` | 3 files, 11 tests passed |
+| Frontend tests | `npm test` | 5 files, 16 tests passed |
 | Frontend build | `npm run build` | passed |
 | Rust format | `cargo fmt --check` | exit 0 |
 | Rust lint | `cargo clippy -- -D warnings` | exit 0 |
 | Rust tests | `scripts/cargo-test-gnu.ps1` | 18 passed, 0 failed |
-| Browser checks | Playwright over all six pages at 1440x900 and 1024x768 | no console errors, no horizontal overflow, nav tooltip works, reduced motion 2.4s, add-file toast works |
+| Browser pass | Playwright over six pages at 1440x900 and 1024x768 | 0 console errors, no horizontal overflow, nav tooltip works |
 
-No E2E test suite exists in this repository; the browser checks above were manual Playwright runs.
+No E2E suite exists; browser checks were manual Playwright runs.
 
 ## Pending / uncommitted
 
-- None. Working tree is clean on `pipeline/2026-11-26`.
+- None. Working tree clean on `pipeline/2026-11-28` at the end of the build stage.
 
 ## Waiting on the user
 
 - Tray menu clicks: Show, Quit, Setup & Dependencies.
 - Clean-machine first-run wizard with an empty `%APPDATA%\ai-media-renamer`.
-- Explicit approval before deployment. Push, merge into `main` and the v2.2.6 release were approved and completed.
+- Explicit approval before push, merge or a new release. Gate B approval is still pending.
 
 ## Warnings and hard stops
 
-- The published **v2.2.6** GitHub release and installer include the UI changes: https://github.com/Abdulmusawwir/ai-media-renamer/releases/tag/v2.2.6. The remote installer hash was verified against the local build.
-- No database, SQL migrations, cron schedules or live database exist in this project.
-- CI needs `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets for signed updater artifacts.
-- `main` is protected by the GitHub ruleset **Protect main**: pull request required, `tests` check required. Direct pushes are rejected.
-- Never push, deploy, apply migrations, write to a live database, or change secrets/hosting/cron without explicit approval in a later turn.
+- Published **v2.2.6** does **not** include this branch's second UI pass. A new build/release is needed to ship it.
+- No database, SQL migrations, cron schedules or live database exist.
+- CI needs `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets.
+- `main` is protected by the **Protect main** ruleset: pull request required, `tests` check required.
+- Never push, deploy, apply migrations or change secrets/hosting/cron without explicit approval in a later turn.
 
 ## Git state to inspect first
 
-Run `git status -sb` and `git log --oneline -15`. Expect to be on `pipeline/2026-11-26` with the UI commits on top of `00d53c5`.
+`git status -sb` and `git log --oneline -15`. Expect `pipeline/2026-11-28` with the UI commits on top of `45b1258`.
