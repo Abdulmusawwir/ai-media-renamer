@@ -439,24 +439,29 @@ export default function Analysis() {
             if (picked.length) addFiles(picked);
           }
         }}
-          className={`cursor-pointer rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
-            isDragActive
-              ? "border-accent bg-accent/10"
-              : "border-border bg-bg hover:border-accent/60"
+          className={`ui-dropzone cursor-pointer text-center transition-colors ${
+            isDragActive ? "ui-dropzone-active" : ""
           }`}
         >
           <input {...getInputProps()} />
-          <UploadCloud size={28} className="mx-auto mb-2 text-text-dim" />
-          <p className="text-sm text-text-dim">
+          <span className="ui-dropzone-icon">
+            <UploadCloud size={26} />
+          </span>
+          <p className="mt-3 text-sm font-medium text-text">
             {isDragActive
-              ? "Drop files here…"
+              ? "Drop files here"
               : isDesktop
               ? "Drag & drop files here, or click to browse"
-              : "Drag & drop is desktop-only — use the folder browser below"}
+              : "Drag & drop is desktop-only - use the folder browser below"}
           </p>
-          <p className="mt-1 text-[11px] text-text-dim">
+          <p className="mt-1 text-xs text-text-dim">
             For server-host files, use the folder picker below.
           </p>
+          {files.length > 0 && (
+            <span className="mt-3 inline-flex items-center rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent">
+              {files.length} file{files.length === 1 ? "" : "s"} ready
+            </span>
+          )}
         </div>
 
         {isDesktop && (

@@ -496,6 +496,32 @@ tbody tr:hover {
   color: var(--text);
 }
 
+.ui-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 148px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  background: linear-gradient(160deg, rgba(15, 17, 21, 0.7), rgba(23, 26, 33, 0.7));
+}
+.ui-dropzone:hover,
+.ui-dropzone-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.ui-dropzone-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .ui-steps {
   display: flex;
   flex-wrap: wrap;
