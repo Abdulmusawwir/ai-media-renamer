@@ -480,11 +480,11 @@ export default function Analysis() {
     startConnection(0);
   };
 
-  const getStagingThenNavigate = async () => {
+  const getStagingThenNavigate = async (target = "/staging") => {
     try {
       const res = await getStaging();
       setStaged(res.assets);
-      navigate("/staging");
+      navigate(target);
     } catch (err) {
       toast.error(`Failed to load staging: ${String(err)}`);
     }
@@ -527,7 +527,7 @@ export default function Analysis() {
           <button
             type="button"
             className="ui-btn ui-btn-secondary"
-            onClick={getStagingThenNavigate}
+            onClick={() => getStagingThenNavigate()}
           >
             Review &amp; commit
           </button>
@@ -875,8 +875,18 @@ export default function Analysis() {
             {ANALYSIS_STEPS.map((step, index) => {
               const current = stepIndexFor(progress.status);
               const state = index < current ? "done" : index === current ? "current" : "todo";
+              const isFinal = index === ANALYSIS_STEPS.length - 1;
+              const clickable = isFinal && progress.status === "complete";
               return (
-                <div key={step.label} className={`ui-step ui-step-${state}`}>
+                <div
+                  key={step.label}
+                  className={`ui-step ui-step-${state} ${
+                    clickable ? "cursor-pointer hover:opacity-80" : ""
+                  }`}
+                  onClick={
+                    clickable ? () => getStagingThenNavigate("/staging") : undefined
+                  }
+                >
                   <span className="ui-step-dot">
                     {state === "done" ? <Check size={12} /> : index + 1}
                   </span>
@@ -935,6 +945,30 @@ export default function Analysis() {
           <div className="mt-3 h-44 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg p-2 font-mono text-xs leading-relaxed text-text-dim">
             {progress.log.join("\n")}
           </div>
+          {progress.status === "complete" && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs">
+              <span>
+                <span className="font-semibold">{progress.total}</span> asset
+                {progress.total === 1 ? "" : "s"} analysed and staged.
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-secondary"
+                  onClick={() => getStagingThenNavigate("/staging")}
+                >
+                  Review
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-primary"
+                  onClick={() => getStagingThenNavigate("/commit")}
+                >
+                  Commit
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
