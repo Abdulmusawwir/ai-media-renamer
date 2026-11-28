@@ -179,6 +179,7 @@ export default function Analysis() {
   }, [incomingPaths, clearIncomingPaths, addFiles]);
   const [profile, setProfile] = useState<string>("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
   const [results, setResults] = useState<Record<string, LiveResult>>({});
   const [fileStatus, setFileStatus] = useState<
@@ -665,12 +666,41 @@ export default function Analysis() {
         )}
       </div>
 
-      {/* Step 2: profile + settings */}
+      {/* Step 2: options (collapsed by default) */}
       <div className="ui-surface">
-        <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-          <Sparkles size={16} className="text-accent" />
-          2 · Profile & settings
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Sparkles size={16} className="text-accent" />
+            2 · Options
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-border bg-bg px-2.5 py-1 text-[11px] text-text-dim">
+              Profile: {activeProfile || "default"}
+            </span>
+            {autoRouteEnabled(config as Record<string, unknown> | null) && (
+              <Tooltip
+                label="Documents, spreadsheets and audio are analysed with their own profiles automatically."
+                side="bottom"
+              >
+                <span className="rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent">
+                  Auto-routed by type
+                </span>
+              </Tooltip>
+            )}
+            <button
+              type="button"
+              className="ui-btn ui-btn-secondary"
+              aria-expanded={showOptions}
+              onClick={() => setShowOptions((v) => !v)}
+            >
+              <Settings2 size={14} />
+              {showOptions ? "Hide options" : "More options"}
+            </button>
+          </div>
         </div>
+
+        {showOptions && (
+        <div className="mt-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-text-dim">
@@ -687,11 +717,6 @@ export default function Analysis() {
                 </option>
               ))}
             </select>
-            {autoRouteEnabled(config as Record<string, unknown> | null) && (
-              <p className="mt-1 text-xs text-text-dim">
-                Documents, spreadsheets, and audio use their own profiles automatically.
-              </p>
-            )}
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-text-dim">
@@ -780,6 +805,8 @@ export default function Analysis() {
               Skip metadata writing
             </label>
           </motion.div>
+        )}
+        </div>
         )}
       </div>
 
