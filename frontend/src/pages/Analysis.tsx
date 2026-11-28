@@ -126,6 +126,7 @@ export default function Analysis() {
   const clearIncomingPaths = useStore((s) => s.clearIncomingPaths);
   const analysisSettings = useStore((s) => s.analysisSettings);
   const setAnalysisSettings = useStore((s) => s.setAnalysisSettings);
+  const staged = useStore((s) => s.staged);
 
   const wsRef = useRef<AnalysisWSController | null>(null);
 
@@ -177,6 +178,15 @@ export default function Analysis() {
     addFiles(incomingPaths);
     clearIncomingPaths();
   }, [incomingPaths, clearIncomingPaths, addFiles]);
+
+  // Keep the "last run" line honest: read the current staging set once.
+  useEffect(() => {
+    getStaging()
+      .then((res) => setStaged(res.assets))
+      .catch(() => {
+        /* the line simply stays hidden */
+      });
+  }, [setStaged]);
   const [profile, setProfile] = useState<string>("");
   const [showSettings, setShowSettings] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
@@ -504,6 +514,25 @@ export default function Analysis() {
         title="Analysis Wizard"
         description="Add media, choose an AI profile and settings, then run the pipeline."
       />
+
+      {staged.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2.5 text-xs">
+          <span className="text-text-dim">
+            Last run:{" "}
+            <span className="font-semibold text-text">
+              {staged.length} asset{staged.length === 1 ? "" : "s"}
+            </span>{" "}
+            waiting for review.
+          </span>
+          <button
+            type="button"
+            className="ui-btn ui-btn-secondary"
+            onClick={getStagingThenNavigate}
+          >
+            Review &amp; commit
+          </button>
+        </div>
+      )}
 
       {/* Step 1: sources */}
       <div className="ui-surface">
