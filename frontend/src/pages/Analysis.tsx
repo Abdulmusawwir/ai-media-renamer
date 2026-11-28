@@ -58,6 +58,14 @@ const LANGUAGES = [
   { value: "auto", label: "Auto-detect" },
 ];
 
+interface LiveResult {
+  originalName: string;
+  stagedName: string;
+  category: string;
+  tags: string[];
+  summary: string;
+}
+
 interface ProgressState {
   running: boolean;
   processed: number;
@@ -172,6 +180,7 @@ export default function Analysis() {
   const [profile, setProfile] = useState<string>("");
   const [showSettings, setShowSettings] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
+  const [results, setResults] = useState<Record<string, LiveResult>>({});
   // Non-blocking banner shown while we retry the socket after a drop.
   const [reconnecting, setReconnecting] = useState<{
     active: boolean;
@@ -241,8 +250,30 @@ export default function Analysis() {
             status: "extracting",
           }));
         } else if (type === "asset_analyzed") {
-          const name = (data.asset as { original_name?: string } | undefined)
-            ?.original_name;
+          const asset = data.asset as
+            | {
+                original_path?: string;
+                original_name?: string;
+                staged_name?: string;
+                category?: string;
+                tags?: string[];
+                summary?: string;
+              }
+            | undefined;
+          const name = asset?.original_name;
+          const path = asset?.original_path;
+          if (asset && path) {
+            setResults((prev) => ({
+              ...prev,
+              [path]: {
+                originalName: asset.original_name ?? path,
+                stagedName: asset.staged_name ?? "",
+                category: asset.category ?? "uncategorized",
+                tags: Array.isArray(asset.tags) ? asset.tags : [],
+                summary: asset.summary ?? "",
+              },
+            }));
+          }
           setProgress((p) => ({
             ...p,
             processed: Number(data.index ?? p.processed),
@@ -407,6 +438,7 @@ export default function Analysis() {
     };
     cleanEndRef.current = false;
     setReconnecting({ active: false, attempt: 0 });
+    setResults({});
     setProgress({
       running: true,
       processed: 0,
@@ -760,6 +792,35 @@ export default function Analysis() {
               );
             })}
           </div>
+          {Object.keys(results).length > 0 && (
+            <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {Object.entries(results).map(([path, result]) => (
+                <div key={path} className="rounded-md border border-border bg-bg p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-[11px] text-text-dim" title={path}>
+                      {result.originalName}
+                    </span>
+                    <span className="shrink-0 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                      {result.category}
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-sm font-medium text-text">
+                    {result.stagedName || "Analyzing..."}
+                  </p>
+                  {result.tags.length > 0 && (
+                    <p className="mt-1 truncate text-[11px] text-text-dim">
+                      {result.tags.join(", ")}
+                    </p>
+                  )}
+                  {result.summary && (
+                    <p className="mt-1 truncate text-[11px] text-text-dim" title={result.summary}>
+                      {result.summary}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="mb-2 flex items-center justify-between text-sm">
             <span className="font-medium">
               Progress — {progress.processed}/{progress.total}
