@@ -159,7 +159,13 @@ export default function Sessions() {
                 <td
                   colSpan={3}
                 >
-                  <div className="ui-empty">No saved sessions.</div>
+                  <div className="ui-empty">
+                    <span className="ui-empty-icon"><FolderOpen size={18} /></span>
+                    <span>No saved sessions yet. Save the current staging set to keep it.</span>
+                    <button className="ui-btn ui-btn-primary ui-empty-action" onClick={onSave} disabled={save.isPending}>
+                      <Save size={15} /> Save current session
+                    </button>
+                  </div>
                 </td>
               </tr>
             )}

@@ -134,7 +134,13 @@ export default function Commit() {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={4}>
-                  <div className="ui-empty">Nothing staged.</div>
+                  <div className="ui-empty">
+                    <span className="ui-empty-icon"><GitCommit size={18} /></span>
+                    <span>Nothing is staged for commit yet.</span>
+                    <button className="ui-btn ui-btn-secondary ui-empty-action" onClick={() => navigate("/staging")}>
+                      Back to Staging
+                    </button>
+                  </div>
                 </td>
               </tr>
             )}

@@ -597,7 +597,13 @@ export default function Staging() {
               {visibleRows.length === 0 && (
                 <tr>
                   <td colSpan={columns.length}>
-                    <div className="ui-empty">No staged assets. Run an analysis first.</div>
+                    <div className="ui-empty">
+                      <span className="ui-empty-icon"><Upload size={18} /></span>
+                      <span>No staged assets yet. Run an analysis to fill this table.</span>
+                      <button className="ui-btn ui-btn-primary ui-empty-action" onClick={() => navigate("/analysis")}>
+                        Run AI Analysis
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )}

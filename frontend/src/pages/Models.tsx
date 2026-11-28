@@ -110,7 +110,10 @@ export default function Models() {
                 <td
                   colSpan={3}
                 >
-                  <div className="ui-empty">No models in catalog.</div>
+                  <div className="ui-empty">
+                    <span className="ui-empty-icon"><Boxes size={18} /></span>
+                    <span>No models in catalog. Run setup to install a local model.</span>
+                  </div>
                 </td>
               </tr>
             )}
