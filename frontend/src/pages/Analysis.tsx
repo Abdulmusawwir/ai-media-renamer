@@ -145,7 +145,12 @@ export default function Analysis() {
   const restoreLatestSession = async () => {
     if (!latestSession) return;
     const id = String(latestSession.name ?? latestSession.path ?? "");
-    if (!id) return;
+    if (!id) {
+      toast.error(
+        "That saved session has no identifier. Open Sessions from the sidebar to pick another."
+      );
+      return;
+    }
     try {
       const res = await loadSession(id);
       toast.success(`Session restored: ${res.asset_count} assets.`);
@@ -182,7 +187,7 @@ export default function Analysis() {
   );
 
   const [source, setSource] = useState<"files" | "folder" | "recent">("files");
-  const [recentDirs] = useState<RecentDir[]>(() => readRecentDirs());
+  const [recentDirs, setRecentDirs] = useState<RecentDir[]>(() => readRecentDirs());
 
   const addRecentFolder = useCallback(
     async (dir: string) => {
@@ -223,6 +228,7 @@ export default function Analysis() {
   const [showOptions, setShowOptions] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
   const [results, setResults] = useState<Record<string, LiveResult>>({});
+  const [completedCount, setCompletedCount] = useState(0);
   const [fileStatus, setFileStatus] = useState<Record<string, FileStatus>>({});
   // Non-blocking banner shown while we retry the socket after a drop.
   const [reconnecting, setReconnecting] = useState<{
@@ -327,6 +333,7 @@ export default function Analysis() {
           cleanEndRef.current = true;
           setReconnecting({ active: false, attempt: 0 });
           const count = Number(data.count ?? 0);
+          setCompletedCount(count);
           setProgress((p) => ({
             ...p,
             running: false,
@@ -341,6 +348,11 @@ export default function Analysis() {
           if (count > 0) {
             // Stay on Analysis so the result cards and the completion row are
             // visible; Review and Commit are one click away from there.
+            getStaging()
+              .then((res) => setStaged(res.assets))
+              .catch(() => {
+                /* the completion row still offers both next steps */
+              });
             toast.success(
               `${count} asset${count === 1 ? "" : "s"} analysed and ready for review.`
             );
@@ -478,6 +490,7 @@ export default function Analysis() {
     cleanEndRef.current = false;
     setReconnecting({ active: false, attempt: 0 });
     setResults({});
+    setCompletedCount(0);
     setFileStatus(initialFileStatus(files));
     setProgress({
       running: true,
@@ -579,7 +592,10 @@ export default function Analysis() {
               key={key}
               type="button"
               aria-pressed={source === key}
-              onClick={() => setSource(key)}
+              onClick={() => {
+                if (key === "recent") setRecentDirs(readRecentDirs());
+                setSource(key);
+              }}
               className={`ui-btn ${source === key ? "ui-btn-primary" : "ui-btn-secondary"}`}
             >
               <Icon size={14} /> {label}
@@ -977,8 +993,8 @@ export default function Analysis() {
           {progress.status === "complete" && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs">
               <span>
-                <span className="font-semibold">{progress.total}</span> asset
-                {progress.total === 1 ? "" : "s"} analysed and staged.
+                <span className="font-semibold">{completedCount}</span> asset
+                {completedCount === 1 ? "" : "s"} analysed and staged.
               </span>
               <div className="flex gap-2">
                 <button
