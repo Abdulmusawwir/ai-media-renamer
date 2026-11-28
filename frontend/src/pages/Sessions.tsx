@@ -1,5 +1,6 @@
 import { PageHeader } from "../components/PageHeader";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Save, Trash2, FolderOpen, RefreshCw } from "lucide-react";
 import {
@@ -10,13 +11,16 @@ import {
 } from "../hooks/api";
 import { useToast } from "../store";
 import { SkeletonRows } from "../components/Skeleton";
+import { relativeFromIso } from "../utils/relativeTime";
+import { sessionKey } from "../utils/analysisResults";
 
 function sessionId(s: { name?: string; path?: string }): string {
-  return String(s.name ?? s.path ?? "");
+  return sessionKey(s);
 }
 
 export default function Sessions() {
   const toast = useToast();
+  const navigate = useNavigate();
   const query = useSessions();
   const save = useSaveSession();
   const del = useDeleteSession();
@@ -59,10 +63,11 @@ export default function Sessions() {
     setNotice(null);
     try {
       const res = await load.mutateAsync(id);
-      setNotice(`Loaded: ${res.asset_count} assets`);
-      toast.success("Session loaded.");
+      setNotice(`Loaded ${res.asset_count} asset${res.asset_count === 1 ? "" : "s"}. Opening staging…`);
+      toast.success(`Session restored: ${res.asset_count} assets.`);
+      navigate("/staging");
     } catch (err) {
-      toast.error(String(err));
+      toast.error(`Could not restore that session. Try saving a fresh one. (${String(err)})`);
     }
   };
 
@@ -71,7 +76,7 @@ export default function Sessions() {
       await del.mutateAsync(id);
       toast.success("Session deleted.");
     } catch (err) {
-      toast.error(String(err));
+      toast.error(`Could not delete that session. Refresh the list and try again. (${String(err)})`);
     }
   };
 
@@ -131,7 +136,7 @@ export default function Sessions() {
                     </span>
                   </td>
                   <td className="px-3 py-1.5 text-text-dim">
-                    {String(s.modified ?? "")}
+                    {relativeFromIso(String(s.modified ?? "")) || String(s.modified ?? "")}
                   </td>
                   <td className="px-3 py-1.5">
                     <div className="flex justify-end gap-2">
@@ -139,8 +144,9 @@ export default function Sessions() {
                         className="flex items-center gap-1 rounded-md border border-border bg-bg-elev-2 px-2.5 py-1 text-xs hover:bg-bg"
                         onClick={() => onLoad(id)}
                         disabled={load.isPending}
+                        title={`Restore ${id} and open staging`}
                       >
-                        Load
+                        Restore
                       </button>
                       <button
                         className="flex items-center gap-1 rounded-md border border-danger/40 bg-danger/10 px-2.5 py-1 text-xs text-danger hover:bg-danger/20"

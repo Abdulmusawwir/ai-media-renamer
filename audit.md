@@ -95,3 +95,11 @@
 - **Updater E2E verified:** published v2.2.1 with installer, `.sig` and `latest.json`; `releases/latest/download/latest.json` serves 2.2.1; an installed 2.2.0 offered the update, downloaded and installed it, and relaunched as 2.2.1. A dead-proxy check left the app running and reported "up to date".
 - ~~**Updater errors were silently shown as "up to date"** — `desktop.checkForUpdate()` caught every failure and returned `null`, and install re-ran `check()`.~~ _Fix: errors propagate to the Settings `error` state with a formatted message; the checked Tauri `Update` object is retained so install never re-checks; a generation guard prevents out-of-order tray/button results. Verified with an unreachable HTTPS endpoint (error shown, app stayed running) and with the live endpoint ("up to date"). `tests/test_updater_signature.py` covers correct, tampered-installer and tampered-signature cases; `tests/frontend/update_error.test.mjs` covers error formatting._
 - **Still deferred / needs a human:** literal tray menu clicks (Show / Quit / Setup & Dependencies); clean-machine first-run wizard. A full bad-signature UI test still needs a deliberately mis-signed release or a controllable endpoint; the crypto and error UI paths are covered separately.
+
+## Third UI pass (v2.2.6, branch pipeline/2026-11-28, 2026-11-28)
+
+- **Guided Analysis flow** added: source switcher, recents with relative time, live result cards, per-file status, More options disclosure and auto-routing chip. No new dependencies, routes, database or backend changes.
+- **No unresolved bug introduced.** Two issues found during the post-implementation audit and fixed before acceptance: a test file that had overwritten three existing picker tests (restored), and an undefined `success` Tailwind token (replaced with `ok`).
+- **Known limitations, intentional:** session restore returns staged assets and an asset count only, never settings; per-file status matches on basename because `asset_error` carries only `path.name`. Both are documented in `docs/DECISIONS.md`.
+- **Release note:** at the user's explicit instruction, the v2.2.6 release assets were replaced with this build instead of a version bump.
+

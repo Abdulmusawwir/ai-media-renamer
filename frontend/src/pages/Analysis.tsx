@@ -5,6 +5,7 @@ import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
 import {
   Check,
+  Clock,
   FolderOpen,
   Play,
   Square,
@@ -14,16 +15,33 @@ import {
   Sparkles,
 } from "lucide-react";
 import {
+  browseFolder,
   connectAnalysisWS,
   getAnalysisToken,
   getStaging,
+  loadSession,
   type AnalysisWSController,
   type AnalysisParams,
   type BrowseEntry,
 } from "../api/client";
+import { useSessions } from "../hooks/api";
 import { useStore, useToast, type AnalysisSettings } from "../store";
 import { desktop, isDesktop } from "../desktop";
-import DirectoryPicker from "../components/DirectoryPicker";
+import DirectoryPicker, {
+  readRecentDirs,
+  type RecentDir,
+} from "../components/DirectoryPicker";
+import { relativeTime, relativeFromIso } from "../utils/relativeTime";
+import {
+  basename,
+  forgetFileStatus,
+  initialFileStatus,
+  markFileStatus,
+  mergeLiveResult,
+  type AnalyzedAsset,
+  type FileStatus,
+  type LiveResult,
+} from "../utils/analysisResults";
 import { Tooltip } from "../components/Tooltip";
 import { Spinner } from "../components/Skeleton";
 
@@ -112,6 +130,37 @@ export default function Analysis() {
   const clearIncomingPaths = useStore((s) => s.clearIncomingPaths);
   const analysisSettings = useStore((s) => s.analysisSettings);
   const setAnalysisSettings = useStore((s) => s.setAnalysisSettings);
+  const staged = useStore((s) => s.staged);
+  const sessionsQuery = useSessions();
+  const latestSession = (() => {
+    const list = [...(sessionsQuery.data?.sessions ?? [])];
+    list.sort((a, b) => {
+      const ta = Date.parse(String(a.modified ?? ""));
+      const tb = Date.parse(String(b.modified ?? ""));
+      return (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
+    });
+    return list[0];
+  })();
+
+  const restoreLatestSession = async () => {
+    if (!latestSession) return;
+    const id = String(latestSession.name ?? latestSession.path ?? "");
+    if (!id) {
+      toast.error(
+        "That saved session has no identifier. Open Sessions from the sidebar to pick another."
+      );
+      return;
+    }
+    try {
+      const res = await loadSession(id);
+      toast.success(`Session restored: ${res.asset_count} assets.`);
+      navigate("/staging");
+    } catch (err) {
+      toast.error(
+        `Could not restore that session. Open Sessions from the sidebar to retry. (${String(err)})`
+      );
+    }
+  };
 
   const wsRef = useRef<AnalysisWSController | null>(null);
 
@@ -137,15 +186,50 @@ export default function Analysis() {
     [toast]
   );
 
+  const [source, setSource] = useState<"files" | "folder" | "recent">("files");
+  const [recentDirs, setRecentDirs] = useState<RecentDir[]>(() => readRecentDirs());
+
+  const addRecentFolder = useCallback(
+    async (dir: string) => {
+      try {
+        const res = await browseFolder(dir);
+        const media = res.files.filter((f) => f.is_media).map((f) => f.path);
+        if (media.length) {
+          addFiles(media);
+        } else {
+          toast.info("No media files in that folder.");
+        }
+      } catch (err) {
+        toast.error(
+          `Could not open that folder. Check it still exists, then pick it again. (${String(err)})`
+        );
+      }
+    },
+    [addFiles, toast]
+  );
+
   // Consume paths pushed by the desktop shell (drag/drop, second instance).
   useEffect(() => {
     if (!incomingPaths.length) return;
     addFiles(incomingPaths);
     clearIncomingPaths();
   }, [incomingPaths, clearIncomingPaths, addFiles]);
+
+  // Keep the "last run" line honest: read the current staging set once.
+  useEffect(() => {
+    getStaging()
+      .then((res) => setStaged(res.assets))
+      .catch(() => {
+        /* the line simply stays hidden */
+      });
+  }, [setStaged]);
   const [profile, setProfile] = useState<string>("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
+  const [results, setResults] = useState<Record<string, LiveResult>>({});
+  const [completedCount, setCompletedCount] = useState(0);
+  const [fileStatus, setFileStatus] = useState<Record<string, FileStatus>>({});
   // Non-blocking banner shown while we retry the socket after a drop.
   const [reconnecting, setReconnecting] = useState<{
     active: boolean;
@@ -190,8 +274,11 @@ export default function Analysis() {
     addFiles([entry.path]);
   };
 
-  const removeFile = (f: string) =>
+  const removeFile = (f: string) => {
+    const base = basename(f);
     setFiles((prev) => prev.filter((x) => x !== f));
+    setFileStatus((prev) => forgetFileStatus(prev, base));
+  };
 
   const patch = (p: Partial<AnalysisSettings>) => setAnalysisSettings(p);
 
@@ -215,8 +302,15 @@ export default function Analysis() {
             status: "extracting",
           }));
         } else if (type === "asset_analyzed") {
-          const name = (data.asset as { original_name?: string } | undefined)
-            ?.original_name;
+          const asset = data.asset as AnalyzedAsset | undefined;
+          const name = asset?.original_name;
+          const path = asset?.original_path;
+          if (asset && path) {
+            setResults((prev) => mergeLiveResult(prev, asset));
+            setFileStatus((prev) =>
+              markFileStatus(prev, name ?? basename(path), "done")
+            );
+          }
           setProgress((p) => ({
             ...p,
             processed: Number(data.index ?? p.processed),
@@ -225,11 +319,13 @@ export default function Analysis() {
             log: [...p.log, `✓ analyzed ${name ?? "asset"}`],
           }));
         } else if (type === "asset_error") {
+          const failedName = String(data.name ?? "asset");
+          setFileStatus((prev) => markFileStatus(prev, failedName, "failed"));
           setProgress((p) => ({
             ...p,
             log: [
               ...p.log,
-              `✗ ${String(data.name ?? "asset")}: ${String(data.error ?? "error")}`,
+              `✗ ${failedName}: ${String(data.error ?? "error")}`,
             ],
           }));
         } else if (type === "complete") {
@@ -237,6 +333,7 @@ export default function Analysis() {
           cleanEndRef.current = true;
           setReconnecting({ active: false, attempt: 0 });
           const count = Number(data.count ?? 0);
+          setCompletedCount(count);
           setProgress((p) => ({
             ...p,
             running: false,
@@ -249,10 +346,19 @@ export default function Analysis() {
             ],
           }));
           if (count > 0) {
-            getStagingThenNavigate();
+            // Stay on Analysis so the result cards and the completion row are
+            // visible; Review and Commit are one click away from there.
+            getStaging()
+              .then((res) => setStaged(res.assets))
+              .catch(() => {
+                /* the completion row still offers both next steps */
+              });
+            toast.success(
+              `${count} asset${count === 1 ? "" : "s"} analysed and ready for review.`
+            );
           } else {
             toast.error(
-              "Analysis finished with 0 assets. Check the progress log for errors (missing AI server, extraction failures, etc.)."
+              "Analysis finished with 0 assets. Check the progress log for errors (missing AI server, extraction failures), then re-run."
             );
           }
         } else if (type === "cancelled") {
@@ -364,7 +470,9 @@ export default function Analysis() {
           status: "error",
           log: [...p.log, "⚠ failed to start the analysis connection"],
         }));
-        toast.error("Failed to start the analysis connection.");
+        toast.error(
+          "Failed to start the analysis connection. Check that the backend is running, then try again."
+        );
       });
   };
 
@@ -381,6 +489,9 @@ export default function Analysis() {
     };
     cleanEndRef.current = false;
     setReconnecting({ active: false, attempt: 0 });
+    setResults({});
+    setCompletedCount(0);
+    setFileStatus(initialFileStatus(files));
     setProgress({
       running: true,
       processed: 0,
@@ -391,18 +502,21 @@ export default function Analysis() {
     startConnection(0);
   };
 
-  const getStagingThenNavigate = async () => {
+  const getStagingThenNavigate = async (target = "/staging") => {
     try {
       const res = await getStaging();
       setStaged(res.assets);
-      navigate("/staging");
+      navigate(target);
     } catch (err) {
-      toast.error(`Failed to load staging: ${String(err)}`);
+      toast.error(
+        `Failed to load staging. Open the Staging page from the sidebar to retry. (${String(err)})`
+      );
     }
   };
 
   const cancel = () => {
     wsRef.current?.cancel();
+    toast.info("Stopping analysis…");
   };
 
   // Allow the global Ctrl/Cmd+Enter shortcut (registered in App) to run the
@@ -426,11 +540,67 @@ export default function Analysis() {
         description="Add media, choose an AI profile and settings, then run the pipeline."
       />
 
+      {staged.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2.5 text-xs">
+          <span className="text-text-dim">
+            Last run:{" "}
+            <span className="font-semibold text-text">
+              {staged.length} asset{staged.length === 1 ? "" : "s"}
+            </span>{" "}
+            waiting for review.
+          </span>
+          <button
+            type="button"
+            className="ui-btn ui-btn-secondary"
+            onClick={() => getStagingThenNavigate()}
+          >
+            Review &amp; commit
+          </button>
+        </div>
+      ) : latestSession ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2.5 text-xs">
+          <span className="text-text-dim">
+            Last saved session:{" "}
+            <span className="font-semibold text-text">
+              {relativeFromIso(String(latestSession.modified ?? "")) ||
+                String(latestSession.name ?? latestSession.path ?? "saved session")}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="ui-btn ui-btn-secondary"
+            onClick={restoreLatestSession}
+          >
+            Restore
+          </button>
+        </div>
+      ) : null}
+
       {/* Step 1: sources */}
       <div className="ui-surface">
         <div className="mb-3 flex items-center gap-2 text-sm font-medium">
           <UploadCloud size={16} className="text-accent" />
           1 · Add media
+        </div>
+        <div className="mb-3 inline-flex rounded-lg border border-border bg-bg p-1" role="group" aria-label="Media source">
+          {([
+            ["files", "Files", UploadCloud],
+            ["folder", "Folder", FolderOpen],
+            ["recent", "Recent", Clock],
+          ] as const).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={source === key}
+              onClick={() => {
+                if (key === "recent") setRecentDirs(readRecentDirs());
+                setSource(key);
+              }}
+              className={`ui-btn ${source === key ? "ui-btn-primary" : "ui-btn-secondary"}`}
+            >
+              <Icon size={14} /> {label}
+            </button>
+          ))}
         </div>
         <div
           {...getRootProps()}
@@ -487,9 +657,49 @@ export default function Analysis() {
           </div>
         )}
 
-        <div className="mt-4">
-          <DirectoryPicker onAddFile={addFromBrowse} />
-        </div>
+        {source === "folder" && (
+          <div className="mt-4">
+            <DirectoryPicker onAddFile={addFromBrowse} />
+          </div>
+        )}
+
+        {source === "recent" && (
+          <div className="mt-3 rounded-md border border-border bg-bg p-2">
+            {recentDirs.length ? (
+              <ul className="space-y-1">
+                {recentDirs.slice(0, 8).map((dir) => (
+                  <li key={dir.path}>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-secondary w-full justify-start text-left text-xs"
+                      onClick={() => addRecentFolder(dir.path)}
+                      title={dir.path}
+                    >
+                      <Clock size={13} />
+                      <span className="truncate">{dir.path}</span>
+                      {relativeTime(dir.at) && (
+                        <span className="shrink-0 text-[10px] text-text-dim/70">
+                          {relativeTime(dir.at)}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="flex flex-wrap items-center gap-2 p-2 text-xs text-text-dim">
+                No recent folders yet.
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-secondary"
+                  onClick={() => setSource("folder")}
+                >
+                  Open folder browser
+                </button>
+              </p>
+            )}
+          </div>
+        )}
 
         {files.length > 0 && (
           <div className="mt-3">
@@ -497,13 +707,29 @@ export default function Analysis() {
               {files.length} file(s) selected
             </div>
             <ul className="max-h-40 space-y-1 overflow-auto rounded-md border border-border bg-bg p-2">
-              {files.map((f) => (
+              {files.map((f) => {
+                const base = f.split(/[\\/]/).pop() ?? f;
+                const status = fileStatus[base];
+                return (
                 <li
                   key={f}
                   className="flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-bg-elev-2"
                 >
                   <FolderOpen size={13} className="shrink-0 text-text-dim" />
                   <span className="flex-1 truncate">{f}</span>
+                  {status && (
+                    <span
+                      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                        status === "done"
+                          ? "bg-ok/15 text-ok"
+                          : status === "failed"
+                            ? "bg-danger/15 text-danger"
+                            : "bg-bg-elev-2 text-text-dim"
+                      }`}
+                    >
+                      {status === "done" ? "Done" : status === "failed" ? "Failed" : "Queued"}
+                    </span>
+                  )}
                   <Tooltip label={`Remove ${f.split(/[\\/]/).pop() ?? f}`}>
                     <button
                       className="ui-btn-icon shrink-0 text-text-dim hover:text-danger"
@@ -514,18 +740,48 @@ export default function Analysis() {
                     </button>
                   </Tooltip>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </div>
         )}
       </div>
 
-      {/* Step 2: profile + settings */}
+      {/* Step 2: options (collapsed by default) */}
       <div className="ui-surface">
-        <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-          <Sparkles size={16} className="text-accent" />
-          2 · Profile & settings
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Sparkles size={16} className="text-accent" />
+            2 · Options
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-border bg-bg px-2.5 py-1 text-[11px] text-text-dim">
+              Profile: {activeProfile || "default"}
+            </span>
+            {autoRouteEnabled(config as Record<string, unknown> | null) && (
+              <Tooltip
+                label="Documents, spreadsheets and audio are analysed with their own profiles automatically."
+                side="bottom"
+              >
+                <span className="rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent">
+                  Auto-routed by type
+                </span>
+              </Tooltip>
+            )}
+            <button
+              type="button"
+              className="ui-btn ui-btn-secondary"
+              aria-expanded={showOptions}
+              onClick={() => setShowOptions((v) => !v)}
+            >
+              <Settings2 size={14} />
+              {showOptions ? "Hide options" : "More options"}
+            </button>
+          </div>
         </div>
+
+        {showOptions && (
+        <div className="mt-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-text-dim">
@@ -542,11 +798,6 @@ export default function Analysis() {
                 </option>
               ))}
             </select>
-            {autoRouteEnabled(config as Record<string, unknown> | null) && (
-              <p className="mt-1 text-xs text-text-dim">
-                Documents, spreadsheets, and audio use their own profiles automatically.
-              </p>
-            )}
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-text-dim">
@@ -636,6 +887,8 @@ export default function Analysis() {
             </label>
           </motion.div>
         )}
+        </div>
+        )}
       </div>
 
       {/* Run */}
@@ -674,8 +927,18 @@ export default function Analysis() {
             {ANALYSIS_STEPS.map((step, index) => {
               const current = stepIndexFor(progress.status);
               const state = index < current ? "done" : index === current ? "current" : "todo";
+              const isFinal = index === ANALYSIS_STEPS.length - 1;
+              const clickable = isFinal && progress.status === "complete";
               return (
-                <div key={step.label} className={`ui-step ui-step-${state}`}>
+                <div
+                  key={step.label}
+                  className={`ui-step ui-step-${state} ${
+                    clickable ? "cursor-pointer hover:opacity-80" : ""
+                  }`}
+                  onClick={
+                    clickable ? () => getStagingThenNavigate("/staging") : undefined
+                  }
+                >
                   <span className="ui-step-dot">
                     {state === "done" ? <Check size={12} /> : index + 1}
                   </span>
@@ -684,6 +947,35 @@ export default function Analysis() {
               );
             })}
           </div>
+          {Object.keys(results).length > 0 && (
+            <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {Object.entries(results).map(([path, result]) => (
+                <div key={path} className="rounded-md border border-border bg-bg p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-[11px] text-text-dim" title={path}>
+                      {result.originalName}
+                    </span>
+                    <span className="shrink-0 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                      {result.category}
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-sm font-medium text-text">
+                    {result.stagedName || "Analyzing..."}
+                  </p>
+                  {result.tags.length > 0 && (
+                    <p className="mt-1 truncate text-[11px] text-text-dim">
+                      {result.tags.join(", ")}
+                    </p>
+                  )}
+                  {result.summary && (
+                    <p className="mt-1 truncate text-[11px] text-text-dim" title={result.summary}>
+                      {result.summary}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="mb-2 flex items-center justify-between text-sm">
             <span className="font-medium">
               Progress — {progress.processed}/{progress.total}
@@ -705,6 +997,30 @@ export default function Analysis() {
           <div className="mt-3 h-44 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg p-2 font-mono text-xs leading-relaxed text-text-dim">
             {progress.log.join("\n")}
           </div>
+          {progress.status === "complete" && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-ok/30 bg-ok/10 px-3 py-2 text-xs">
+              <span>
+                <span className="font-semibold">{completedCount}</span> asset
+                {completedCount === 1 ? "" : "s"} analysed and staged.
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-secondary"
+                  onClick={() => getStagingThenNavigate("/staging")}
+                >
+                  Review
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-primary"
+                  onClick={() => getStagingThenNavigate("/commit")}
+                >
+                  Commit
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

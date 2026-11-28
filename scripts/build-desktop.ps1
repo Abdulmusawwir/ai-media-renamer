@@ -38,7 +38,7 @@ Write-Host "=== 2. Backend (PyInstaller onedir) ==="
 if (Test-Path "dist/AIMediaRenamerBackend") {
     Remove-Item "dist/AIMediaRenamerBackend" -Recurse -Force
 }
-Invoke-BuildStep "python dependencies" { pip install -r requirements.txt pyinstaller }
+Invoke-BuildStep "python dependencies" { pip install -r requirements.txt }
 Invoke-BuildStep "backend bundle" { pyinstaller build_desktop.spec --noconfirm }
 if (-not (Test-Path "dist/AIMediaRenamerBackend/AIMediaRenamerBackend.exe")) {
     throw "Backend exe missing after PyInstaller build"
