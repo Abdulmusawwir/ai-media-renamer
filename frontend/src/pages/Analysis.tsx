@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
 import {
+  Check,
   FolderOpen,
   Play,
   Square,
@@ -66,6 +67,18 @@ const INITIAL_PROGRESS: ProgressState = {
   log: [],
   status: "",
 };
+
+const ANALYSIS_STEPS = [
+  { label: "Add media", statuses: [""] },
+  { label: "Extract", statuses: ["starting", "extracting"] },
+  { label: "Analyze", statuses: ["analyzing"] },
+  { label: "Review & commit", statuses: ["complete", "cancelled", "error"] },
+];
+
+function stepIndexFor(status: string): number {
+  const found = ANALYSIS_STEPS.findIndex((step) => step.statuses.includes(status));
+  return found < 0 ? 0 : found;
+}
 
 function profileOptions(config: Record<string, unknown> | null): {
   value: string;
@@ -649,6 +662,20 @@ export default function Analysis() {
       {/* Progress */}
       {(progress.running || progress.log.length > 0) && (
         <div className="ui-surface">
+          <div className="ui-steps" aria-label="Analysis progress">
+            {ANALYSIS_STEPS.map((step, index) => {
+              const current = stepIndexFor(progress.status);
+              const state = index < current ? "done" : index === current ? "current" : "todo";
+              return (
+                <div key={step.label} className={`ui-step ui-step-${state}`}>
+                  <span className="ui-step-dot">
+                    {state === "done" ? <Check size={12} /> : index + 1}
+                  </span>
+                  <span>{step.label}</span>
+                </div>
+              );
+            })}
+          </div>
           <div className="mb-2 flex items-center justify-between text-sm">
             <span className="font-medium">
               Progress — {progress.processed}/{progress.total}

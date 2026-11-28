@@ -496,6 +496,51 @@ tbody tr:hover {
   color: var(--text);
 }
 
+.ui-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.ui-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  padding: 5px 10px 5px 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.ui-step-dot {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  font-size: 10px;
+  font-weight: 600;
+}
+.ui-step-current {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.ui-step-current .ui-step-dot {
+  background: var(--accent);
+  color: #fff;
+}
+.ui-step-done {
+  border-color: rgba(34, 197, 94, 0.35);
+  color: var(--ok);
+}
+.ui-step-done .ui-step-dot {
+  background: rgba(34, 197, 94, 0.2);
+}
+
 .ui-empty-icon {
   display: grid;
   place-items: center;
