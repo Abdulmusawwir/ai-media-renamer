@@ -181,6 +181,9 @@ export default function Analysis() {
   const [showSettings, setShowSettings] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
   const [results, setResults] = useState<Record<string, LiveResult>>({});
+  const [fileStatus, setFileStatus] = useState<
+    Record<string, "queued" | "done" | "failed">
+  >({});
   // Non-blocking banner shown while we retry the socket after a drop.
   const [reconnecting, setReconnecting] = useState<{
     active: boolean;
@@ -225,8 +228,16 @@ export default function Analysis() {
     addFiles([entry.path]);
   };
 
-  const removeFile = (f: string) =>
+  const removeFile = (f: string) => {
+    const base = f.split(/[\\/]/).pop() ?? f;
     setFiles((prev) => prev.filter((x) => x !== f));
+    setFileStatus((prev) => {
+      if (!(base in prev)) return prev;
+      const next = { ...prev };
+      delete next[base];
+      return next;
+    });
+  };
 
   const patch = (p: Partial<AnalysisSettings>) => setAnalysisSettings(p);
 
@@ -273,6 +284,8 @@ export default function Analysis() {
                 summary: asset.summary ?? "",
               },
             }));
+            const base = name ?? path.split(/[\\/]/).pop() ?? path;
+            setFileStatus((prev) => ({ ...prev, [base]: "done" }));
           }
           setProgress((p) => ({
             ...p,
@@ -282,11 +295,13 @@ export default function Analysis() {
             log: [...p.log, `✓ analyzed ${name ?? "asset"}`],
           }));
         } else if (type === "asset_error") {
+          const failedName = String(data.name ?? "asset");
+          setFileStatus((prev) => ({ ...prev, [failedName]: "failed" }));
           setProgress((p) => ({
             ...p,
             log: [
               ...p.log,
-              `✗ ${String(data.name ?? "asset")}: ${String(data.error ?? "error")}`,
+              `✗ ${failedName}: ${String(data.error ?? "error")}`,
             ],
           }));
         } else if (type === "complete") {
@@ -439,6 +454,11 @@ export default function Analysis() {
     cleanEndRef.current = false;
     setReconnecting({ active: false, attempt: 0 });
     setResults({});
+    setFileStatus(
+      Object.fromEntries(
+        files.map((f) => [f.split(/[\\/]/).pop() ?? f, "queued" as const])
+      )
+    );
     setProgress({
       running: true,
       processed: 0,
@@ -605,13 +625,29 @@ export default function Analysis() {
               {files.length} file(s) selected
             </div>
             <ul className="max-h-40 space-y-1 overflow-auto rounded-md border border-border bg-bg p-2">
-              {files.map((f) => (
+              {files.map((f) => {
+                const base = f.split(/[\\/]/).pop() ?? f;
+                const status = fileStatus[base];
+                return (
                 <li
                   key={f}
                   className="flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-bg-elev-2"
                 >
                   <FolderOpen size={13} className="shrink-0 text-text-dim" />
                   <span className="flex-1 truncate">{f}</span>
+                  {status && (
+                    <span
+                      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                        status === "done"
+                          ? "bg-success/15 text-success"
+                          : status === "failed"
+                            ? "bg-danger/15 text-danger"
+                            : "bg-bg-elev-2 text-text-dim"
+                      }`}
+                    >
+                      {status === "done" ? "Done" : status === "failed" ? "Failed" : "Queued"}
+                    </span>
+                  )}
                   <Tooltip label={`Remove ${f.split(/[\\/]/).pop() ?? f}`}>
                     <button
                       className="ui-btn-icon shrink-0 text-text-dim hover:text-danger"
@@ -622,7 +658,8 @@ export default function Analysis() {
                     </button>
                   </Tooltip>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </div>
         )}
