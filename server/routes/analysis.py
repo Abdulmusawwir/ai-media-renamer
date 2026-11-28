@@ -164,6 +164,7 @@ def run_analysis(
                 emit(make_event(
                     "asset_error",
                     name=raw,
+                    path=str(path),
                     error=(
                         f"file not found: {path}"
                         + ("" if str(path) == str(raw) else f" (received {raw!r})")
@@ -177,11 +178,14 @@ def run_analysis(
             try:
                 preview = _extract(path, kind)
             except Exception as exc:  # extraction can fail (missing ffmpeg etc.)
-                emit(make_event("asset_error", name=path.name, error=str(exc), index=idx, total=total))
+                emit(make_event("asset_error", name=path.name, path=str(path), error=str(exc), index=idx, total=total))
                 continue
 
             if not preview:
-                emit(make_event("asset_error", name=path.name, error="extraction failed", index=idx, total=total))
+                emit(make_event(
+                    "asset_error", name=path.name, path=str(path),
+                    error="extraction failed", index=idx, total=total,
+                ))
                 continue
 
             # Text assets (documents/spreadsheets/audio) are analyzed with their own
@@ -196,13 +200,13 @@ def run_analysis(
                     if not ai.get("ok"):
                         detail = ai.get("detail") or ai.get("error") or "analysis failed"
                         emit(make_event(
-                            "asset_error", name=path.name, error=str(detail), index=idx, total=total,
+                            "asset_error", name=path.name, path=str(path), error=str(detail), index=idx, total=total,
                         ))
                         continue
                     # Build inside the scope so category validation uses this profile.
                     asset = _build_asset(path, ai.get("data", {}), is_text, kind, preview)
             except Exception as exc:
-                emit(make_event("asset_error", name=path.name, error=str(exc), index=idx, total=total))
+                emit(make_event("asset_error", name=path.name, path=str(path), error=str(exc), index=idx, total=total))
                 continue
 
             asset["profile"] = asset_profile

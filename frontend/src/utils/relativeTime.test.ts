@@ -35,6 +35,12 @@ describe("relativeFromIso", () => {
     expect(relativeFromIso("2026-11-28T09:00:00Z")).toBe("3h ago");
   });
 
+  it("parses the session timestamp format", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-28T12:00:00"));
+    expect(relativeFromIso("2026-11-28_090000")).toBe("3h ago");
+  });
+
   it("returns nothing for missing or invalid input", () => {
     expect(relativeFromIso(undefined)).toBe("");
     expect(relativeFromIso("not a date")).toBe("");

@@ -33,11 +33,11 @@ import DirectoryPicker, {
 } from "../components/DirectoryPicker";
 import { relativeTime, relativeFromIso } from "../utils/relativeTime";
 import {
-  basename,
   forgetFileStatus,
   initialFileStatus,
   markFileStatus,
   mergeLiveResult,
+  sessionKey,
   type AnalyzedAsset,
   type FileStatus,
   type LiveResult,
@@ -135,8 +135,8 @@ export default function Analysis() {
   const latestSession = (() => {
     const list = [...(sessionsQuery.data?.sessions ?? [])];
     list.sort((a, b) => {
-      const ta = Date.parse(String(a.modified ?? ""));
-      const tb = Date.parse(String(b.modified ?? ""));
+      const ta = Date.parse(String(a.created ?? a.modified ?? ""));
+      const tb = Date.parse(String(b.created ?? b.modified ?? ""));
       return (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
     });
     return list[0];
@@ -144,7 +144,7 @@ export default function Analysis() {
 
   const restoreLatestSession = async () => {
     if (!latestSession) return;
-    const id = String(latestSession.name ?? latestSession.path ?? "");
+    const id = sessionKey(latestSession);
     if (!id) {
       toast.error(
         "That saved session has no identifier. Open Sessions from the sidebar to pick another."
@@ -275,9 +275,8 @@ export default function Analysis() {
   };
 
   const removeFile = (f: string) => {
-    const base = basename(f);
     setFiles((prev) => prev.filter((x) => x !== f));
-    setFileStatus((prev) => forgetFileStatus(prev, base));
+    setFileStatus((prev) => forgetFileStatus(prev, f));
   };
 
   const patch = (p: Partial<AnalysisSettings>) => setAnalysisSettings(p);
@@ -307,9 +306,7 @@ export default function Analysis() {
           const path = asset?.original_path;
           if (asset && path) {
             setResults((prev) => mergeLiveResult(prev, asset));
-            setFileStatus((prev) =>
-              markFileStatus(prev, name ?? basename(path), "done")
-            );
+            setFileStatus((prev) => markFileStatus(prev, path, "done"));
           }
           setProgress((p) => ({
             ...p,
@@ -319,7 +316,9 @@ export default function Analysis() {
             log: [...p.log, `✓ analyzed ${name ?? "asset"}`],
           }));
         } else if (type === "asset_error") {
-          const failedName = String(data.name ?? "asset");
+          const failedName = String(
+            data.path ?? data.name ?? "asset"
+          );
           setFileStatus((prev) => markFileStatus(prev, failedName, "failed"));
           setProgress((p) => ({
             ...p,
@@ -562,8 +561,11 @@ export default function Analysis() {
           <span className="text-text-dim">
             Last saved session:{" "}
             <span className="font-semibold text-text">
-              {relativeFromIso(String(latestSession.modified ?? "")) ||
-                String(latestSession.name ?? latestSession.path ?? "saved session")}
+              {relativeFromIso(
+                String(latestSession.created ?? latestSession.modified ?? "")
+              ) ||
+                sessionKey(latestSession) ||
+                "saved session"}
             </span>
           </span>
           <button
@@ -628,7 +630,7 @@ export default function Analysis() {
               : "Drag & drop is desktop-only - use the folder browser below"}
           </p>
           <p className="mt-1 text-xs text-text-dim">
-            For server-host files, use the folder picker below.
+            For server-host files, use the Folder tab.
           </p>
           {files.length > 0 && (
             <span className="mt-3 inline-flex items-center rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent">
@@ -708,8 +710,7 @@ export default function Analysis() {
             </div>
             <ul className="max-h-40 space-y-1 overflow-auto rounded-md border border-border bg-bg p-2">
               {files.map((f) => {
-                const base = f.split(/[\\/]/).pop() ?? f;
-                const status = fileStatus[base];
+                const status = fileStatus[f];
                 return (
                 <li
                   key={f}

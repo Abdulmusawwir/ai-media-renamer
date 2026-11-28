@@ -54,8 +54,8 @@ No E2E suite exists; browser checks were manual Playwright runs.
 - No database, SQL migrations, cron schedules or live database exist.
 - CI needs `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets; local updater key is `C:\Users\AMQB\.tauri\ai-media-renamer.key`.
 - `main` is protected by the **Protect main** ruleset: pull request required, `tests` check required.
-- Session restore returns staged assets and an asset count only — not the AI profile or settings.
-- Per-file status is keyed by basename because `asset_error` carries only `path.name`; duplicate filenames in different folders share a badge.
+- Per-file status is keyed by the full original path; `asset_error` now carries `path` as well as `name`. Same-named files in different folders no longer share a badge.
+- Session rows expose `created` (format `YYYY-MM-DD_HHMMSS`) and `path`, not `modified`. The restore id is the filename from `path`, which is what the API accepts.
 
 ## Git state to inspect first
 

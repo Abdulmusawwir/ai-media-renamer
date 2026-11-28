@@ -23,7 +23,7 @@ export function basename(path: string): string {
 }
 
 export function initialFileStatus(files: string[]): Record<string, FileStatus> {
-  return Object.fromEntries(files.map((file) => [basename(file), "queued" as const]));
+  return Object.fromEntries(files.map((file) => [file, "queued" as const]));
 }
 
 /**
@@ -67,7 +67,10 @@ export function forgetFileStatus(
   return next;
 }
 
-/** A session's identifier is its name, falling back to its path. */
+/** A session's identifier is its name, or the filename from its stored path. */
 export function sessionKey(session: { name?: string; path?: string }): string {
-  return String(session.name ?? session.path ?? "");
+  const name = session.name ? String(session.name) : "";
+  if (name) return name;
+  const path = session.path ? String(session.path) : "";
+  return path ? basename(path) : "";
 }

@@ -12,6 +12,19 @@ export function relativeTime(at: number): string {
 export function relativeFromIso(value?: string): string {
   if (!value) return "";
   const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) return "";
-  return relativeTime(parsed);
+  if (!Number.isNaN(parsed)) return relativeTime(parsed);
+  // Session files use `created: YYYY-MM-DD_HHMMSS`.
+  const match = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})$/.exec(value);
+  if (match) {
+    const ms = new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5]),
+      Number(match[6])
+    ).getTime();
+    if (!Number.isNaN(ms)) return relativeTime(ms);
+  }
+  return "";
 }
