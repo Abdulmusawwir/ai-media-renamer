@@ -1,16 +1,30 @@
 import { PageHeader } from "../components/PageHeader";
 import { motion } from "framer-motion";
 import { Download, Cpu, Boxes } from "lucide-react";
-import { useModels, useDownloadModel } from "../hooks/api";
+import { useEnvironment, useModels, useDownloadModel } from "../hooks/api";
 import { useToast } from "../store";
 import { Skeleton, SkeletonRows, Spinner } from "../components/Skeleton";
+import { Tooltip } from "../components/Tooltip";
 
 export default function Models() {
   const toast = useToast();
   const query = useModels();
   const download = useDownloadModel();
+  const environment = useEnvironment();
 
   const data = query.data;
+  const serverModels = [
+    ...(environment.data?.vision_models ?? []),
+    ...(environment.data?.text_models ?? []),
+  ];
+  const normalise = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const isOnServer = (name: string) => {
+    const wanted = normalise(name);
+    return serverModels.some((model) => {
+      const found = normalise(model);
+      return found.includes(wanted) || wanted.includes(found);
+    });
+  };
 
   const onDownload = async (name: string) => {
     try {
@@ -91,16 +105,42 @@ export default function Models() {
                 animate={{ opacity: 1 }}
               >
                 <td className="px-3 py-1.5">{m.provider}</td>
-                <td className="px-3 py-1.5">{m.name}</td>
+                <td className="px-3 py-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>{m.name}</span>
+                    {/vl|vision/i.test(m.name) && (
+                      <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                        Vision
+                      </span>
+                    )}
+                    {isOnServer(m.name) ? (
+                      <span className="rounded-full border border-ok/30 bg-ok/10 px-2 py-0.5 text-[10px] font-semibold text-ok">
+                        On server
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-border bg-bg px-2 py-0.5 text-[10px] text-text-dim">
+                        Catalog
+                      </span>
+                    )}
+                  </div>
+                </td>
                 <td className="px-3 py-1.5">
                   <div className="flex justify-end">
-                    <button
-                      className="flex items-center gap-1 rounded-md border border-border bg-bg-elev-2 px-2.5 py-1 text-xs hover:bg-bg"
-                      onClick={() => onDownload(m.name)}
-                      disabled={download.isPending}
+                    <Tooltip
+                      label={
+                        isOnServer(m.name)
+                          ? "Already available on the running server"
+                          : `Download ${m.name}`
+                      }
                     >
-                      <Download size={13} /> Download
-                    </button>
+                      <button
+                        className="ui-btn ui-btn-secondary"
+                        onClick={() => onDownload(m.name)}
+                        disabled={download.isPending || isOnServer(m.name)}
+                      >
+                        <Download size={13} /> Download
+                      </button>
+                    </Tooltip>
                   </div>
                 </td>
               </motion.tr>
