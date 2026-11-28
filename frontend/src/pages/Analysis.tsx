@@ -166,7 +166,9 @@ export default function Analysis() {
           toast.info("No media files in that folder.");
         }
       } catch (err) {
-        toast.error(`Could not open that folder: ${String(err)}`);
+        toast.error(
+          `Could not open that folder. Check it still exists, then pick it again. (${String(err)})`
+        );
       }
     },
     [addFiles, toast]
@@ -332,10 +334,14 @@ export default function Analysis() {
             ],
           }));
           if (count > 0) {
-            getStagingThenNavigate();
+            // Stay on Analysis so the result cards and the completion row are
+            // visible; Review and Commit are one click away from there.
+            toast.success(
+              `${count} asset${count === 1 ? "" : "s"} analysed and ready for review.`
+            );
           } else {
             toast.error(
-              "Analysis finished with 0 assets. Check the progress log for errors (missing AI server, extraction failures, etc.)."
+              "Analysis finished with 0 assets. Check the progress log for errors (missing AI server, extraction failures), then re-run."
             );
           }
         } else if (type === "cancelled") {
@@ -447,7 +453,9 @@ export default function Analysis() {
           status: "error",
           log: [...p.log, "⚠ failed to start the analysis connection"],
         }));
-        toast.error("Failed to start the analysis connection.");
+        toast.error(
+          "Failed to start the analysis connection. Check that the backend is running, then try again."
+        );
       });
   };
 
@@ -486,12 +494,15 @@ export default function Analysis() {
       setStaged(res.assets);
       navigate(target);
     } catch (err) {
-      toast.error(`Failed to load staging: ${String(err)}`);
+      toast.error(
+        `Failed to load staging. Open the Staging page from the sidebar to retry. (${String(err)})`
+      );
     }
   };
 
   const cancel = () => {
     wsRef.current?.cancel();
+    toast.info("Stopping analysis…");
   };
 
   // Allow the global Ctrl/Cmd+Enter shortcut (registered in App) to run the
