@@ -240,7 +240,7 @@ export default function App() {
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <Tooltip label={engineStatus.title} side="bottom">
+            <Tooltip label={engineStatus.title} side="left">
               <span className="ui-status-pill">
                 <span
                   className={`h-1.5 w-1.5 rounded-full ${engineStatus.ok ? "bg-ok" : "bg-warn"}`}

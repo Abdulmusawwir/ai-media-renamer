@@ -8,6 +8,7 @@ import { Skeleton } from "../components/Skeleton";
 import type { Json } from "../api/client";
 import { desktop, isDesktop } from "../desktop";
 import { formatUpdateError } from "../desktop/updateErrors";
+import { Tooltip } from "../components/Tooltip";
 
 export default function Settings() {
   const toast = useToast();
@@ -326,13 +327,17 @@ export default function Settings() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="ui-surface">
-          <div className="mb-1 text-xs text-text-dim">AI profile</div>
+          <Tooltip label="Profile used for video and image assets" side="bottom">
+            <span className="mb-1 block text-xs text-text-dim">AI profile</span>
+          </Tooltip>
           <div className="text-sm font-medium">
             {String((config?.prompt_profiles as Json | undefined)?.active ?? "—")}
           </div>
         </div>
         <div className="ui-surface">
-          <div className="mb-1 text-xs text-text-dim">Naming</div>
+          <Tooltip label="Default filename style and length limit" side="bottom">
+            <span className="mb-1 block text-xs text-text-dim">Naming</span>
+          </Tooltip>
           <div className="text-sm font-medium">
             {String((config?.naming as Json | undefined)?.case_style ?? "—")}
           </div>
@@ -341,13 +346,17 @@ export default function Settings() {
           </div>
         </div>
         <div className="ui-surface">
-          <div className="mb-1 text-xs text-text-dim">Categories</div>
+          <Tooltip label="Taxonomy entries available in staging" side="bottom">
+            <span className="mb-1 block text-xs text-text-dim">Categories</span>
+          </Tooltip>
           <div className="text-sm font-medium">
             {Array.isArray(config?.allowed_categories) ? config.allowed_categories.length : "—"}
           </div>
         </div>
         <div className="ui-surface">
-          <div className="mb-1 text-xs text-text-dim">Local model</div>
+          <Tooltip label="GGUF alias currently configured for llama.cpp" side="bottom">
+            <span className="mb-1 block text-xs text-text-dim">Local model</span>
+          </Tooltip>
           <div className="truncate text-sm font-medium">
             {String(
               ((config?.model as Json | undefined)?.llamacpp as Json | undefined)?.gguf_name ?? "—"

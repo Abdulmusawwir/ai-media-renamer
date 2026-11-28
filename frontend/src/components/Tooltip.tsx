@@ -11,7 +11,7 @@ import {
 interface TooltipProps {
   label: string;
   children: ReactElement;
-  side?: "top" | "bottom";
+  side?: "top" | "bottom" | "left" | "right";
   delay?: number;
 }
 
