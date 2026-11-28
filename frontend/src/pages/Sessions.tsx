@@ -12,9 +12,10 @@ import {
 import { useToast } from "../store";
 import { SkeletonRows } from "../components/Skeleton";
 import { relativeFromIso } from "../utils/relativeTime";
+import { sessionKey } from "../utils/analysisResults";
 
 function sessionId(s: { name?: string; path?: string }): string {
-  return String(s.name ?? s.path ?? "");
+  return sessionKey(s);
 }
 
 export default function Sessions() {

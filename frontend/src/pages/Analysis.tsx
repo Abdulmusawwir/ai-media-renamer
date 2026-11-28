@@ -32,6 +32,16 @@ import DirectoryPicker, {
   type RecentDir,
 } from "../components/DirectoryPicker";
 import { relativeTime, relativeFromIso } from "../utils/relativeTime";
+import {
+  basename,
+  forgetFileStatus,
+  initialFileStatus,
+  markFileStatus,
+  mergeLiveResult,
+  type AnalyzedAsset,
+  type FileStatus,
+  type LiveResult,
+} from "../utils/analysisResults";
 import { Tooltip } from "../components/Tooltip";
 import { Spinner } from "../components/Skeleton";
 
@@ -59,14 +69,6 @@ const LANGUAGES = [
   { value: "zh", label: "Chinese" },
   { value: "auto", label: "Auto-detect" },
 ];
-
-interface LiveResult {
-  originalName: string;
-  stagedName: string;
-  category: string;
-  tags: string[];
-  summary: string;
-}
 
 interface ProgressState {
   running: boolean;
@@ -221,9 +223,7 @@ export default function Analysis() {
   const [showOptions, setShowOptions] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
   const [results, setResults] = useState<Record<string, LiveResult>>({});
-  const [fileStatus, setFileStatus] = useState<
-    Record<string, "queued" | "done" | "failed">
-  >({});
+  const [fileStatus, setFileStatus] = useState<Record<string, FileStatus>>({});
   // Non-blocking banner shown while we retry the socket after a drop.
   const [reconnecting, setReconnecting] = useState<{
     active: boolean;
@@ -269,14 +269,9 @@ export default function Analysis() {
   };
 
   const removeFile = (f: string) => {
-    const base = f.split(/[\\/]/).pop() ?? f;
+    const base = basename(f);
     setFiles((prev) => prev.filter((x) => x !== f));
-    setFileStatus((prev) => {
-      if (!(base in prev)) return prev;
-      const next = { ...prev };
-      delete next[base];
-      return next;
-    });
+    setFileStatus((prev) => forgetFileStatus(prev, base));
   };
 
   const patch = (p: Partial<AnalysisSettings>) => setAnalysisSettings(p);
@@ -301,31 +296,14 @@ export default function Analysis() {
             status: "extracting",
           }));
         } else if (type === "asset_analyzed") {
-          const asset = data.asset as
-            | {
-                original_path?: string;
-                original_name?: string;
-                staged_name?: string;
-                category?: string;
-                tags?: string[];
-                summary?: string;
-              }
-            | undefined;
+          const asset = data.asset as AnalyzedAsset | undefined;
           const name = asset?.original_name;
           const path = asset?.original_path;
           if (asset && path) {
-            setResults((prev) => ({
-              ...prev,
-              [path]: {
-                originalName: asset.original_name ?? path,
-                stagedName: asset.staged_name ?? "",
-                category: asset.category ?? "uncategorized",
-                tags: Array.isArray(asset.tags) ? asset.tags : [],
-                summary: asset.summary ?? "",
-              },
-            }));
-            const base = name ?? path.split(/[\\/]/).pop() ?? path;
-            setFileStatus((prev) => ({ ...prev, [base]: "done" }));
+            setResults((prev) => mergeLiveResult(prev, asset));
+            setFileStatus((prev) =>
+              markFileStatus(prev, name ?? basename(path), "done")
+            );
           }
           setProgress((p) => ({
             ...p,
@@ -336,7 +314,7 @@ export default function Analysis() {
           }));
         } else if (type === "asset_error") {
           const failedName = String(data.name ?? "asset");
-          setFileStatus((prev) => ({ ...prev, [failedName]: "failed" }));
+          setFileStatus((prev) => markFileStatus(prev, failedName, "failed"));
           setProgress((p) => ({
             ...p,
             log: [
@@ -500,11 +478,7 @@ export default function Analysis() {
     cleanEndRef.current = false;
     setReconnecting({ active: false, attempt: 0 });
     setResults({});
-    setFileStatus(
-      Object.fromEntries(
-        files.map((f) => [f.split(/[\\/]/).pop() ?? f, "queued" as const])
-      )
-    );
+    setFileStatus(initialFileStatus(files));
     setProgress({
       running: true,
       processed: 0,
