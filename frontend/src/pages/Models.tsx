@@ -82,7 +82,7 @@ export default function Models() {
       </div>
 
       <div className="ui-scroll overflow-x-auto rounded-lg border border-border bg-bg-elev">
-        <table className="w-full border-collapse text-sm">
+        <table className="ui-table w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border">
               <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-text-dim">

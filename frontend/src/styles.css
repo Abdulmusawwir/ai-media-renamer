@@ -336,6 +336,25 @@ table {
   border-collapse: collapse;
   font-size: 13px;
 }
+.ui-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+}
+.ui-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+.ui-table td,
+.ui-table th {
+  padding: 9px 12px;
+}
+
+.ui-chart-card {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(59, 130, 246, 0.14), transparent 55%),
+    linear-gradient(160deg, rgba(23, 26, 33, 0.96), rgba(17, 20, 28, 0.96));
+}
 
 th,
 td {

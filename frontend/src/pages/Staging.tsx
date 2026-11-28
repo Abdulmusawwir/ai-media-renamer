@@ -525,7 +525,7 @@ export default function Staging() {
           ref={parentRef}
           className="ui-scroll max-h-[600px] max-w-full rounded-lg border border-border bg-bg-elev lg:col-span-3"
         >
-          <table className="w-full border-collapse text-sm">
+          <table className="ui-table w-full border-collapse text-sm">
             <thead>
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id} className="border-b border-border">
@@ -612,7 +612,7 @@ export default function Staging() {
         </div>
 
         {/* Analytics */}
-        <div className="ui-surface">
+        <div className="ui-surface ui-chart-card">
           <div className="mb-2 text-sm font-medium text-text-dim">
             Category distribution
           </div>
