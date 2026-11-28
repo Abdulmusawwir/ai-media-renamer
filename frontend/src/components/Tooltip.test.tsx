@@ -54,6 +54,18 @@ describe("Tooltip", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
+  it("uses the requested side class", async () => {
+    vi.useFakeTimers();
+    render(
+      <Tooltip label="Context hint" side="left">
+        <button type="button">hint</button>
+      </Tooltip>
+    );
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "hint" }));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(screen.getByRole("tooltip").className).toContain("ui-tooltip-left");
+  });
+
   it("clears pending timers on unmount", () => {
     vi.useFakeTimers();
     const { unmount } = render(
