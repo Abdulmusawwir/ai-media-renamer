@@ -83,6 +83,18 @@ body {
     var(--bg);
 }
 
+.ui-page-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  background: linear-gradient(145deg, rgba(59, 130, 246, 0.22), rgba(59, 130, 246, 0.08));
+  color: var(--accent);
+}
+
 .ui-surface {
   background: linear-gradient(160deg, rgba(23, 26, 33, 0.96), rgba(17, 20, 28, 0.96));
   border: 1px solid var(--border);
