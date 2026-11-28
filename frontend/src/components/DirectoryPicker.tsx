@@ -19,14 +19,45 @@ import { Tooltip } from "./Tooltip";
 const RECENTS_KEY = "amr:recent-dirs";
 const MAX_RECENTS = 8;
 
-export function readRecentDirs(): string[] {
+export interface RecentDir {
+  path: string;
+  at: number;
+}
+
+/** Stored paths are client-controlled; only plausible absolute paths are used. */
+function isPlausiblePath(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim()) return false;
+  return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\") || value.startsWith("/");
+}
+
+export function readRecentDirs(): RecentDir[] {
   try {
     const raw = localStorage.getItem(RECENTS_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((d) => typeof d === "string") : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((entry) =>
+        typeof entry === "string"
+          ? { path: entry, at: 0 }
+          : { path: entry?.path, at: entry?.at }
+      )
+      .filter(
+        (entry): entry is RecentDir =>
+          isPlausiblePath(entry.path) && typeof entry.at === "number"
+      )
+      .slice(0, MAX_RECENTS);
   } catch {
     return [];
   }
+}
+
+export function relativeTime(at: number): string {
+  if (!at) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000));
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
 }
 
 interface DirectoryPickerProps {
@@ -37,14 +68,17 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
   const [browse, setBrowse] = useState<BrowseResponse | null>(null);
   const [path, setPath] = useState<string>("");
   const [busy, setBusy] = useState(false);
-  const [recents, setRecents] = useState<string[]>(() => readRecentDirs());
+  const [recents, setRecents] = useState<RecentDir[]>(() => readRecentDirs());
   const [filter, setFilter] = useState("");
   const toast = useToast();
 
   const pushRecent = useCallback((dir: string) => {
-    if (!dir) return;
+    if (!isPlausiblePath(dir)) return;
     setRecents((prev) => {
-      const next = [dir, ...prev.filter((d) => d !== dir)].slice(0, MAX_RECENTS);
+      const next = [
+        { path: dir, at: Date.now() },
+        ...prev.filter((entry) => entry.path !== dir),
+      ].slice(0, MAX_RECENTS);
       try {
         localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
       } catch {
@@ -154,14 +188,22 @@ export default function DirectoryPicker({ onAddFile }: DirectoryPickerProps) {
           <span className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-text-dim">
             <Clock size={12} /> Recent
           </span>
-          {recents.map((dir) => (
-            <Tooltip key={dir} label={dir} side="bottom">
+          {recents.map((entry) => (
+            <Tooltip key={entry.path} label={entry.path} side="bottom">
               <button
                 type="button"
-                onClick={() => doBrowse(dir)}
-                className="max-w-[200px] truncate rounded-full border border-border bg-bg px-2.5 py-1 text-xs text-text-dim hover:border-accent hover:text-text"
+                onClick={() => doBrowse(entry.path)}
+                className="flex max-w-[220px] items-center gap-1.5 rounded-full border border-border bg-bg px-2.5 py-1 text-xs text-text-dim hover:border-accent hover:text-text"
+                title={`${entry.path}${relativeTime(entry.at) ? ` - ${relativeTime(entry.at)}` : ""}`}
               >
-                {dir.split(/[\\/]/).filter(Boolean).slice(-1)[0] || dir}
+                <span className="truncate">
+                  {entry.path.split(/[\\/]/).filter(Boolean).slice(-1)[0] || entry.path}
+                </span>
+                {relativeTime(entry.at) && (
+                  <span className="shrink-0 text-[10px] text-text-dim/70">
+                    {relativeTime(entry.at)}
+                  </span>
+                )}
               </button>
             </Tooltip>
           ))}

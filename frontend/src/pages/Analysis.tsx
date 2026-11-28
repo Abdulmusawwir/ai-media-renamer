@@ -25,7 +25,11 @@ import {
 } from "../api/client";
 import { useStore, useToast, type AnalysisSettings } from "../store";
 import { desktop, isDesktop } from "../desktop";
-import DirectoryPicker, { readRecentDirs } from "../components/DirectoryPicker";
+import DirectoryPicker, {
+  readRecentDirs,
+  relativeTime,
+  type RecentDir,
+} from "../components/DirectoryPicker";
 import { Tooltip } from "../components/Tooltip";
 import { Spinner } from "../components/Skeleton";
 
@@ -140,7 +144,7 @@ export default function Analysis() {
   );
 
   const [source, setSource] = useState<"files" | "folder" | "recent">("files");
-  const [recentDirs] = useState<string[]>(() => readRecentDirs());
+  const [recentDirs] = useState<RecentDir[]>(() => readRecentDirs());
 
   const addRecentFolder = useCallback(
     async (dir: string) => {
@@ -537,15 +541,20 @@ export default function Analysis() {
             {recentDirs.length ? (
               <ul className="space-y-1">
                 {recentDirs.slice(0, 8).map((dir) => (
-                  <li key={dir}>
+                  <li key={dir.path}>
                     <button
                       type="button"
                       className="ui-btn ui-btn-secondary w-full justify-start text-left text-xs"
-                      onClick={() => addRecentFolder(dir)}
-                      title={dir}
+                      onClick={() => addRecentFolder(dir.path)}
+                      title={dir.path}
                     >
                       <Clock size={13} />
-                      <span className="truncate">{dir}</span>
+                      <span className="truncate">{dir.path}</span>
+                      {relativeTime(dir.at) && (
+                        <span className="shrink-0 text-[10px] text-text-dim/70">
+                          {relativeTime(dir.at)}
+                        </span>
+                      )}
                     </button>
                   </li>
                 ))}
