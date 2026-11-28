@@ -28,7 +28,7 @@ jobs:
           npm ci
           npm run build
       - name: Install Python dependencies
-        run: pip install -r requirements.txt pyinstaller
+        run: pip install -r requirements.txt
       - name: Build backend (onedir)
         run: pyinstaller build_desktop.spec --noconfirm
       - name: Smoke test backend
